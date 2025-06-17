@@ -1,5 +1,6 @@
 dxcam==0.0.5
 onnxruntime_directml==1.22.0
 opencv_python==4.11.0.86
+pywin32==310
 pywinusb==0.4.2
 vgamepad==0.1.0
