@@ -12,6 +12,7 @@ class HidHideController:
     FILE_SHARE_READ  = 0x00000001
     FILE_SHARE_WRITE = 0x00000002
     OPEN_EXISTING    = 3
+    ERROR_INSUFFICIENT_BUFFER = 122
 
     # —— 来自 Logic.h 的设备类型 —— 
     IoControlDeviceType = 32769
@@ -53,20 +54,31 @@ class HidHideController:
 
     def _get_list(self, ioctl):
         """内部：读取 double-null-terminated wide-string 列表"""
-        buf_size = 8192
-        out_buf = (ctypes.c_wchar * (buf_size // 2))()
-        ret = wintypes.DWORD()
-        ok = self.kernel32.DeviceIoControl(
-            self.handle, ioctl,
-            None, 0,
-            out_buf, ctypes.sizeof(out_buf),
-            ctypes.byref(ret),
-            None
-        )
-        if not ok:
-            raise ctypes.WinError(ctypes.get_last_error())
-        raw = ''.join(out_buf[: ret.value // 2])
-        return [p for p in raw.split('\x00') if p]
+        buf_size = 8 * 1024
+        max_buf_size = 256 * 1024
+
+        while True:
+            out_buf = (ctypes.c_wchar * (buf_size // 2))()
+            ret = wintypes.DWORD()
+            ok = self.kernel32.DeviceIoControl(
+                self.handle, ioctl,
+                None, 0,
+                out_buf, ctypes.sizeof(out_buf),
+                ctypes.byref(ret),
+                None
+            )
+            if ok:
+                raw = ''.join(out_buf[: ret.value // 2])
+                return [p for p in raw.split('\x00') if p]
+            
+            err = ctypes.get_last_error()
+            if err == self.ERROR_INSUFFICIENT_BUFFER and buf_size < max_buf_size:
+                buf_size *= 2
+                # print(f"缓冲区不够，扩大到 {buf_size} 字节后重试")
+                continue
+
+            # 不是缓冲区不足导致的错误，直接抛异常
+            raise ctypes.WinError(err)
 
     def _set_list(self, ioctl, paths):
         """内部：写入 double-null-terminated wide-string 列表"""

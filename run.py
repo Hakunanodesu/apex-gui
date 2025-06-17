@@ -26,7 +26,7 @@ from utils.tools import get_screenshot_region_dxcam, list_subdirs, enum_hid_devi
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("TGC v1.1.0")
+        self.root.title("TGC v1.1.2")
 
         self.running = False
         self.mapper_running = False
@@ -86,9 +86,6 @@ class App:
         self.button = tk.Button(button_frame, text="启动智慧核心", state='disabled', command=self.toggle)
         self.button.pack(side='left', padx=5)
 
-        # 底部按钮和标签容器
-        bottom_frame = tk.Frame(root)
-        bottom_frame.pack(fill='x', pady=(5, 0))
         # 延迟信息标签
         self.latency_str = (
             f"[Latency] full cycle: waiting...\n"
@@ -96,15 +93,10 @@ class App:
             f"[Latency] inference: waiting..."
         )
         self.latency_label = tk.Label(root, text=self.latency_str, font=("Arial", 10), justify=tk.LEFT)
-        self.latency_label.pack(side="left", padx=10, pady=(0, 5))
-        # 清空手柄独占按钮
-        self.clear_excl_button = tk.Button(
-            root,
-            text="清空手柄独占",
-            state='normal', 
-            command=lambda: self.set_exclusive(state=False)
-        )
-        self.clear_excl_button.pack(side='right', padx=20, pady=(0, 5))
+        self.latency_label.pack(side="left", padx=10, pady=(5, 5))
+
+        # 清空手柄独占
+        self.set_exclusive(state=False, verbose=False)
 
         if not driver_ready:
             if_download = messagebox.askyesno("跳转下载", "是否下载缺失的驱动？")
@@ -114,6 +106,8 @@ class App:
                     os.startfile(link)
             else:
                 sys.exit()
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def check_instance(self):
         if os.path.exists("user_config.json"):
@@ -190,14 +184,10 @@ class App:
             sys.stdout.write("\n>>> 配置初始化完成。")
             self.mapper_button.config(state='normal')
             self.cfg_button.config(state='normal')
-            self.clear_excl_button.config(state='normal')
         except Exception as e:
             if 'init_root' in locals():
                 init_root.grab_release()  # 确保在发生异常时也释放焦点
             sys.stdout.write(f"\n>>> 初始化配置时出错: {e}")
-
-    # def toggle_mapper(self):
-    #     threading.Thread(target=self._wrap_toggle_mapper, daemon=True).start()
 
     def toggle_mapper(self):
         if not self.mapper_running:
@@ -208,18 +198,17 @@ class App:
                 product_id = int(config["controller"]["Product_ID"], 16)
                 path = config["controller"]["Path"]
                 sys.stdout.write("\n>>> 正在启动手柄映射...")
-                self.set_exclusive("on")
+                self.set_exclusive(True)
                 if vendor_id == 0x054c:
                     self.mapper = DualSenseToDS4Mapper(product_id=product_id, path=path)
-                elif vendor_id == 0x045e:
-                    self.mapper = XboxWirelessToX360Mapper(product_id=product_id, path=path)
+                # elif vendor_id == 0x045e:
+                #     self.mapper = XboxWirelessToX360Mapper(product_id=product_id, path=path)
                 status = self.mapper.start()
                 if status:
                     self.mapper_running = True
                     self.mapper_button.config(text="停止手柄映射")
                     self.button.config(state='normal')
                     self.init_button.config(state='disabled')
-                    self.clear_excl_button.config(state='disabled')
                     sys.stdout.write("\n>>> 手柄映射已启动。")
                 else:
                     sys.stdout.write("\n>>> 手柄映射启动失败，请检查设备。")
@@ -231,12 +220,11 @@ class App:
             if self.mapper:
                 self.mapper.stop()
             self.mapper_running = False
-            self.set_exclusive("off")
+            self.set_exclusive(False)
             sys.stdout.write("\n>>> 手柄映射已停止。")
             self.mapper_button.config(text="启动手柄映射")
             self.button.config(state='disabled')
             self.init_button.config(state='normal')
-            self.clear_excl_button.config(state='normal')
             if self.running:
                 self.toggle()
 
@@ -294,7 +282,7 @@ class App:
 
     def run_logic(self):
         try:
-            def map_range(x: float, a: float, scale: list[float] = [0.2, 0.8]) -> int:
+            def map_range(x: float, a: float, scale: list[float] = [0.2, 0.8]):
                 normalized = x / a
                 out_min = 127 * scale[0]
                 out_max = 127 * scale[1]
@@ -384,11 +372,11 @@ class App:
             sys.stdout.write(f"\n>>> 智慧核心运行时出错。")
             handle_exception(e)
             self.running = False
-            self.handle_logic_failure()
+            self._handle_logic_failure()
         finally:
             camera.stop()
         
-    def set_exclusive(self, state: bool):
+    def set_exclusive(self, state: bool, verbose: bool = True):
         if state:
             msg = ["\n>>> 正在启动手柄独占，请勿退出...", "\n>>> 手柄独占已启动。", "\n>>> 启动手柄独占时出错: "]
         else:
@@ -398,11 +386,10 @@ class App:
             "cfg": self.cfg_button.cget("state"),
             "mapper": self.mapper_button.cget("state"),
             "button": self.button.cget("state"),
-            "clear_excl": self.clear_excl_button.cget("state")
         }
         try:
-            sys.stdout.write(msg[0])
-            self.clear_excl_button.config(state='disabled')
+            if verbose:
+                sys.stdout.write(msg[0])
             self.init_button.config(state='disabled')
             self.mapper_button.config(state='disabled')
             self.cfg_button.config(state='disabled')
@@ -412,16 +399,24 @@ class App:
             instance_id = config["controller"]["Instance_ID"]
             self.hidhide.set_this_to_visible(instance_id, state)
             self.replugger.replug(instance_id)
-            sys.stdout.write(msg[1])
+            if verbose:
+                sys.stdout.write(msg[1])
         except Exception as e:
             sys.stdout.write(f"{msg[2]}{e}")
             handle_exception(e)
         finally:
-            self.clear_excl_button.config(state=button_states["clear_excl"])
             self.init_button.config(state=button_states["init"])
             self.mapper_button.config(state=button_states["mapper"])
             self.cfg_button.config(state=button_states["cfg"])
             self.button.config(state=button_states["button"])
+
+    def on_close(self):
+        if messagebox.askyesno("退出", "确定退出吗？"):
+            self.running = False
+            self.set_exclusive(state=False, verbose=True)
+            self.hidhide.close()
+            # messagebox.showinfo("调试", "on_close")
+            self.root.destroy()
 
 
 if __name__ == "__main__":

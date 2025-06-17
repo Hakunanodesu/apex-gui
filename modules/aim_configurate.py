@@ -1,7 +1,7 @@
 import tkinter as tk
 import json
 
-from utils.tools import get_scaling_factor
+from utils.tools import get_scaling_factor, median_of_three
 
 
 class CFGApp:
@@ -102,6 +102,7 @@ class CFGApp:
         entry_outer_close = tk.Entry(self.coord_frame, textvariable=var_outer_close, width=4, validate='key', validatecommand=vcmd_float)
         entry_outer_close.grid(row=0, column=3, padx=5, pady=5)
         entry_outer_close.bind('<Return>', lambda e: self.draw_coord())
+        entry_outer_close.bind('<Return>', self._on_outer_enter)
         self.y_vars['outer_close'] = var_outer_close
         
         tk.Label(self.coord_frame, text="外圈 远（%）").grid(row=1, column=2, padx=10, pady=5)
@@ -109,6 +110,7 @@ class CFGApp:
         entry_outer_far = tk.Entry(self.coord_frame, textvariable=var_outer_far, width=4, validate='key', validatecommand=vcmd_float)
         entry_outer_far.grid(row=1, column=3, padx=5, pady=5)
         entry_outer_far.bind('<Return>', lambda e: self.draw_coord())
+        entry_outer_far.bind('<Return>', self._on_outer_enter)
         self.y_vars['outer_far'] = var_outer_far
         # 底部坐标点输入之后，添加"完成"按钮
         self.bottom_frame = tk.Frame(root)
@@ -127,6 +129,23 @@ class CFGApp:
         # 初始化并绘制
         self.valid_ranges = {}
         self.update_ranges()
+
+    def _on_outer_enter(self, event=None):
+        try:
+            val = float(self.y_vars['outer_close'].get())
+            inner = float(self.y_vars['inner_close'].get())
+        except ValueError:
+            # 非法输入就重置为内圈值
+            self.y_vars['outer_close'].set(self.y_vars['inner_close'].get())
+        else:
+            # 范围 [inner, 1]
+            if val < inner:
+                val = inner
+            elif val > 1.0:
+                val = 1.0
+            self.y_vars['outer_close'].set(str(val))
+        finally:
+            self.draw_coord()
 
     def _validate_integer(self, P):
         if P == "":  # 允许空字符串
@@ -209,7 +228,7 @@ class CFGApp:
         for key in ['inner_close', 'inner_far', 'outer_close', 'outer_far']:
             try: yv = float(self.y_vars[key].get())
             except: yv = 0.0
-            yv = max(0.0, min(1.0, yv))
+            yv = median_of_three(yv, 1.0, 0.0)
             ypos = y1 - (yv)*(y1-y0)
             x = xs[0] if key == 'inner_close' else (xs[1] if key in ['inner_far', 'outer_close'] else xs[2])
             pts.append((x, ypos))
