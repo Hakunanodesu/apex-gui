@@ -1,5 +1,4 @@
 import ctypes
-from pathlib import Path
 import os
 import traceback
 import sys
@@ -38,22 +37,6 @@ def list_subdirs(path):
     return [name for name in os.listdir(path)
             if os.path.isdir(os.path.join(path, name))]
 
-def find_model_files():
-    """
-    在当前工作目录（及其子目录）中查找后缀为 .onnx 的文件，
-    并返回它们相对于当前工作目录的路径列表。
-    """
-    cwd = Path.cwd()
-    extensions = {'.onnx'}
-    result = []
-
-    for path in cwd.rglob('*'):
-        if path.is_file() and path.suffix.lower() in extensions:
-            # 将绝对路径转换为相对于 cwd 的相对路径
-            rel_path = path.relative_to(cwd)
-            result.append(str(rel_path).replace('\\', '/'))
-    return result
-
 def get_screenshot_region_dxcam(screenshot_size):
     user32 = ctypes.windll.user32
     screen_width = user32.GetSystemMetrics(0)
@@ -75,7 +58,7 @@ def get_scaling_factor():
     try:
         # 设置 DPI 感知
         ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE = 2
-    except:
+    except Exception:
         pass  # 某些旧系统不支持
 
     # 获取屏幕 DPI
@@ -118,4 +101,5 @@ def median_of_three(x, max, min): # 比min，max嵌套函数更快
 
 if __name__ == "__main__":
     for dev in enum_hid_devices():
-        print(dev)
+        if dev[1] in ("0x54c", "0x45e"):
+            print(dev)

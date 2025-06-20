@@ -3,7 +3,7 @@ from tkinter import scrolledtext
 import json
 import sys
 
-from utils.tools import enum_hid_devices, find_model_files
+from utils.tools import enum_hid_devices
 from utils.delay_stdout import DelayedStdoutRedirector
 
 
@@ -34,9 +34,8 @@ class InitApp:
         try:
             with open("user_config.json", "r") as f:
                 self.config = json.load(f)
-        except:
+        except Exception:
             self.config = {
-                "model_path": "apv5.onnx",
                 "controller": {"Name": "", "Vendor_ID": "", "Product_ID": "", "Instance_ID": ""},
                 "detect_settings": {
                     "range": {"outer": 320, "middle": 320, "inner": 80},
@@ -71,23 +70,12 @@ class InitApp:
                 sys.stdout.write(f"[{i}] {name}")
             sys.stdout.write(">>> 请输入要使用的手柄编号（留空则刷新）：")
 
-    def _poll_model_files(self):
-        files = find_model_files()
-        if not files:
-            sys.stdout.write(">>> 未找到模型文件，请放入当前目录后回车重试。")
-        else:
-            sys.stdout.write(f">>> 检测到 {len(files)} 个模型文件：")
-            for i, f in enumerate(files):
-                sys.stdout.write(f"[{i}] {f}")
-            sys.stdout.write(">>> 请输入要使用的模型编号（留空则刷新）：")
-            self.model_files = files
-
     def _on_entry(self, event):
         s = self.entry.get().strip()
         self.entry.delete(0, tk.END)
 
         # 手柄选择阶段
-        if hasattr(self, 'filtered_devices') and not hasattr(self, 'model_files'):
+        if hasattr(self, 'filtered_devices'):
             if s == "":
                 self._poll_controller()
             elif s.isdigit() and 0 <= int(s) < len(self.filtered_devices):
@@ -96,26 +84,14 @@ class InitApp:
                 self.config["controller"]["Vendor_ID"] = vid
                 self.config["controller"]["Product_ID"] = pid
                 self.config["controller"]["Instance_ID"] = instance_id
-                sys.stdout.write(">>> 手柄配置完成。")
-                sys.stdout.write(">>> 正在初始化模型配置...")
-                sys.stdout.write(">>> 开始枚举模型文件…")
-                self._poll_model_files()
-            else:
-                sys.stdout.write(">>> 输入无效，请重新输入手柄编号：")
-
-        # 模型选择阶段
-        elif hasattr(self, 'model_files'):
-            if s == "":
-                self._poll_model_files()
-            elif s.isdigit() and 0 <= int(s) < len(self.model_files):
-                self.config["model_path"] = self.model_files[int(s)]
+                sys.stdout.write(">>> 手柄配置完成。，窗口将自动关闭。")
                 with open("user_config.json", "w") as f:
                     json.dump(self.config, f, indent=4)
-                sys.stdout.write(">>> 配置完成，窗口将自动关闭。")
                 self.force_quit = False
                 self.root.after(500, self.root.destroy)
             else:
-                sys.stdout.write(">>> 输入无效，请重新输入模型编号：")
+                sys.stdout.write(">>> 输入无效，请重新输入手柄编号：")
+
 
 if __name__ == "__main__":
     root = tk.Tk()

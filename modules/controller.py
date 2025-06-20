@@ -79,7 +79,7 @@ class XboxWirelessToX360Mapper:
           - accumulate: True 时在现有偏移上累加，否则覆盖
         """
         self.rx_offset = int(rx_offset * 255)
-        self.ry_offset = int(ry_offset * 255)
+        self.ry_offset = -int(ry_offset * 255)
 
     def _map_loop(self):
         """
@@ -290,10 +290,14 @@ class DualSenseToDS4Mapper:
 
         # D-Pad 映射
         dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NONE
-        if SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_UP): dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NORTH
-        elif SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT): dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_EAST
-        elif SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN): dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_SOUTH
-        elif SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT): dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_WEST
+        if SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_UP): 
+            dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NORTH
+        elif SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT): 
+            dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_EAST
+        elif SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN): 
+            dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_SOUTH
+        elif SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT): 
+            dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_WEST
         self.virtual_gamepad.directional_pad(direction=dpad)
 
         # PS (Guide) 键

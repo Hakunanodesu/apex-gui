@@ -39,18 +39,16 @@ class App:
             with open("user_config.json", "r") as f:
                 config = json.load(f)
             self.vendor_id = int(config["controller"]["Vendor_ID"], 16)
-        except:
+        except Exception:
             self.vendor_id = None
-
-        self.hidhide = HidHideController()
-        self.replugger = DeviceReplugCM()
 
         # 日志输出区
         self.output = scrolledtext.ScrolledText(root, height=15, width=80, state='disabled')
         self.output.pack(fill='both', expand=True)
         sys.stdout = DelayedStdoutRedirector(self.output, interval_ms=50)
 
-        self.hidhide.add_this_to_whitelist(sys.executable)
+        self.model_path  = os.path.join(os.path.dirname(__file__), "dependencies", "apv5.onnx")
+        sys.stdout.write("\n>>> 已识别到模型路径。")
         
         self.missing_drivers_link = []
         driver_ready = self.check_resources()
@@ -111,6 +109,10 @@ class App:
                     os.startfile(link)
             else:
                 sys.exit()
+        else:
+            self.hidhide = HidHideController()
+            self.replugger = DeviceReplugCM()
+            self.hidhide.add_this_to_whitelist(sys.executable)
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -204,48 +206,61 @@ class App:
         vendor_id = int(config["controller"]["Vendor_ID"], 16)
         if not self.mapper_running:
             try:
-                
+                button_states = {
+                    "init": self.init_button.cget("state"),
+                    "cfg": self.cfg_button.cget("state"),
+                    "mapper": self.mapper_button.cget("state"),
+                    "button": self.button.cget("state"),
+                }
                 sys.stdout.write("\n>>> 正在启动手柄映射...")
-                if not self.set_exclusive(True):
-                    sys.stdout.write("\n>>> 手柄映射启动失败，请检查设备。")
-                    return
-                if vendor_id == 0x054c:
-                    self.mapper = DualSenseToDS4Mapper()
-                elif vendor_id == 0x045e:
-                    self.output.config(state='normal')
-                    self.output.insert(tk.END, ">>> 请按下物理手柄上的 A 键进行检测（按 ESC 键取消）...\n")
-                    self.output.see(tk.END)
-                    self.root.update()
-                    physical_id = detect_controller_by_a()
-                    if not physical_id:
-                        sys.stdout.write("\n>>> 手柄映射已取消。")
-                        return
-                    self.mapper = XboxWirelessToX360Mapper(physical_id=int(physical_id))
-                status = self.mapper.start()
-                if status:
-                    self.mapper_running = True
-                    self.mapper_button.config(text="停止手柄映射")
-                    self.button.config(state='normal')
-                    self.init_button.config(state='disabled')
-                    sys.stdout.write("\n>>> 手柄映射已启动。")
-                else:
-                    self.mapper.stop()
-                    self.set_exclusive(False)
-                    sys.stdout.write("\n>>> 手柄映射启动失败，请检查设备。")
+                self.set_exclusive(True)
+                threading.Thread(target=self._wrap_toggle_mapper, args=(vendor_id, button_states)).start()
             except Exception as e:
                 sys.stdout.write("\n>>> 启动映射时出错: ")
                 handle_exception(e)
         else:
             sys.stdout.write("\n>>> 正在停止手柄映射...")
+            self.set_exclusive(False)
             self.mapper.stop()
             self.mapper_running = False
-            self.set_exclusive(False)
+            self.set_exclusive(False, verbose=False)
             sys.stdout.write("\n>>> 手柄映射已停止。")
             self.mapper_button.config(text="启动手柄映射")
             self.button.config(state='disabled')
             self.init_button.config(state='normal')
             if self.running:
                 self.toggle()
+
+    def _wrap_toggle_mapper(self, vendor_id, button_states: dict):
+        try:
+            if vendor_id == 0x054c:
+                self.mapper = DualSenseToDS4Mapper()
+            elif vendor_id == 0x045e:
+                sys.stdout.write("\n>>> 请按下物理手柄上的 A 键进行检测（按 ESC 键取消）...\n")
+                physical_id = detect_controller_by_a()
+                if not physical_id:
+                    sys.stdout.write("\n>>> 手柄映射已取消。")
+                    return
+                self.mapper = XboxWirelessToX360Mapper(physical_id=int(physical_id))
+            status = self.mapper.start()
+            if status:
+                self.mapper_running = True
+                self.mapper_button.config(text="停止手柄映射")
+                self.button.config(state='normal')
+                self.init_button.config(state='disabled')
+                sys.stdout.write("\n>>> 手柄映射已启动。")
+            else:
+                self.set_exclusive(False)
+                self.mapper.stop()
+                self.set_exclusive(False)
+                sys.stdout.write("\n>>> 手柄映射启动失败，请检查设备。")
+        except Exception as e:
+            self.init_button.config(state=button_states["init"])
+            self.mapper_button.config(state=button_states["mapper"])
+            self.cfg_button.config(state=button_states["cfg"])
+            self.button.config(state=button_states["button"])
+            sys.stdout.write("\n>>> 启动映射时出错: ")
+            handle_exception(e)
 
     def toggle(self):
         if not self.running and self.mapper_running:
@@ -319,10 +334,9 @@ class App:
             ident_center = ident_size / 2
             curve_inner = config["detect_settings"]["curve"]["inner"]
             curve_outer = config["detect_settings"]["curve"]["outer"]
-            model_path = config["model_path"]
 
             camera = ScreenGrabber(region=get_screenshot_region_dxcam(ident_size))
-            model = APV5Experimental(model_path)
+            model = APV5Experimental(self.model_path)
 
             sys.stdout.write(f"\n>>> 智慧核心运行中，当前 EP：{model.provider}")
             last_print_time = time.time()
@@ -422,13 +436,14 @@ class App:
                 sys.stdout.write(msg[1])
             response = True
         except Exception as e:
-            sys.stdout.write(f"{msg[2]}{e}")
-            if str(e) == "CM_Locate_DevNodeW failed: 0x000D":
-                sys.stdout.write("\n>>> 请检查手柄是否插入。若您更换了手柄，请重新初始化。")
-            elif str(e) == "CM_Disable_DevNode failed: 0x0017":
-                sys.stdout.write("\n>>> 检测到多个相同的手柄实例。")
-            else:
-                handle_exception(e)
+            if verbose:
+                sys.stdout.write(f"{msg[2]}{e}")
+                if str(e) == "CM_Locate_DevNodeW failed: 0x000D":
+                    sys.stdout.write("\n>>> 请检查手柄是否插入。若您更换了手柄，请重新初始化。")
+                elif str(e) == "CM_Disable_DevNode failed: 0x0017":
+                    sys.stdout.write("\n>>> 检测到多个相同的手柄实例。")
+                else:
+                    handle_exception(e)
             response = False
         finally:
             self.init_button.config(state=button_states["init"])
@@ -440,9 +455,10 @@ class App:
     def on_close(self):
         if messagebox.askyesno("退出", "确定退出吗？"):
             self.running = False
+            self.set_exclusive(state=False, verbose=True)
             if self.mapper:
                 self.mapper.stop()
-            self.set_exclusive(state=False, verbose=True)
+            self.set_exclusive(state=False, verbose=False)
             self.hidhide.close()
             # messagebox.showinfo("调试", "on_close")
             self.root.destroy()
