@@ -1,321 +1,374 @@
-import pywinusb.hid as hid
-import vgamepad as vg
-import threading
-import time
 import sys
+import time
+import threading
+import json
 
-from utils.tools import median_of_three, handle_exception
+import vgamepad as vg
+import XInput
+from sdl2 import (
+    SDL_Init, SDL_Quit,
+    SDL_PumpEvents,
+    SDL_NumJoysticks, SDL_IsGameController,
+    SDL_GameControllerOpen, SDL_GameControllerClose,
+    SDL_GameControllerGetAxis, SDL_GameControllerGetButton,
+    SDL_JoystickGetDeviceVendor, SDL_JoystickGetDeviceProduct,
+    SDL_INIT_VIDEO, SDL_INIT_GAMECONTROLLER,
+    SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY,
+    SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY,
+    SDL_CONTROLLER_AXIS_TRIGGERLEFT, SDL_CONTROLLER_AXIS_TRIGGERRIGHT,
+    SDL_CONTROLLER_BUTTON_A, SDL_CONTROLLER_BUTTON_B,
+    SDL_CONTROLLER_BUTTON_X, SDL_CONTROLLER_BUTTON_Y,
+    SDL_CONTROLLER_BUTTON_LEFTSHOULDER, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,
+    SDL_CONTROLLER_BUTTON_BACK, SDL_CONTROLLER_BUTTON_START,
+    SDL_CONTROLLER_BUTTON_LEFTSTICK, SDL_CONTROLLER_BUTTON_RIGHTSTICK,
+    SDL_CONTROLLER_BUTTON_DPAD_UP, SDL_CONTROLLER_BUTTON_DPAD_RIGHT,
+    SDL_CONTROLLER_BUTTON_DPAD_DOWN, SDL_CONTROLLER_BUTTON_DPAD_LEFT,
+    SDL_CONTROLLER_BUTTON_GUIDE, SDL_CONTROLLER_BUTTON_TOUCHPAD
+)
+
+from utils.tools import handle_exception, median_of_three
 
 
-class DualSenseToDS4Mapper:
-    """
-    DualSenseToDS4Mapper 类：
-    - 使用 pywinusb.hid 读取 DualSense 控制器的原始 HID 输入
-    - 使用 vgamepad 创建虚拟 DualShock 4 手柄，并将 DualSense 输入映射到虚拟手柄
-    - 提供 start() 和 stop() 方法，方便在外部控制映射循环的启动和停止
-    """
+class XboxWirelessToX360Mapper:
+    # ——— XInput 按键掩码 ———
+    XINPUT_GAMEPAD_DPAD_UP        = 0x0001
+    XINPUT_GAMEPAD_DPAD_DOWN      = 0x0002
+    XINPUT_GAMEPAD_DPAD_LEFT      = 0x0004
+    XINPUT_GAMEPAD_DPAD_RIGHT     = 0x0008
+    XINPUT_GAMEPAD_START          = 0x0010
+    XINPUT_GAMEPAD_BACK           = 0x0020
+    XINPUT_GAMEPAD_LEFT_THUMB     = 0x0040
+    XINPUT_GAMEPAD_RIGHT_THUMB    = 0x0080
+    XINPUT_GAMEPAD_LEFT_SHOULDER  = 0x0100
+    XINPUT_GAMEPAD_RIGHT_SHOULDER = 0x0200
+    XINPUT_GAMEPAD_GUIDE          = 0x0400
+    XINPUT_GAMEPAD_A              = 0x1000
+    XINPUT_GAMEPAD_B              = 0x2000
+    XINPUT_GAMEPAD_X              = 0x4000
+    XINPUT_GAMEPAD_Y              = 0x8000
 
-    def __init__(self, product_id: int, path: str):
+    def __init__(self, physical_id: int = None):
         """
-        初始化 DualSenseToDS4Mapper。
-
-        :param vendor_id: DualSense 供应商 ID，默认使用 Sony（0x054C）
-        :param product_id: DualSense 产品 ID，默认使用 DualSense Edge（0x0DF2）
-        :param poll_interval: 映射循环的轮询间隔（秒）
+        poll_interval: 每帧轮询 XInput 的间隔（秒）。
         """
-        self.vendor_id = 0x054c
-        self.product_id = product_id
-        self.path = path
-        self.poll_interval = 0.002
+        with open("user_config.json", "r") as f:
+            config = json.load(f)
+        self.controller_name = config["controller"]["Name"]
+        self.interval = 0.004
+        self._stop = threading.Event()
+        self._thread = None
+        self.phys_id = physical_id
+        self.vpad = None
 
-        # 存储 DualSense 的实时状态
-        self.dual_sense_state = {
-            "lx": 0,       # 左摇杆 X 轴 (0-255)
-            "ly": 0,       # 左摇杆 Y 轴 (0-255)
-            "rx": 0,       # 右摇杆 X 轴 (0-255)
-            "ry": 0,       # 右摇杆 Y 轴 (0-255)
-            "lt": 0,       # 左扳机 (0-255)
-            "rt": 0,       # 右扳机 (0-255)
-            "shoulders_sticks_share_options": 0,  # 按钮掩码
-            "buttons_dpad": 0,                  # 按钮掩码
-            "touchpad_ps": 0,                  # 触控板和PS键状态 (0-3)
-        }
+        # 新增：右摇杆偏移量（单位与 XInput 原始值相同，signed 16-bit）
+        self.rx_offset = 0
+        self.ry_offset = 0
 
-        # 支持右摇杆叠加（偏移量）
-        self.rx_override = None
-        self.ry_override = None
-
-        # 虚拟 Xbox 360 手柄对象（使用 vgamepad）
-        self.virtual_gamepad = vg.VDS4Gamepad()
-
-        # DualSense 设备对象（pywinusb.hid.HidDevice），方便后续关闭
-        self._hid_device = None
-
-        # 线程控制
-        self._mapping_thread = None
-        self._stop_event = threading.Event()
-
-    def _input_handler(self, data: bytearray):
+    def get_trigger_values(self) -> tuple[int, int]:
         """
-        PyWinUSB 的回调函数。当 DualSense 有新输入时调用。
-
-        :param data: bytearray，长度因设备而异
+        读取并返回当前左右扳机值 (0–255)。
+        若读取失败，则返回 (0, 0)。
         """
-        # 基本检查
-        if len(data) < 11:  # 修改为11以包含新的数据位
-            return
-
-        # 更新摇杆和扳机状态
-        self.dual_sense_state["lx"] = data[1]
-        self.dual_sense_state["ly"] = data[2]
-        self.dual_sense_state["rx"] = data[3]
-        self.dual_sense_state["ry"] = data[4]
-        self.dual_sense_state["lt"] = data[5]
-        self.dual_sense_state["rt"] = data[6]
-
-        # 更新按钮掩码，高字节在 data[9]，低字节在 data[8]
-        self.dual_sense_state["shoulders_sticks_share_options"] = data[9]
-        self.dual_sense_state["buttons_dpad"] = data[8]
-        
-        # 更新触控板和PS键状态
-        self.dual_sense_state["touchpad_ps"] = data[10]
-
-    def _find_and_register_dualsense(self) -> bool:
+        s = XInput.get_state(self.phys_id).Gamepad
+        return s.bLeftTrigger, s.bRightTrigger
+    
+    def add_rx_ry_offset(self, rx_offset: int, ry_offset: int):
         """
-        查找并打开 DualSense 设备，注册输入回调。
-
-        :return: 如果成功找到并注册 DualSense，返回 True；否则返回 False
+        设置右摇杆 X/Y 轴的偏移值。
+          - rx_offset, ry_offset: 要应用的偏移（signed 16-bit）
+          - accumulate: True 时在现有偏移上累加，否则覆盖
         """
-        all_devices = hid.HidDeviceFilter(
-            vendor_id=self.vendor_id,
-            product_id=self.product_id,
-            path=self.path
-        ).get_devices()
+        self.rx_offset = int(rx_offset * 255)
+        self.ry_offset = int(ry_offset * 255)
 
-        if not all_devices:
-            sys.stdout.write("\n>>> 未找到 DualSense 设备，请检查手柄是否连接。")
-            return False
-
-        # 只打开第一个匹配的 DualSense 设备
-        self._hid_device = all_devices[0]
-        self._hid_device.open()
-        # 注册回调，将收到的新数据传给 _input_handler 方法
-        self._hid_device.set_raw_data_handler(lambda data: self._input_handler(data))
-        sys.stdout.write(f"\n>>> 已连接并注册 DualSense (VID:0x{self.vendor_id:04X}, PID:0x{self.product_id:04X})")
-        return True
-
-    def add_rx_ry_offset(self, dx: int = 0, dy: int = 0):
-        """在原始值上添加偏移量"""
-        rx = self.dual_sense_state["rx"]
-        ry = self.dual_sense_state["ry"]
-        self.rx_override = median_of_three(rx + dx, 255, 0)
-        self.ry_override = median_of_three(ry + dy, 255, 0)
-
-    def _map_to_ds4(self):
+    def _map_loop(self):
         """
-        将当前 dual_sense_state 中的信息映射到虚拟 DualShock 4 手柄。
+        后台线程函数：不断读取物理手柄状态并映射到虚拟 360 手柄。
         """
-        # 1. 左摇杆
-        lx = self.dual_sense_state["lx"]
-        ly = self.dual_sense_state["ly"]
-        self.virtual_gamepad.left_joystick(x_value=lx, y_value=ly)
+        while not self._stop.is_set():
+            s = XInput.get_state(self.phys_id).Gamepad
 
-        # 2. 右摇杆
-        rx = int(self.rx_override) if self.rx_override is not None else self.dual_sense_state["rx"]
-        ry = int(self.ry_override) if self.ry_override is not None else self.dual_sense_state["ry"]
-        self.virtual_gamepad.right_joystick(x_value=rx, y_value=ry)
+            # —— 摇杆 ——  
+            self.vpad.left_joystick(x_value=s.sThumbLX, y_value=s.sThumbLY)
 
-        # 3. 扳机（vgamepad 接受 0-255）
-        self.virtual_gamepad.left_trigger(self.dual_sense_state["lt"])
-        self.virtual_gamepad.right_trigger(self.dual_sense_state["rt"])
+            # —— 右摇杆（加偏移 & 截断到 signed 16-bit）——  
+            rx = s.sThumbRX + self.rx_offset
+            ry = s.sThumbRY + self.ry_offset
+            # 截断范围 -32768..32767
+            rx = median_of_three(rx, 32767, -32768)
+            ry = median_of_three(ry, 32767, -32768)
+            self.vpad.right_joystick(x_value=rx, y_value=ry)
 
-        # 4. 按钮 & D-Pad
-        btns = self.dual_sense_state["buttons_dpad"]
-        shoulders = self.dual_sense_state["shoulders_sticks_share_options"] & 0x0F
+            # —— 扳机 ——  
+            self.vpad.left_trigger(value=s.bLeftTrigger)
+            self.vpad.right_trigger(value=s.bRightTrigger)
 
-        # 肩键（L1/R1）- 独立处理，不受扳机影响
-        self.virtual_gamepad.release_button(vg.DS4_BUTTONS.DS4_BUTTON_SHOULDER_LEFT)
-        self.virtual_gamepad.release_button(vg.DS4_BUTTONS.DS4_BUTTON_SHOULDER_RIGHT)
-        # 左肩键 (L1)
-        if (shoulders & 0x01) != 0:
-            self.virtual_gamepad.press_button(vg.DS4_BUTTONS.DS4_BUTTON_SHOULDER_LEFT)
-        # 右肩键 (R1)
-        if (shoulders & 0x02) != 0:
-            self.virtual_gamepad.press_button(vg.DS4_BUTTONS.DS4_BUTTON_SHOULDER_RIGHT)
+            # —— 主按钮 ——  
+            for mask, btn in [
+                (self.XINPUT_GAMEPAD_A, vg.XUSB_BUTTON.XUSB_GAMEPAD_A),
+                (self.XINPUT_GAMEPAD_B, vg.XUSB_BUTTON.XUSB_GAMEPAD_B),
+                (self.XINPUT_GAMEPAD_X, vg.XUSB_BUTTON.XUSB_GAMEPAD_X),
+                (self.XINPUT_GAMEPAD_Y, vg.XUSB_BUTTON.XUSB_GAMEPAD_Y),
+            ]:
+                if s.wButtons & mask:
+                    self.vpad.press_button(button=btn)
+                else:
+                    self.vpad.release_button(button=btn)
 
-        # A 按钮
-        if (btns & 0x20) != 0:
-            self.virtual_gamepad.press_button(button=vg.DS4_BUTTONS.DS4_BUTTON_CROSS)
-        else:
-            self.virtual_gamepad.release_button(button=vg.DS4_BUTTONS.DS4_BUTTON_CROSS)
-        # B 按钮
-        if (btns & 0x40) != 0:
-            self.virtual_gamepad.press_button(button=vg.DS4_BUTTONS.DS4_BUTTON_CIRCLE)
-        else:
-            self.virtual_gamepad.release_button(button=vg.DS4_BUTTONS.DS4_BUTTON_CIRCLE)
-        # X 按钮
-        if (btns & 0x10) != 0:
-            self.virtual_gamepad.press_button(button=vg.DS4_BUTTONS.DS4_BUTTON_SQUARE)
-        else:
-            self.virtual_gamepad.release_button(button=vg.DS4_BUTTONS.DS4_BUTTON_SQUARE)
-        # Y 按钮
-        if (btns & 0x80) != 0:
-            self.virtual_gamepad.press_button(button=vg.DS4_BUTTONS.DS4_BUTTON_TRIANGLE)
-        else:
-            self.virtual_gamepad.release_button(button=vg.DS4_BUTTONS.DS4_BUTTON_TRIANGLE)
+            # —— 其他按钮 ——  
+            for mask, btn in [
+                (self.XINPUT_GAMEPAD_LEFT_SHOULDER, vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER),
+                (self.XINPUT_GAMEPAD_RIGHT_SHOULDER, vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER),
+                (self.XINPUT_GAMEPAD_BACK,           vg.XUSB_BUTTON.XUSB_GAMEPAD_BACK),
+                (self.XINPUT_GAMEPAD_START,          vg.XUSB_BUTTON.XUSB_GAMEPAD_START),
+                (self.XINPUT_GAMEPAD_LEFT_THUMB,     vg.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_THUMB),
+                (self.XINPUT_GAMEPAD_RIGHT_THUMB,    vg.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_THUMB),
+                (self.XINPUT_GAMEPAD_GUIDE,          vg.XUSB_BUTTON.XUSB_GAMEPAD_GUIDE),
+                (self.XINPUT_GAMEPAD_DPAD_UP,    vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP),
+                (self.XINPUT_GAMEPAD_DPAD_RIGHT, vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT),
+                (self.XINPUT_GAMEPAD_DPAD_DOWN,  vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN),
+                (self.XINPUT_GAMEPAD_DPAD_LEFT,  vg.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT),
+            ]:
+                if s.wButtons & mask:
+                    self.vpad.press_button(button=btn)
+                else:
+                    self.vpad.release_button(button=btn)
 
-        # 镜头相关的按键：Back、Start、LeftThumb、RightThumb
-        sticks = self.dual_sense_state["shoulders_sticks_share_options"] & 0xF0
-        # Back
-        if (sticks & 0x10) != 0:
-            self.virtual_gamepad.press_button(button=vg.DS4_BUTTONS.DS4_BUTTON_SHARE)
-        else:
-            self.virtual_gamepad.release_button(button=vg.DS4_BUTTONS.DS4_BUTTON_SHARE)
-        # Start
-        if (sticks & 0x20) != 0:
-            self.virtual_gamepad.press_button(button=vg.DS4_BUTTONS.DS4_BUTTON_OPTIONS)
-        else:
-            self.virtual_gamepad.release_button(button=vg.DS4_BUTTONS.DS4_BUTTON_OPTIONS)
-            
-        # Left Thumb（L3）
-        if (sticks & 0x40) != 0:
-            self.virtual_gamepad.press_button(button=vg.DS4_BUTTONS.DS4_BUTTON_THUMB_LEFT)
-        else:
-            self.virtual_gamepad.release_button(button=vg.DS4_BUTTONS.DS4_BUTTON_THUMB_LEFT)
-        # Right Thumb（R3）
-        if (sticks & 0x80) != 0:
-            self.virtual_gamepad.press_button(button=vg.DS4_BUTTONS.DS4_BUTTON_THUMB_RIGHT)
-        else:
-            self.virtual_gamepad.release_button(button=vg.DS4_BUTTONS.DS4_BUTTON_THUMB_RIGHT)
-
-        # —— D-Pad ——  
-        # hat 值 0–7 表示 8 个方向，8 表示无输入
-        hat = self.dual_sense_state["buttons_dpad"] & 0x0F
-        # 完整枚举请看：vg.DS4_DPAD_DIRECTIONS
-        # 比如 hat==0 -> DS4_BUTTON_DPAD_NORTH
-        direction = {
-            0: vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NORTH,
-            1: vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NORTHEAST,
-            2: vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_EAST,
-            3: vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_SOUTHEAST,
-            4: vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_SOUTH,
-            5: vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_SOUTHWEST,
-            6: vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_WEST,
-            7: vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NORTHWEST,
-            8: vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NONE,
-        }.get(hat, vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NONE)
-        self.virtual_gamepad.directional_pad(direction=direction)
-
-        # —— PS 和触控板 ——  
-        touchpad_ps = self.dual_sense_state["touchpad_ps"]
-        # PS 键
-        if touchpad_ps & 0x01:
-            self.virtual_gamepad.press_special_button(special_button=vg.DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_PS)
-        else:
-            self.virtual_gamepad.release_special_button(special_button=vg.DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_PS)
-        # 触控板键
-        if touchpad_ps & 0x02:
-            self.virtual_gamepad.press_special_button(special_button=vg.DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_TOUCHPAD)
-        else:
-            self.virtual_gamepad.release_special_button(special_button=vg.DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_TOUCHPAD)
-
-        # 最后送出报告
-        self.virtual_gamepad.update()
+            self.vpad.update()
+            time.sleep(self.interval)
 
     def start(self):
         """
-        启动映射循环：
-        1. 查找并注册 DualSense
-        2. 创建虚拟手柄（已在 __init__ 中创建）
-        3. 启动一个后台线程，不断将 DualSense 输入映射到虚拟手柄
+        检测手柄并启动映射：创建虚拟手柄、启动线程。
         """
-        if not self._find_and_register_dualsense():
-            return False
-
-        sys.stdout.write("\n>>> 虚拟 DualShock 4 手柄已创建。DualSense 的输入将直接映射到虚拟手柄上。")
-
-        # 重置（防止多次调用 start）
-        self._stop_event.clear()
-
-        # 后台线程负责循环映射
-        def run_loop():
-            try:
-                while not self._stop_event.is_set():
-                    self._map_to_ds4()
-                    time.sleep(self.poll_interval)
-            except Exception as e:
-                sys.stdout.write(f">>> 映射循环遇到异常：")
-                handle_exception(e)
-
-        self._mapping_thread = threading.Thread(target=run_loop, daemon=True)
-        self._mapping_thread.start()
+        # 创建虚拟手柄实例
+        self.vpad = vg.VX360Gamepad()
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._map_loop, daemon=True)
+        self._thread.start()
+        sys.stdout.write(f">>> {self.controller_name} → 虚拟 Xbox 360")
         return True
 
     def stop(self):
         """
-        停止映射循环，并关闭 DualSense 设备、重置虚拟手柄。
+        停止映射并移除虚拟设备。
         """
+        self._stop.set()
+        if self._thread:
+            self._thread.join()
+        # 删除虚拟手柄对象，触发其析构方法以移除设备
+        try:
+            del self.vpad
+        except AttributeError:
+            pass
+        self.vpad = None
+
+
+class DualSenseToDS4Mapper:
+    """
+    使用 SDL2 GameController API 读取指定 VID/PID 的 DualSense 控制器，
+    并将输入映射到虚拟 DualShock 4 手柄 (vgamepad)
+    """
+
+    def __init__(self):
+        with open("user_config.json", "r") as f:
+            config = json.load(f)
+        self.vendor_id = 0x054C
+        self.product_id = int(config["controller"]["Product_ID"], 16)
+        self.controller_name = config["controller"]["Name"]
+        self.poll_interval = 0.002
+        self._sdl_controller = None
+        self._mapping_thread = None
+        self._stop_event = threading.Event()
+        self.virtual_gamepad = vg.VDS4Gamepad()
+        self._sdl_inited = False
+
+        self.rx_offset = 0
+        self.ry_offset = 0
+
+    def _init_sdl(self) -> bool:
+        if not self._sdl_inited:
+            if SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0:
+                sys.stdout.write("SDL_Init Error: failed to initialize GameController\n")
+                return False
+            self._sdl_inited = True
+        # 确保事件队列最新
+        SDL_PumpEvents()
+        # 打开对应 VID/PID 的手柄
+        count = SDL_NumJoysticks()
+        for idx in range(count):
+            if SDL_IsGameController(idx):
+                vid = SDL_JoystickGetDeviceVendor(idx)
+                pid = SDL_JoystickGetDeviceProduct(idx)
+                if vid == self.vendor_id and pid == self.product_id:
+                    # 关闭上次未关闭的手柄
+                    if self._sdl_controller:
+                        SDL_GameControllerClose(self._sdl_controller)
+                    self._sdl_controller = SDL_GameControllerOpen(idx)
+                    sys.stdout.write(f"\n>>> 已打开 VID=0x{vid:04X}, PID=0x{pid:04X} 的 {self.controller_name}\n")
+                    return True
+        sys.stdout.write(f"\n>>> 未找到 VID=0x{self.vendor_id:04X}, PID=0x{self.product_id:04X} 的手柄\n")
+        return False
+
+    def get_trigger_values(self) -> tuple[int, int]:
+        """
+        返回当前左右扳机的映射值，格式 (left_trigger, right_trigger)，范围 0..255。
+        如果还没初始化或没找到手柄，则返回 (0, 0)。
+        """
+
+        # 刷新输入状态
+        SDL_PumpEvents()
+
+        # 读取原始轴值
+        lt_raw = SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT)
+        rt_raw = SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT)
+
+        # 转换并返回
+        lt = self._axis_to_byte_trigger(lt_raw)
+        rt = self._axis_to_byte_trigger(rt_raw)
+        return lt, rt
+
+    def add_rx_ry_offset(self, rx_offset: int, ry_offset: int):
+        """
+        设置右摇杆 X/Y 轴的偏移量（单位：0–255）。
+        新的摇杆值 = 归一化后值 + offset，并在 0–255 之间截断。
+        """
+        self.rx_offset = int(rx_offset)
+        self.ry_offset = int(ry_offset)
+
+    # 归一化轴数据：-32768..+32767 -> 0..255
+    def _axis_to_byte_signed(self, val):
+        return (val + 32768) * 255 // 65535
+    
+    # 触发器轴：0..32767 -> 0..255
+    def _axis_to_byte_trigger(self, val):
+        return val * 255 // 32767
+
+    def _map_to_ds4(self):
+        """将 SDL 控制器状态映射到 DS4 虚拟手柄"""
+        # 左摇杆
+        lx = self._axis_to_byte_signed(SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_LEFTX))
+        ly = self._axis_to_byte_signed(SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_LEFTY))
+        self.virtual_gamepad.left_joystick(x_value=lx, y_value=ly)
+
+        # 右摇杆（加偏移 & 截断到 0–255）
+        rx = self._axis_to_byte_signed(
+            SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_RIGHTX)
+        ) + self.rx_offset
+        ry = self._axis_to_byte_signed(
+            SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_RIGHTY)
+        ) + self.ry_offset
+        # 截断到 [0, 255]
+        rx = median_of_three(rx, 255, 0)
+        ry = median_of_three(ry, 255, 0)
+        self.virtual_gamepad.right_joystick(x_value=rx, y_value=ry)
+
+        # 扳机映射
+        lt = self._axis_to_byte_trigger(SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT))
+        rt = self._axis_to_byte_trigger(SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT))
+        self.virtual_gamepad.left_trigger(lt)
+        self.virtual_gamepad.right_trigger(rt)
+
+        # 普通按钮映射
+        btn_map = [
+            (SDL_CONTROLLER_BUTTON_A, vg.DS4_BUTTONS.DS4_BUTTON_CROSS),
+            (SDL_CONTROLLER_BUTTON_B, vg.DS4_BUTTONS.DS4_BUTTON_CIRCLE),
+            (SDL_CONTROLLER_BUTTON_X, vg.DS4_BUTTONS.DS4_BUTTON_SQUARE),
+            (SDL_CONTROLLER_BUTTON_Y, vg.DS4_BUTTONS.DS4_BUTTON_TRIANGLE),
+            (SDL_CONTROLLER_BUTTON_LEFTSHOULDER, vg.DS4_BUTTONS.DS4_BUTTON_SHOULDER_LEFT),
+            (SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, vg.DS4_BUTTONS.DS4_BUTTON_SHOULDER_RIGHT),
+            (SDL_CONTROLLER_BUTTON_BACK, vg.DS4_BUTTONS.DS4_BUTTON_SHARE),
+            (SDL_CONTROLLER_BUTTON_START, vg.DS4_BUTTONS.DS4_BUTTON_OPTIONS),
+            (SDL_CONTROLLER_BUTTON_LEFTSTICK, vg.DS4_BUTTONS.DS4_BUTTON_THUMB_LEFT),
+            (SDL_CONTROLLER_BUTTON_RIGHTSTICK, vg.DS4_BUTTONS.DS4_BUTTON_THUMB_RIGHT),
+        ]
+        for sdl_btn, ds4_btn in btn_map:
+            if SDL_GameControllerGetButton(self._sdl_controller, sdl_btn):
+                self.virtual_gamepad.press_button(ds4_btn)
+            else:
+                self.virtual_gamepad.release_button(ds4_btn)
+
+        # D-Pad 映射
+        dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NONE
+        if SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_UP): dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_NORTH
+        elif SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT): dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_EAST
+        elif SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN): dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_SOUTH
+        elif SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT): dpad = vg.DS4_DPAD_DIRECTIONS.DS4_BUTTON_DPAD_WEST
+        self.virtual_gamepad.directional_pad(direction=dpad)
+
+        # PS (Guide) 键
+        if SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_GUIDE):
+            self.virtual_gamepad.press_special_button(vg.DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_PS)
+        else:
+            self.virtual_gamepad.release_special_button(vg.DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_PS)
+
+        # 触控板点击 (如果 SDL 支持)
+        try:
+            pressed = SDL_GameControllerGetButton(self._sdl_controller, SDL_CONTROLLER_BUTTON_TOUCHPAD)
+            if pressed:
+                self.virtual_gamepad.press_special_button(vg.DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_TOUCHPAD)
+            else:
+                self.virtual_gamepad.release_special_button(vg.DS4_SPECIAL_BUTTONS.DS4_SPECIAL_BUTTON_TOUCHPAD)
+        except AttributeError:
+            pass  # SDL 版本不支持触控板按钮
+
+        self.virtual_gamepad.update()
+
+    def start(self) -> bool:
+        if not self._init_sdl():
+            return False
+        self._stop_event.clear()
+        def loop():
+            try:
+                while not self._stop_event.is_set():
+                    SDL_PumpEvents()  # 处理 SDL 事件，保证输入更新
+                    self._map_to_ds4()
+                    time.sleep(self.poll_interval)
+            except Exception as e:
+                sys.stdout.write(">>> 映射循环遇到异常：\n")
+                handle_exception(e)
+        self._mapping_thread = threading.Thread(target=loop, daemon=True)
+        self._mapping_thread.start()
+        return True
+
+    def stop(self):
         self._stop_event.set()
         if self._mapping_thread:
             self._mapping_thread.join(timeout=0)
         self._cleanup()
 
     def _cleanup(self):
-        """
-        清理工作：关闭 DualSense 设备、重置虚拟手柄并提交更新
-        """
-        if self._hid_device:
-            try:
-                self._hid_device.close()
-                sys.stdout.write("\n>>> DualSense 设备已关闭。")
-            except Exception:
-                pass
-            finally:
-                self._hid_device = None
-
+        if self._sdl_controller:
+            SDL_GameControllerClose(self._sdl_controller)
+            self._sdl_controller = None
+        if self._sdl_inited:
+            SDL_Quit()
+            self._sdl_inited = False
         if self.virtual_gamepad:
             try:
-                self.virtual_gamepad.reset()
-                self.virtual_gamepad.update()
-                if hasattr(self.virtual_gamepad, 'vigem_disconnect'):
-                    self.virtual_gamepad.vigem_disconnect()
-                sys.stdout.write("\n>>> 虚拟手柄已重置并关闭。")
-            except Exception:
+                del self.virtual_gamepad
+            except AttributeError:
                 pass
-            finally:
-                self.virtual_gamepad = None
+            self.virtual_gamepad = None
 
 
 if __name__ == "__main__":
-    import sys
-    import time
-
-    # 默认 DualSense Edge 的 PID，可按需修改
-    PRODUCT_ID = 0x028E
-
-    # 实例化 mapper
-    mapper = DualSenseToDS4Mapper(product_id=PRODUCT_ID)
-
-    # debug 用的回调：先打印原始 data，再交给 _input_handler
-    def debug_handler(data: bytearray):
-        time.sleep(0.5)
-        print("Raw HID data:", list(data))
-        mapper._input_handler(data)
-
-    # 找设备并注册
-    if not mapper._find_and_register_dualsense():
-        sys.exit(1)
-
-    # 覆盖原始 handler 为 debug_handler
-    mapper._hid_device.set_raw_data_handler(debug_handler)
-
-    print(">>> 开始读取 DualSense 原始数据，按 Ctrl+C 停止")
+    # mapper = DualSenseToDS4Mapper(vendor_id=0x054C, product_id=0x0DF2)
+    # if mapper.start():
+    #     print(">>> 开始通过 SDL2 读取 DualSense 并映射到 DS4，按 Ctrl+C 退出")
+    #     try:
+    #         while True:
+    #             time.sleep(1)
+    #     except KeyboardInterrupt:
+    #         print("\n>>> 检测到 Ctrl+C，正在停止…")
+    #     finally:
+    #         mapper.stop()
+    mapper = XboxWirelessToX360Mapper()
+    mapper.start()
     try:
-        # 保持主线程存活
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n>>> 检测到 Ctrl+C，正在退出…")
-    finally:
         mapper.stop()
-
+    finally:
+        time.sleep(10)

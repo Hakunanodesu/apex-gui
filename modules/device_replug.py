@@ -84,7 +84,7 @@ class DeviceReplugCM:
 
 # 如果直接运行此脚本，可接受命令行参数
 if __name__ == '__main__':
-    instance_id = "HID\\vid_054c&pid_0df2&mi_03\\b&15d9a947&0&0000"
+    instance_id = "HID\\vid_045e&pid_0b13&rev_0509&0c3526101353&ig_00\\d&32dc9e2a&0&0000"
     rp = DeviceReplugCM()
     rp.replug(instance_id)
     print(f"✔ 软拔插完成: {instance_id}")

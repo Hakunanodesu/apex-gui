@@ -31,15 +31,19 @@ class InitApp:
         self.entry.focus()
 
         # 初始配置
-        self.config = {
-            "model_path": "apv5.onnx",
-            "controller": {"Vendor_ID": "", "Product_ID": "", "Instance_ID": "", "Path": ""},
-            "detect_settings": {
-                "range": {"outer": 320, "middle": 320, "inner": 80},
-                "curve": {"outer": [0.2, 0.2], "inner": [0.05, 1.0]},
-                "hipfire_scale": 0.8
+        try:
+            with open("user_config.json", "r") as f:
+                self.config = json.load(f)
+        except:
+            self.config = {
+                "model_path": "apv5.onnx",
+                "controller": {"Name": "", "Vendor_ID": "", "Product_ID": "", "Instance_ID": ""},
+                "detect_settings": {
+                    "range": {"outer": 320, "middle": 320, "inner": 80},
+                    "curve": {"outer": [0.2, 0.2], "inner": [0.0, 1.0]},
+                    "hipfire_scale": 0.7
+                }
             }
-        }
 
         # 开始手柄检测
         sys.stdout.write(">>> 正在初始化手柄配置...")
@@ -55,13 +59,15 @@ class InitApp:
     def _poll_controller(self):
         devices = enum_hid_devices()
         # 过滤出 Sony(0x054C) 和 Microsoft(0x045E) 设备
-        filtered = [(name, vid, pid, path) for (name, vid, pid, path) in devices if vid in ("0x54c")]
+        filtered = [(name, vid, pid, instance_id) for (name, vid, pid, instance_id) in devices if vid in ("0x54c", "0x45e")]
         self.filtered_devices = filtered
         if not filtered:
-            sys.stdout.write(">>> 未检测到 DualSense 手柄，请插入手柄后回车重试。")
+            sys.stdout.write(">>> 未检测到 DualSense 或 Xbox 无线控制器，请插入手柄后回车重试。")
         else:
             sys.stdout.write(f">>> 检测到 {len(filtered)} 台手柄设备：")
-            for i, (name, vid, pid, path) in enumerate(filtered):
+            for i, (name, vid, pid, instance_id) in enumerate(filtered):
+                if "{" in instance_id and "}" in instance_id:
+                    name = name + "（蓝牙）"
                 sys.stdout.write(f"[{i}] {name}")
             sys.stdout.write(">>> 请输入要使用的手柄编号（留空则刷新）：")
 
@@ -85,11 +91,11 @@ class InitApp:
             if s == "":
                 self._poll_controller()
             elif s.isdigit() and 0 <= int(s) < len(self.filtered_devices):
-                name, vid, pid, path = self.filtered_devices[int(s)]
+                name, vid, pid, instance_id = self.filtered_devices[int(s)]
+                self.config["controller"]["Name"] = name
                 self.config["controller"]["Vendor_ID"] = vid
                 self.config["controller"]["Product_ID"] = pid
-                self.config["controller"]["Instance_ID"] = "HID\\" + "\\".join(path.split("#")[1:-1])
-                self.config["controller"]["Path"] = path
+                self.config["controller"]["Instance_ID"] = instance_id
                 sys.stdout.write(">>> 手柄配置完成。")
                 sys.stdout.write(">>> 正在初始化模型配置...")
                 sys.stdout.write(">>> 开始枚举模型文件…")

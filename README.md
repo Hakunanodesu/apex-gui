@@ -29,6 +29,7 @@
 
 - [ViGEmBus](https://github.com/nefarius/ViGEmBus) - Windows kernel-mode driver emulating well-known USB game controllers
 - [HidHide](https://github.com/nefarius/HidHide) - Gaming Input Peripherals Device Firewall for Windows
+- [PySDL2](https://github.com/py-sdl/py-sdl2) - Python ctypes wrapper around SDL2
 
 ## ⚠️ **重要提示**：
 
@@ -40,7 +41,3 @@
 1. 检查系统要求
 2. 查看项目 Issues 页面
 3. 提交详细的问题报告
-
----
-
-**项目状态**：积极开发中 | **最后更新**：2025年6月17日

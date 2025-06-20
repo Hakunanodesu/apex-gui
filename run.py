@@ -1,6 +1,4 @@
-# 在你的脚本最顶部（import 之前）
 import os
-import re
 import sys
 import json
 import time
@@ -8,19 +6,22 @@ import threading
 import tkinter as tk
 from tkinter import scrolledtext
 from tkinter import messagebox
-import subprocess
 
 import numpy as np
 
 from modules.device_replug import DeviceReplugCM
 from modules.hidhide import HidHideController
 from modules.onnx import APV5Experimental
-from modules.controller import DualSenseToDS4Mapper
+from modules.controller import DualSenseToDS4Mapper, XboxWirelessToX360Mapper
 from modules.initialize import InitApp
 from modules.aim_configurate import CFGApp
 from utils.grab_screen import ScreenGrabber
 from utils.delay_stdout import DelayedStdoutRedirector
-from utils.tools import get_screenshot_region_dxcam, list_subdirs, enum_hid_devices, handle_exception
+from utils.tools import (
+    get_screenshot_region_dxcam, 
+    list_subdirs, enum_hid_devices, 
+    handle_exception, detect_controller_by_a
+)
 
 
 class App:
@@ -33,6 +34,13 @@ class App:
         self.logic_started = False  # 标记 run_logic 是否已成功启动
         self.thread = None
         self.mapper = None
+
+        try:
+            with open("user_config.json", "r") as f:
+                config = json.load(f)
+            self.vendor_id = int(config["controller"]["Vendor_ID"], 16)
+        except:
+            self.vendor_id = None
 
         self.hidhide = HidHideController()
         self.replugger = DeviceReplugCM()
@@ -88,9 +96,9 @@ class App:
 
         # 延迟信息标签
         self.latency_str = (
-            f"[Latency] full cycle: waiting...\n"
-            f"[Latency] screen grab: waiting...\n"
-            f"[Latency] inference: waiting..."
+            "[Latency] full cycle: waiting...\n"
+            "[Latency] screen grab: waiting...\n"
+            "[Latency] inference: waiting..."
         )
         self.latency_label = tk.Label(root, text=self.latency_str, font=("Arial", 10), justify=tk.LEFT)
         self.latency_label.pack(side="left", padx=10, pady=(5, 5))
@@ -98,7 +106,7 @@ class App:
         if not driver_ready:
             if_download = messagebox.askyesno("跳转下载", "是否下载缺失的驱动？")
             if if_download:
-                sys.stdout.write(f"\n>>> 请在下载完成后安装到默认路径，然后重启软件（下载慢请使用代理）。如果安装完成后依旧检测不到，可能是因为您在非默认路径安装过该软件，请卸载后重新安装。")
+                sys.stdout.write("\n>>> 请在下载完成后安装到默认路径，然后重启软件（下载慢请使用代理）。如果安装完成后依旧检测不到，可能是因为您在非默认路径安装过该软件，请卸载后重新安装。")
                 for link in self.missing_drivers_link:
                     os.startfile(link)
             else:
@@ -109,9 +117,9 @@ class App:
     def check_instance(self):
         if os.path.exists("user_config.json"):
             with open("user_config.json", "r") as f:
-                path = json.load(f)["controller"]["Path"] 
+                instance_id = json.load(f)["controller"]["Instance_ID"] 
             for device in enum_hid_devices():
-                if device[3] == path:
+                if device[3] == instance_id:
                     return True
             sys.stdout.write("\n>>> 检测到手柄实例变动，可能是手柄未插入或使用了新的手柄。若手柄未插入，请插入手柄后重新打开软件。若使用了新的手柄，请重新初始化。")
         else:
@@ -168,6 +176,7 @@ class App:
 
     def start_init(self):
         try:
+            self.set_exclusive(state=False, verbose=False)
             sys.stdout.write("\n>>> 开始初始化配置...")
             init_root = tk.Toplevel(self.root)
             init_root.grab_set()  # 使子窗口获得焦点，主窗口无法操作
@@ -179,6 +188,9 @@ class App:
                 sys.stdout.write("\n>>> 初始化未完成。")
                 return
             sys.stdout.write("\n>>> 配置初始化完成。")
+            with open("user_config.json", "r") as f:
+                config = json.load(f)
+            self.vendor_id = int(config["controller"]["Vendor_ID"], 16)
             self.mapper_button.config(state='normal')
             self.cfg_button.config(state='normal')
         except Exception as e:
@@ -187,19 +199,28 @@ class App:
             sys.stdout.write(f"\n>>> 初始化配置时出错: {e}")
 
     def toggle_mapper(self):
+        with open("user_config.json", "r") as f:
+            config = json.load(f)
+        vendor_id = int(config["controller"]["Vendor_ID"], 16)
         if not self.mapper_running:
             try:
-                with open("user_config.json", "r") as f:
-                    config = json.load(f)
-                vendor_id = int(config["controller"]["Vendor_ID"], 16)
-                product_id = int(config["controller"]["Product_ID"], 16)
-                path = config["controller"]["Path"]
+                
                 sys.stdout.write("\n>>> 正在启动手柄映射...")
-                self.set_exclusive(True)
+                if not self.set_exclusive(True):
+                    sys.stdout.write("\n>>> 手柄映射启动失败，请检查设备。")
+                    return
                 if vendor_id == 0x054c:
-                    self.mapper = DualSenseToDS4Mapper(product_id=product_id, path=path)
-                # elif vendor_id == 0x045e:
-                #     self.mapper = XboxWirelessToX360Mapper(product_id=product_id, path=path)
+                    self.mapper = DualSenseToDS4Mapper()
+                elif vendor_id == 0x045e:
+                    self.output.config(state='normal')
+                    self.output.insert(tk.END, ">>> 请按下物理手柄上的 A 键进行检测（按 ESC 键取消）...\n")
+                    self.output.see(tk.END)
+                    self.root.update()
+                    physical_id = detect_controller_by_a()
+                    if not physical_id:
+                        sys.stdout.write("\n>>> 手柄映射已取消。")
+                        return
+                    self.mapper = XboxWirelessToX360Mapper(physical_id=int(physical_id))
                 status = self.mapper.start()
                 if status:
                     self.mapper_running = True
@@ -208,14 +229,15 @@ class App:
                     self.init_button.config(state='disabled')
                     sys.stdout.write("\n>>> 手柄映射已启动。")
                 else:
+                    self.mapper.stop()
+                    self.set_exclusive(False)
                     sys.stdout.write("\n>>> 手柄映射启动失败，请检查设备。")
             except Exception as e:
-                sys.stdout.write(f"\n>>> 启动映射时出错: ")
+                sys.stdout.write("\n>>> 启动映射时出错: ")
                 handle_exception(e)
         else:
             sys.stdout.write("\n>>> 正在停止手柄映射...")
-            if self.mapper:
-                self.mapper.stop()
+            self.mapper.stop()
             self.mapper_running = False
             self.set_exclusive(False)
             sys.stdout.write("\n>>> 手柄映射已停止。")
@@ -322,14 +344,14 @@ class App:
 
                 if (
                     result is not None \
-                    and (self.mapper.dual_sense_state["rt"] > 128 \
+                    and (self.mapper.get_trigger_values()[1] > 128 \
                     or time.perf_counter() - tracking_delay_start < 0.2)
                 ):
                     xy_result = result - ident_center
                     distances = np.abs(xy_result[:, 0]) + np.abs(xy_result[:, 1])
                     min_idx = distances.argmin()
                     strength = 1
-                    if self.mapper.dual_sense_state["lt"] < 128:
+                    if self.mapper.get_trigger_values()[0] < 128:
                         strength *= hipfire_scale
                     euclidean_distance = np.sqrt(np.sum(xy_result[min_idx]**2))
                     cos_angle = xy_result[min_idx][0] / euclidean_distance
@@ -343,11 +365,11 @@ class App:
                     rx_offset = map_euclidean_distance * cos_angle
                     ry_offset = map_euclidean_distance * sin_angle
                     self.mapper.add_rx_ry_offset(rx_offset, ry_offset)
-                    if self.mapper.dual_sense_state["rt"] > 128:
+                    if self.mapper.get_trigger_values()[1] > 128:
                         tracking_delay_start = time.perf_counter()
                 else:
-                    self.mapper.rx_override = None
-                    self.mapper.ry_override = None
+                    self.mapper.rx_offset = 0
+                    self.mapper.ry_offset = 0
 
                 cycle_end = time.perf_counter()
                 cycle_latency = (cycle_end - cycle_start) * 1000
@@ -366,7 +388,7 @@ class App:
             self.mapper.ry_override = None
             sys.stdout.write("\n>>> 智慧核心已关闭。")
         except Exception as e:
-            sys.stdout.write(f"\n>>> 智慧核心运行时出错。")
+            sys.stdout.write("\n>>> 智慧核心运行时出错。")
             handle_exception(e)
             self.running = False
             self._handle_logic_failure()
@@ -398,14 +420,22 @@ class App:
             self.replugger.replug(instance_id)
             if verbose:
                 sys.stdout.write(msg[1])
+            response = True
         except Exception as e:
             sys.stdout.write(f"{msg[2]}{e}")
-            handle_exception(e)
+            if str(e) == "CM_Locate_DevNodeW failed: 0x000D":
+                sys.stdout.write("\n>>> 请检查手柄是否插入。若您更换了手柄，请重新初始化。")
+            elif str(e) == "CM_Disable_DevNode failed: 0x0017":
+                sys.stdout.write("\n>>> 检测到多个相同的手柄实例。")
+            else:
+                handle_exception(e)
+            response = False
         finally:
             self.init_button.config(state=button_states["init"])
             self.mapper_button.config(state=button_states["mapper"])
             self.cfg_button.config(state=button_states["cfg"])
             self.button.config(state=button_states["button"])
+            return response
 
     def on_close(self):
         if messagebox.askyesno("退出", "确定退出吗？"):
