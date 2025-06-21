@@ -8,7 +8,7 @@ from pywinusb import hid
 import XInput
 
 # 导入日志模块
-from .logger import get_logger
+from utils.logger import get_logger
 
 
 def detect_controller_by_a():
@@ -66,6 +66,8 @@ def handle_exception(e):
 
 def list_subdirs(path):
     # 列出 path 下的所有条目，并筛选出目录
+    if not os.path.exists(path):
+        return []
     return [name for name in os.listdir(path)
             if os.path.isdir(os.path.join(path, name))]
 
@@ -143,6 +145,7 @@ def check_xbox_controller_available(controller_id: int) -> bool:
         return False
 
 if __name__ == "__main__":
-    for dev in enum_hid_devices():
-        if dev[1] in ("0x54c", "0x45e"):
-            print(dev)
+    # for dev in enum_hid_devices():
+    #     if dev[1] in ("0x54c", "0x45e"):
+    #         print(dev)
+    print(list_subdirs("C:/Program Files/Nefarius Software Solutions"))

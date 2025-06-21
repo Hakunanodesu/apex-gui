@@ -29,6 +29,8 @@ from sdl2 import (
 from utils.tools import handle_exception, median_of_three
 from utils.logger import get_logger
 
+# 全局常量
+RT_REPEAT_INTERVAL = 0.1  # 连点间隔（秒）
 
 class XboxWirelessToX360Mapper:
     # ——— XInput 按键掩码 ———
@@ -65,6 +67,11 @@ class XboxWirelessToX360Mapper:
         # 新增：右摇杆偏移量（单位与 XInput 原始值相同，signed 16-bit）
         self.rx_offset = 0
         self.ry_offset = 0
+        
+        # 新增：连点 RT 相关变量
+        self.rt_repeat_enabled = False
+        self.rt_repeat_timer = 0
+        self.rt_repeat_interval = RT_REPEAT_INTERVAL  # 连点间隔（秒）
 
     def get_trigger_values(self) -> tuple[int, int]:
         """
@@ -92,6 +99,15 @@ class XboxWirelessToX360Mapper:
         with self._lock:
             self.rx_offset = int(rx_offset * 255)
             self.ry_offset = -int(ry_offset * 255)
+    
+    def set_rt_repeat(self, enabled: bool):
+        """
+        设置 RT 连点功能
+        """
+        with self._lock:
+            self.rt_repeat_enabled = enabled
+            if not enabled:
+                self.rt_repeat_timer = 0
 
     def _map_loop(self):
         """
@@ -127,7 +143,18 @@ class XboxWirelessToX360Mapper:
 
                 # —— 扳机 ——  
                 self.vpad.left_trigger(value=s.bLeftTrigger)
-                self.vpad.right_trigger(value=s.bRightTrigger)
+                
+                # RT 扳机处理（包含连点逻辑）
+                if self.rt_repeat_enabled:
+                    current_time = time.time()
+                    if current_time - self.rt_repeat_timer >= self.rt_repeat_interval:
+                        self.rt_repeat_timer = current_time
+                        # 松开后立马按下：先释放，下一帧按下
+                        self.vpad.right_trigger(0)    # 释放
+                    else:
+                        self.vpad.right_trigger(255)  # 按下
+                else:
+                    self.vpad.right_trigger(value=s.bRightTrigger)
 
                 # —— 主按钮 ——  
                 for mask, btn in [
@@ -231,6 +258,11 @@ class DualSenseToDS4Mapper:
 
         self.rx_offset = 0
         self.ry_offset = 0
+        
+        # 新增：连点 RT 相关变量
+        self.rt_repeat_enabled = False
+        self.rt_repeat_timer = 0
+        self.rt_repeat_interval = RT_REPEAT_INTERVAL  # 连点间隔（秒）
 
     def _init_sdl(self) -> bool:
         if not self._sdl_inited:
@@ -290,6 +322,14 @@ class DualSenseToDS4Mapper:
     def _axis_to_byte_trigger(self, val):
         return val * 255 // 32767
 
+    def set_rt_repeat(self, enabled: bool):
+        """
+        设置 RT 连点功能
+        """
+        self.rt_repeat_enabled = enabled
+        if not enabled:
+            self.rt_repeat_timer = 0
+
     def _map_to_ds4(self):
         """将 SDL 控制器状态映射到 DS4 虚拟手柄"""
         # 左摇杆
@@ -311,9 +351,20 @@ class DualSenseToDS4Mapper:
 
         # 扳机映射
         lt = self._axis_to_byte_trigger(SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT))
-        rt = self._axis_to_byte_trigger(SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT))
         self.virtual_gamepad.left_trigger(lt)
-        self.virtual_gamepad.right_trigger(rt)
+        
+        # RT 扳机处理（包含连点逻辑）
+        if self.rt_repeat_enabled:
+            current_time = time.time()
+            if current_time - self.rt_repeat_timer >= self.rt_repeat_interval:
+                self.rt_repeat_timer = current_time
+                # 松开后立马按下：先释放，下一帧按下
+                self.virtual_gamepad.right_trigger(0)    # 释放
+            else:
+                self.virtual_gamepad.right_trigger(255)  # 按下
+        else:
+            rt = self._axis_to_byte_trigger(SDL_GameControllerGetAxis(self._sdl_controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT))
+            self.virtual_gamepad.right_trigger(rt)
 
         # 普通按钮映射
         btn_map = [

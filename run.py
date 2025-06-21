@@ -30,7 +30,7 @@ from utils.log_cleaner import start_auto_cleanup, stop_auto_cleanup
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("TGC v1.2.1")
+        self.root.title("TGC v1.2.2")
 
         # 初始化日志系统
         self.logger = get_logger("TGC")
@@ -422,23 +422,20 @@ class App:
             ident_center = ident_size / 2
             curve_inner = config["detect_settings"]["curve"]["inner"]
             curve_outer = config["detect_settings"]["curve"]["outer"]
+            repeater = config["detect_settings"]["repeater"]
 
-            self.logger.info(f"加载配置: hipfire_scale={hipfire_scale}, strong_size={strong_size}, weak_size={weak_size}, ident_size={ident_size}")
+            self.logger.info(f"加载配置: hipfire_scale={hipfire_scale}, strong_size={strong_size}, weak_size={weak_size}, ident_size={ident_size}, repeater={repeater}")
 
             camera = ScreenGrabber(region=get_screenshot_region_dxcam(ident_size))
             model = APV5Experimental(self.model_path)
 
-            self.logger.info(f"初始化完成: 模型提供者={model.provider}")
+            self.logger.info(f"初始化完成: 执行提供者={model.provider}")
 
             sys.stdout.write(f"\n>>> 智慧核心运行中，当前 EP：{model.provider}")
             last_print_time = time.time()
-            
-            tracking_delay_start = time.perf_counter()
-            cycle_count = 0
-            
+                        
             while self.running:
                 cycle_start = time.perf_counter()
-                cycle_count += 1
                 
                 grab_start = time.perf_counter()
                 img = camera.grab_frame()
@@ -452,10 +449,19 @@ class App:
                 infer_end = time.perf_counter()
                 infer_latency = (infer_end - infer_start) * 1000
 
+                # 获取当前扳机值
+                trigger_values = self.mapper.get_trigger_values()
+                rt_trigger = trigger_values[1]  # 右扳机值
+
+                # 连点 RT 逻辑
+                if repeater == 1 and rt_trigger > 128:
+                    self.mapper.set_rt_repeat(True)
+                else:
+                    self.mapper.set_rt_repeat(False)
+
                 if (
-                    result is not None \
-                    and (self.mapper.get_trigger_values()[1] > 128 \
-                    or time.perf_counter() - tracking_delay_start < 0.2)
+                    result is not None
+                    and rt_trigger > 128
                 ):
                     xy_result = result - ident_center
                     distances = np.abs(xy_result[:, 0]) + np.abs(xy_result[:, 1])
@@ -475,17 +481,11 @@ class App:
                     rx_offset = map_euclidean_distance * cos_angle
                     ry_offset = map_euclidean_distance * sin_angle
                     self.mapper.add_rx_ry_offset(rx_offset, ry_offset)
-                    if self.mapper.get_trigger_values()[1] > 128:
-                        tracking_delay_start = time.perf_counter()
                 else:
                     self.mapper.add_rx_ry_offset(0, 0)
 
                 cycle_end = time.perf_counter()
                 cycle_latency = (cycle_end - cycle_start) * 1000
-
-                # 每1000个周期记录一次性能日志
-                if cycle_count % 1000 == 0:
-                    self.logger.debug(f"性能统计 - 周期: {cycle_count}, 总延迟: {cycle_latency:.2f}ms, 截图: {grab_latency:.2f}ms, 推理: {infer_latency:.2f}ms")
 
                 now = time.time()
                 if now - last_print_time > 1:

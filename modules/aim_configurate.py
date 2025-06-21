@@ -49,11 +49,11 @@ class CFGApp:
             'weak': self.config["detect_settings"]["range"]["middle"], 
             'strong': self.config["detect_settings"]["range"]["inner"]
         }
-        range_labels = ["识别（px）", "弱吸附（px）", "强吸附（px）"]
+        range_labels = ["识别（px", "弱吸附（px", "强吸附（px"]
         for label_text, key in zip(range_labels, defaults_range.keys()):
             tk.Label(self.range_frame, text=label_text).pack(side='left', padx=5)
             var = tk.StringVar(value=str(defaults_range[key]))
-            entry = tk.Entry(self.range_frame, textvariable=var, width=4, validate='key', validatecommand=vcmd)
+            entry = tk.Entry(self.range_frame, textvariable=var, width=5, validate='key', validatecommand=vcmd)
             entry.pack(side='left', padx=5)
             entry.bind('<Return>', lambda e: self.update_ranges())
             self.vars[key] = var
@@ -82,49 +82,61 @@ class CFGApp:
             self.coord_frame.grid_rowconfigure(i, weight=1)
             
         # 内圈输入框
-        tk.Label(self.coord_frame, text="内圈 近（%）").grid(row=0, column=0, padx=10, pady=5)
+        tk.Label(self.coord_frame, text="内圈 近（%").grid(row=0, column=0, padx=10, pady=5)
         var_inner_close = tk.StringVar(value=str(defaults_coord['inner_close']))
-        entry_inner_close = tk.Entry(self.coord_frame, textvariable=var_inner_close, width=4, validate='key', validatecommand=vcmd_float)
+        entry_inner_close = tk.Entry(self.coord_frame, textvariable=var_inner_close, width=6, validate='key', validatecommand=vcmd_float)
         entry_inner_close.grid(row=0, column=1, padx=5, pady=5)
         entry_inner_close.bind('<Return>', lambda e: self.draw_coord())
         self.y_vars['inner_close'] = var_inner_close
         
-        tk.Label(self.coord_frame, text="内圈 远（%）").grid(row=1, column=0, padx=10, pady=5)
+        tk.Label(self.coord_frame, text="内圈 远（%").grid(row=1, column=0, padx=10, pady=5)
         var_inner_far = tk.StringVar(value=str(defaults_coord['inner_far']))
-        entry_inner_far = tk.Entry(self.coord_frame, textvariable=var_inner_far, width=4, validate='key', validatecommand=vcmd_float)
+        entry_inner_far = tk.Entry(self.coord_frame, textvariable=var_inner_far, width=6, validate='key', validatecommand=vcmd_float)
         entry_inner_far.grid(row=1, column=1, padx=5, pady=5)
         entry_inner_far.bind('<Return>', lambda e: self.draw_coord())
         self.y_vars['inner_far'] = var_inner_far
         
         # 外圈输入框
-        tk.Label(self.coord_frame, text="外圈 近（%）").grid(row=0, column=2, padx=10, pady=5)
+        tk.Label(self.coord_frame, text="外圈 近（%").grid(row=0, column=2, padx=10, pady=5)
         var_outer_close = tk.StringVar(value=str(defaults_coord['outer_close']))
-        entry_outer_close = tk.Entry(self.coord_frame, textvariable=var_outer_close, width=4, validate='key', validatecommand=vcmd_float)
+        entry_outer_close = tk.Entry(self.coord_frame, textvariable=var_outer_close, width=6, validate='key', validatecommand=vcmd_float)
         entry_outer_close.grid(row=0, column=3, padx=5, pady=5)
         entry_outer_close.bind('<Return>', lambda e: self.draw_coord())
         entry_outer_close.bind('<Return>', self._on_outer_enter)
         self.y_vars['outer_close'] = var_outer_close
         
-        tk.Label(self.coord_frame, text="外圈 远（%）").grid(row=1, column=2, padx=10, pady=5)
+        tk.Label(self.coord_frame, text="外圈 远（%").grid(row=1, column=2, padx=10, pady=5)
         var_outer_far = tk.StringVar(value=str(defaults_coord['outer_far']))
-        entry_outer_far = tk.Entry(self.coord_frame, textvariable=var_outer_far, width=4, validate='key', validatecommand=vcmd_float)
+        entry_outer_far = tk.Entry(self.coord_frame, textvariable=var_outer_far, width=6, validate='key', validatecommand=vcmd_float)
         entry_outer_far.grid(row=1, column=3, padx=5, pady=5)
         entry_outer_far.bind('<Return>', lambda e: self.draw_coord())
         entry_outer_far.bind('<Return>', self._on_outer_enter)
         self.y_vars['outer_far'] = var_outer_far
+        
         # 底部坐标点输入之后，添加"完成"按钮
         self.bottom_frame = tk.Frame(root)
         self.bottom_frame.grid(row=4, column=0, pady=(0, 20))
         
         # 添加腰射系数输入框
-        tk.Label(self.bottom_frame, text="腰射系数（%）").pack(side='left', padx=5)
+        tk.Label(self.bottom_frame, text="腰射系数（%").pack(side='left', padx=5)
         self.hipfire_var = tk.StringVar(value=str(self.config["detect_settings"]["hipfire_scale"]))  # 默认值0.5
         self.hipfire_entry = tk.Entry(self.bottom_frame, textvariable=self.hipfire_var, width=4, validate='key', validatecommand=vcmd_float)
-        self.hipfire_entry.pack(side='left', padx=5)
+        self.hipfire_entry.pack(side='left', padx=10)
+
+        # 修复 repeater 复选框 - 保存变量为实例变量
+        self.repeater_var = tk.IntVar(value=self.config["detect_settings"]["repeater"])
+        repeater = tk.Checkbutton(
+            self.bottom_frame,
+            text="连点",
+            variable=self.repeater_var,
+            onvalue=1,     # 选中时变量的值
+            offvalue=0     # 取消选中时变量的值
+        )
+        repeater.pack(side='left', padx=10)
         
         # 完成按钮
         self.done_button = tk.Button(self.bottom_frame, text="完成", command=self.on_done, width=10)
-        self.done_button.pack(side='left', padx=20)
+        self.done_button.pack(side='left', padx=10)
 
         # 初始化并绘制
         self.valid_ranges = {}
@@ -226,8 +238,10 @@ class CFGApp:
             c.create_text(x0-10, ypos, text=label, anchor='e')
         pts = []
         for key in ['inner_close', 'inner_far', 'outer_close', 'outer_far']:
-            try: yv = float(self.y_vars[key].get())
-            except: yv = 0.0
+            try: 
+                yv = float(self.y_vars[key].get())
+            except Exception: 
+                yv = 0.0
             yv = median_of_three(yv, 1.0, 0.0)
             ypos = y1 - (yv)*(y1-y0)
             x = xs[0] if key == 'inner_close' else (xs[1] if key in ['inner_far', 'outer_close'] else xs[2])
@@ -250,6 +264,7 @@ class CFGApp:
         self.config["detect_settings"]["range"]["middle"] = self.valid_ranges['weak']
         self.config["detect_settings"]["range"]["inner"] = self.valid_ranges['strong']
         self.config["detect_settings"]["hipfire_scale"] = float(self.hipfire_var.get())
+        self.config["detect_settings"]["repeater"] = self.repeater_var.get()
         with open('user_config.json', 'w') as f:
             json.dump(self.config, f, indent=4)
         self.force_quit = False

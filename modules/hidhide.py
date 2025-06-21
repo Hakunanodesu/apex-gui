@@ -1,7 +1,8 @@
 import sys
 import ctypes
 from ctypes import wintypes
-import win32file, win32con
+import win32file
+import win32con
 
 class HidHideController:
     # —— WinAPI & 常量 定义 —— 

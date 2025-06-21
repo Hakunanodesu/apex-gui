@@ -39,8 +39,9 @@ class InitApp:
                 "controller": {"Name": "", "Vendor_ID": "", "Product_ID": "", "Instance_ID": ""},
                 "detect_settings": {
                     "range": {"outer": 320, "middle": 320, "inner": 80},
-                    "curve": {"outer": [0.2, 0.2], "inner": [0.0, 1.0]},
-                    "hipfire_scale": 0.7
+                    "curve": {"outer": [0.2, 0.2], "inner": [0.025, 1.0]},
+                    "hipfire_scale": 0.7,
+                    "repeater": 0
                 }
             }
 

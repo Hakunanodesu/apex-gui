@@ -2,7 +2,7 @@ import time
 import threading
 from datetime import datetime
 from pathlib import Path
-from .logger import get_logger
+from utils.logger import get_logger
 
 
 class LogCleaner:
