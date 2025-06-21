@@ -31,7 +31,7 @@ from utils.log_cleaner import start_auto_cleanup, stop_auto_cleanup
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("TGC v1.2.2")
+        self.root.title("TGC v1.3.0")
 
         # 初始化日志系统
         self.logger = get_logger("TGC")
