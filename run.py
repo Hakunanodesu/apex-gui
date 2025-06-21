@@ -594,7 +594,7 @@ class App:
             self.logger.error(f"程序关闭时出错: {e}")
             try:
                 self.root.destroy()
-            except:
+            except Exception:
                 pass
 
     def _handle_logic_failure(self):
