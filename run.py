@@ -31,10 +31,10 @@ from utils.log_cleaner import start_auto_cleanup, stop_auto_cleanup
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("A.P.E.X. v1.3.1")
+        self.root.title("Assisted Pursuit with Effortless eXecution v1.3.1")
 
         # 初始化日志系统
-        self.logger = get_logger("TGC")
+        self.logger = get_logger("A.P.E.X.")
         self.logger.info("应用程序启动")
 
         self.running = False

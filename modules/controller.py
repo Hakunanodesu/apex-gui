@@ -30,7 +30,7 @@ from utils.tools import handle_exception, median_of_three
 from utils.logger import get_logger
 
 
-RT_REPEAT_INTERVAL = 0.02  # 连点间隔（秒）
+RT_REPEAT_INTERVAL = 0.01  # 连点间隔（秒）
 
 
 class XboxWirelessToX360Mapper:
