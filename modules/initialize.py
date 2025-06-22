@@ -39,7 +39,7 @@ class InitApp:
                 "controller": {"Name": "", "Vendor_ID": "", "Product_ID": "", "Instance_ID": ""},
                 "detect_settings": {
                     "range": {"outer": 320, "middle": 320, "inner": 80},
-                    "curve": {"outer": [0.2, 0.2], "inner": [0.025, 1.0]},
+                    "curve": {"outer": [0.2, 0.2], "inner": [0.02, 1.0]},
                     "hipfire_scale": 0.7
                 }
             }
@@ -84,7 +84,7 @@ class InitApp:
                 self.config["controller"]["Vendor_ID"] = vid
                 self.config["controller"]["Product_ID"] = pid
                 self.config["controller"]["Instance_ID"] = instance_id
-                sys.stdout.write(">>> 手柄配置完成。，窗口将自动关闭。")
+                sys.stdout.write(">>> 手柄配置完成，窗口将自动关闭。")
                 with open("user_config.json", "w") as f:
                     json.dump(self.config, f, indent=4)
                 self.force_quit = False
