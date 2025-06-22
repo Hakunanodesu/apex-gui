@@ -6,7 +6,7 @@ import threading
 import tkinter as tk
 from tkinter import scrolledtext
 from tkinter import messagebox
-
+import winsound
 import numpy as np
 
 from modules.device_replug import DeviceReplugCM
@@ -487,7 +487,12 @@ class App:
                 # 检测Home键状态并处理切换逻辑
                 home_pressed = check_key_pressed(VK_HOME)
                 if home_pressed and not home_key_prev_state:  # Home键刚被按下
-                    repeater = 1 if repeater == 0 else 0  # 在0和1之间切换
+                    if repeater == 0:
+                        repeater = 1
+                        winsound.Beep(1046, 200)
+                    else:
+                        repeater = 0
+                        winsound.Beep(523, 200)
                     # 更新UI显示
                     self.root.after(0, self.update_repeater_status, repeater == 1)
                 home_key_prev_state = home_pressed
