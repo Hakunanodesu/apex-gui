@@ -1,0 +1,34 @@
+[package]
+name = "Assisted-Pursuit-with-Effortless-eXecution"
+version = "2.0.0"
+edition = "2024"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+debug = false
+panic = "abort"
+
+[dependencies]
+eframe = "0.31.1"
+egui = "0.31.1"
+sdl2 = { version = "0.34", features = ["bundled"] }
+hidapi = "2.6.3"
+reqwest = { version = "0.12", features = ["blocking"] }
+vigem-client = "0.1.4"
+windows = { version = "0.48.0", features = [
+    # 用于 SetupDi* 系列函数
+    "Win32_Devices_DeviceAndDriverInstallation",
+    # 用于 GUID_DEVINTERFACE_HID
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_Foundation",
+] }
+windows-capture = "1.5.0"
+anyhow = "1.0.98"
+ndarray = "0.16.1"
+ort = { version = "2.0.0-rc.10", features = [ "directml" ] }
+num_cpus = "1.17.0"
+image = "0.25.6"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
