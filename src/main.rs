@@ -89,7 +89,7 @@ fn main() -> eframe::Result {
     let mut last_log = String::from("初始化成功"); // 仅保留最新一条日志
     let mut do_resize = true;
     let mut on_top = false;
-    let (window_w, window_h) = (330.0, 293.0);
+    let (window_w, window_h) = (280.0, 293.0);
     let options = NativeOptions {
         viewport: ViewportBuilder::default()
             .with_resizable(true),
@@ -241,9 +241,9 @@ fn main() -> eframe::Result {
                                             ui.add(
                                                 Label::new(
                                                     egui::RichText::new(
-                                                        "⚠️\n初次使用的 Xbox 系手柄在检测到后请断开并重新连接\n⚠️"
+                                                        "⚠️\nXbox 系手柄在每次软件打开并检测到后需重新连接手柄\n⚠️"
                                                     ).color(Color32::ORANGE)
-                                                ).extend()
+                                                )
                                             );
                                             ui.label("当前已检测到的手柄：");
                                             for (i, name) in con_names.iter().enumerate() {
