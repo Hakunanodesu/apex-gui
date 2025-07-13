@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
     sync::Arc,
@@ -92,7 +92,7 @@ fn main() -> eframe::Result {
     let (window_w, window_h) = (280.0, 293.0);
     let options = NativeOptions {
         viewport: ViewportBuilder::default()
-            .with_resizable(true),
+            .with_resizable(false),
         ..Default::default()
     };
     run_simple_native(
