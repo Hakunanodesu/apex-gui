@@ -21,7 +21,7 @@ use windows_capture::{
 
 /// Handler 中持有的状态
 struct CaptureHandler {
-    start: Instant,
+    _start: Instant,
     /// 用于停止信号
     running: Arc<AtomicBool>,
     /// 外部共享的像素缓冲（只存正方形区域）
@@ -41,7 +41,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         let (running, buffer, square_size, frame_count, last_fps, last_time) = ctx.flags;
 
         Ok(Self {
-            start: Instant::now(),
+            _start: Instant::now(),
             running,
             buffer,
             square_size,
@@ -114,7 +114,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     }
 
     fn on_closed(&mut self) -> Result<(), Self::Error> {
-        println!("Capture session closed after {}s", self.start.elapsed().as_secs());
+        // println!("Capture session closed after {}s", self.start.elapsed().as_secs());
         Ok(())
     }
 }
@@ -161,7 +161,7 @@ impl ScreenCapturer {
             CaptureHandler::start(settings).unwrap();
         });
 
-        println!("屏幕捕获线程已启动");
+        // println!("屏幕捕获线程已启动");
         Ok(ScreenCapturer { buffer, running, handle, square_size, last_fps })
     }
 

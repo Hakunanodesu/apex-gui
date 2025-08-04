@@ -223,7 +223,7 @@ impl DetectorThread {
             }
         });
 
-        println!("智慧核心线程已启动");
+        // println!("智慧核心线程已启动");
         Ok(Self { stop_flag, handle: Some(handle), result, fps })
     }
 

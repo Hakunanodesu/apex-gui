@@ -154,7 +154,7 @@ impl ConReader {
 
             // 标记就绪
             ready_clone.store(true, Ordering::SeqCst);
-            println!("SDL 事件读取线程已启动");
+            // println!("SDL 事件读取线程已启动");
 
             // 启用事件
             for ev in &[

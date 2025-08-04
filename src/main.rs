@@ -31,6 +31,7 @@ use crate::utils::{
         show_square_viewport, show_param_curve
     },
     bg_dl_instl::spawn_download_thread,
+    console_redirect::ConsoleRedirector,
 };
 use crate::modules::{
     bg_con_reading::ConReader,
@@ -41,6 +42,12 @@ use crate::modules::{
 };
 
 fn main() -> eframe::Result {
+    // 初始化控制台错误重定向
+    let _console_redirector = ConsoleRedirector::init().unwrap_or_else(|e| {
+        eprintln!("初始化控制台重定向失败: {}", e);
+        panic!("无法初始化控制台重定向");
+    });
+    
     // 添加白名单 & 启动屏蔽 & 重枚举
     run_hidhidecli(&["--app-reg", get_exe_path().unwrap().to_str().unwrap()]).unwrap();
     run_hidhidecli(&["--cloak-on"]).unwrap();

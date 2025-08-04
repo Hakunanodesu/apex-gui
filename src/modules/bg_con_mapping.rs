@@ -45,7 +45,7 @@ impl ConMapper {
             while !ready_flag.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_millis(1));
             }
-            println!("ViGEm 映射线程已启动");
+            // println!("ViGEm 映射线程已启动");
 
             let id = TargetId::XBOX360_WIRED;
             let mut tgt = Xbox360Wired::new(client_clone, id);

@@ -91,12 +91,12 @@ pub fn enumerate_controllers() -> Result<Vec<String>, Box<dyn Error>> {
     let count = js.num_joysticks()?;
     let mut name_list = Vec::with_capacity(count as usize);
 
-    println!("检测到以下手柄：");
+    // println!("检测到以下手柄：");
     for id in 0..count {
         let joystick: Joystick = js.open(id)?;
         let name = joystick.name();
         name_list.push(format!("{} ({})", name, id));
-        println!("{} ({})", name, id);
+        // println!("{} ({})", name, id);
     }
 
     // 隐藏所有通过 get_hid_instance() 获取到的设备
