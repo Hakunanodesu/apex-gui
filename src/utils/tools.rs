@@ -7,7 +7,7 @@ use egui::{Ui, TextStyle};
 use serde::{Serialize, Deserialize};
 use std::fs;
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize)]
 pub struct UserConfig {
     pub outer_size: String,
     pub mid_size: String,
@@ -17,6 +17,21 @@ pub struct UserConfig {
     pub inner_str: String,
     pub deadzone: Option<String>,
     pub hipfire: Option<String>,
+}
+
+impl Default for UserConfig {
+    fn default() -> Self {
+        Self {
+            outer_size: "320.0".to_string(),
+            mid_size: "80.0".to_string(),
+            inner_size: "80.0".to_string(),
+            outer_str: "0.2".to_string(),
+            mid_str: "0.5".to_string(),
+            inner_str: "0.5".to_string(),
+            deadzone: Some("0.0".to_string()),
+            hipfire: Some("0.6".to_string()),
+        }
+    }
 }
 
 const CONFIG_PATH: &str = "config.json";

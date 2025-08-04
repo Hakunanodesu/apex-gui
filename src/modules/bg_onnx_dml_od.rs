@@ -9,6 +9,8 @@ use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use image::{RgbImage, imageops::FilterType};
+// 直接嵌入ONNX模型文件（编译时嵌入）
+const EMBEDDED_ONNX_DATA: &[u8] = include_bytes!("../../apex.onnx");
 
 /// 检测结果结构体，仅供本文件内部和线程推理用
 #[derive(Clone, Debug)]
@@ -34,11 +36,12 @@ struct OnnxDetector {
 impl OnnxDetector {
     /// start 时把阈值和 classes 都传进来
     pub fn new(src_size: usize) -> Result<Self> {
+        // 直接从内存加载嵌入的模型
         let session = Session::builder()?
             .with_execution_providers([DirectMLExecutionProvider::default().build()])?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_intra_threads(num_cpus::get_physical() as usize)?
-            .commit_from_file("apex.onnx")?;
+            .commit_from_memory(EMBEDDED_ONNX_DATA)?;
 
         let input_name  = session.inputs[0].name.clone();
         let output_name = session.outputs[0].name.clone();
