@@ -31,6 +31,7 @@ impl ConMapper {
         deadzone: f32,
         hipfire: f32,
         reverse_coef: f32, // 新增反向系数参数
+        aim_height: f32,  // 新增瞄准高度参数（暂未使用）
     ) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
@@ -68,7 +69,7 @@ impl ConMapper {
                                 if right_trigger_pressed {
                                     let center = outer_size / 2.0;
                                     let dx = d.x - center;
-                                    let dy = d.y - center;
+                                    let dy = (d.y + (aim_height - 0.5) * d.h) - center;
                                     let dist = ((dx * dx + dy * dy).sqrt()).min(center);
                                     let strength = if dist <= inner_size / 2.0 {
                                         // inner区间，线性递减

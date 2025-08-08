@@ -81,6 +81,7 @@ fn main() -> eframe::Result {
     let deadzone = Arc::new(Mutex::new(user_config.deadzone));
     let hipfire = Arc::new(Mutex::new(user_config.hipfire));
     let reverse_coef = Arc::new(Mutex::new(user_config.reverse_coef));
+    let aim_height = Arc::new(Mutex::new(user_config.aim_height));
     // =========================
 
     // 为保存配置克隆变量
@@ -93,6 +94,7 @@ fn main() -> eframe::Result {
     let deadzone_for_save = deadzone.clone();
     let hipfire_for_save = hipfire.clone();
     let reverse_coef_for_save = reverse_coef.clone();
+    let aim_height_for_save = aim_height.clone();
 
     let mut do_resize = true;
     let mut on_top = false;
@@ -323,6 +325,7 @@ fn main() -> eframe::Result {
                                                     let deadzone_val = deadzone.lock().unwrap().trim().parse::<f32>().unwrap_or(0.0);
                                                     let hipfire_val = hipfire.lock().unwrap().trim().parse::<f32>().unwrap_or(0.0);
                                                     let reverse_coef_val = reverse_coef.lock().unwrap().trim().parse::<f32>().unwrap_or(0.0);
+                                                    let aim_height_val = aim_height.lock().unwrap().trim().parse::<f32>().unwrap_or(0.5);
                                                     
                                                     con_mapper = Some(ConMapper::start(
                                                         state,
@@ -337,7 +340,8 @@ fn main() -> eframe::Result {
                                                         inner_str_val,
                                                         deadzone_val,
                                                         hipfire_val,
-                                                        reverse_coef_val
+                                                        reverse_coef_val,
+                                                        aim_height_val
                                                     ));
                                                 } else {
                                                     mapping_active = false;
@@ -616,11 +620,19 @@ fn main() -> eframe::Result {
                                 }
                                 ui.end_row();
                             });
-                            
-                            // 反向系数滑块
+                            // 瞄准高度滑块（在反冲系数上方）
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {
-                                ui.label("反向系数");
+                                ui.label("瞄准高度");
+                                let mut aim_height_val = aim_height.lock().unwrap().trim().parse::<f32>().unwrap_or(0.5);
+                                if ui.add(egui::Slider::new(&mut aim_height_val, 0.0..=1.0)).changed() {
+                                    *aim_height.lock().unwrap() = format!("{:.2}", aim_height_val);
+                                }
+                            });
+                            // 反冲系数滑块
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                ui.label("反冲系数");
                                 let mut reverse_coef_val = reverse_coef.lock().unwrap().trim().parse::<f32>().unwrap_or(0.0);
                                 if ui.add(egui::Slider::new(&mut reverse_coef_val, 0.0..=1.0)).changed() {
                                     *reverse_coef.lock().unwrap() = format!("{:.2}", reverse_coef_val);
@@ -695,6 +707,7 @@ fn main() -> eframe::Result {
         deadzone: deadzone_for_save.lock().unwrap().clone(),
         hipfire: hipfire_for_save.lock().unwrap().clone(),
         reverse_coef: reverse_coef_for_save.lock().unwrap().clone(),
+        aim_height: aim_height_for_save.lock().unwrap().clone(),
     });
     // =========================
     run_hidhidecli(&["--cloak-off"]).unwrap();

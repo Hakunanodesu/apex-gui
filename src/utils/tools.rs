@@ -8,6 +8,7 @@ use serde::{Serialize, Deserialize};
 use std::fs;
 
 #[derive(Serialize, Deserialize)]
+#[serde(default)]
 pub struct UserConfig {
     pub outer_size: String,
     pub mid_size: String,
@@ -18,6 +19,7 @@ pub struct UserConfig {
     pub deadzone: String,
     pub hipfire: String,
     pub reverse_coef: String, // 反向系数
+    pub aim_height: String,
 }
 
 impl Default for UserConfig {
@@ -32,6 +34,7 @@ impl Default for UserConfig {
             deadzone: "0.0".to_string(),
             hipfire: "0.6".to_string(),
             reverse_coef: "0.5".to_string(),
+            aim_height: "0.7".to_string(),
         }
     }
 }
