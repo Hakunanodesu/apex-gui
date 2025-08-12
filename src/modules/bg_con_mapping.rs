@@ -10,6 +10,73 @@ use std::{
 use vigem_client::{Client, TargetId, Xbox360Wired, XGamepad};
 use crate::modules::bg_onnx_dml_od::Detection;
 
+// 新增：当右扳机按下时，基于检测结果对右摇杆进行修正
+fn apply_right_trigger_adjustment(
+    mapped_state: &mut XGamepad,
+    d: &Detection,
+    outer_size: f32,
+    mid_size: f32,
+    inner_size: f32,
+    outer_str: f32,
+    mid_str: f32,
+    inner_str: f32,
+    deadzone: f32,
+    hipfire: f32,
+    reverse_coef: f32,
+    aim_height: f32,
+    left_trigger_pressed: bool,
+) {
+    let center = outer_size / 2.0;
+    let dx = d.x - center;
+    let dy = (d.y + (0.5 - aim_height) * d.h) - center;
+    let dist = ((dx * dx + dy * dy).sqrt()).min(center);
+    let strength = if dist <= inner_size / 2.0 {
+        // inner区间，线性递减
+        let t = if inner_size > 0.0 { dist / (inner_size / 2.0) } else { 1.0 };
+        deadzone * (1.0 - t) + inner_str * t
+    } else if dist <= mid_size / 2.0 {
+        // mid区间
+        mid_str
+    } else if dist <= outer_size / 2.0 {
+        // outer区间
+        outer_str
+    } else {
+        // 超出outer区间
+        0.0
+    };
+    let (x, y) = if dist > 0.0 {
+        (strength * dx / dist, -strength * dy / dist)
+    } else {
+        (0.0, 0.0)
+    };
+
+    // 根据扳机状态应用不同的乘数
+    let multiplier = if left_trigger_pressed { 1.0 } else { hipfire };
+
+    let adjusted_x = x * multiplier;
+    let adjusted_y = y * multiplier;
+
+    // 归一化到 -32768~32767 并叠加到右摇杆
+    let rx = (adjusted_x * 32767.0).clamp(-32768.0, 32767.0) as i16;
+    let ry = (adjusted_y * 32767.0).clamp(-32768.0, 32767.0) as i16;
+
+    // 检查叠加后是否改变方向，如果改变则应用反向系数
+    let new_rx = mapped_state.thumb_rx.saturating_add(rx);
+    let new_ry = mapped_state.thumb_ry.saturating_add(ry);
+
+    if (mapped_state.thumb_rx > 0 && new_rx < 0) || (mapped_state.thumb_rx < 0 && new_rx > 0) {
+        mapped_state.thumb_rx = (reverse_coef * new_rx as f32) as i16;
+    } else {
+        mapped_state.thumb_rx = new_rx;
+    }
+
+    if (mapped_state.thumb_ry > 0 && new_ry < 0) || (mapped_state.thumb_ry < 0 && new_ry > 0) {
+        mapped_state.thumb_ry = (reverse_coef * new_ry as f32) as i16;
+    } else {
+        mapped_state.thumb_ry = new_ry;
+    }
+}
+
 pub struct ConMapper {
     stop_flag: Arc<AtomicBool>,
     handle: JoinHandle<()>,
@@ -51,7 +118,6 @@ impl ConMapper {
             tgt.plugin().expect("plugin failed");
             tgt.wait_ready().expect("wait_ready failed");
 
-
             while !stop_clone.load(Ordering::SeqCst) {
                 let orig_state = state_clone.lock().unwrap().clone(); // 每次都用原始state
                 let mut mapped_state = orig_state.clone();
@@ -67,61 +133,21 @@ impl ConMapper {
                             if let Some(d) = detections.first() {
                                 // 只有当右扳机按下时才计算并应用结果
                                 if right_trigger_pressed {
-                                    let center = outer_size / 2.0;
-                                    let dx = d.x - center;
-                                    let dy = (d.y + (0.5 - aim_height) * d.h) - center;
-                                    let dist = ((dx * dx + dy * dy).sqrt()).min(center);
-                                    let strength = if dist <= inner_size / 2.0 {
-                                        // inner区间，线性递减
-                                        let t = dist / (inner_size / 2.0);
-                                        deadzone * (1.0 - t) + inner_str * t
-                                    } else if dist <= mid_size / 2.0 {
-                                        // mid区间
-                                        mid_str
-                                    } else if dist <= outer_size / 2.0 {
-                                        // outer区间
-                                        outer_str
-                                    } else {
-                                        // 超出outer区间
-                                        0.0
-                                    };
-                                    let x = strength * dx / dist;
-                                    let y = -strength * dy / dist;
-                                    
-                                    // 根据扳机状态应用不同的乘数
-                                    let multiplier = if left_trigger_pressed {
-                                        // 左右扳机同时按下，保持当前输出
-                                        1.0
-                                    } else {
-                                        // 只有右扳机按下，应用hipfire乘数
-                                        hipfire
-                                    };
-                                    
-                                    let adjusted_x = x * multiplier;
-                                    let adjusted_y = y * multiplier;
-                                    
-                                    // 归一化到 -32768~32767 并叠加到右摇杆
-                                    let rx = (adjusted_x * 32767.0).clamp(-32768.0, 32767.0) as i16;
-                                    let ry = (adjusted_y * 32767.0).clamp(-32768.0, 32767.0) as i16;
-                                    
-                                    // 检查叠加后是否改变方向，如果改变则重置为居中
-                                    let new_rx = mapped_state.thumb_rx.saturating_add(rx);
-                                    let new_ry = mapped_state.thumb_ry.saturating_add(ry);
-                                    
-                                    // 检查X轴方向是否改变
-                                    if (mapped_state.thumb_rx > 0 && new_rx < 0) || (mapped_state.thumb_rx < 0 && new_rx > 0) {
-                                        mapped_state.thumb_rx = (reverse_coef * new_rx as f32) as i16; // 应用反向系数
-                                    } else {
-                                        mapped_state.thumb_rx = new_rx;
-                                    }
-                                    
-                                    // 检查Y轴方向是否改变
-                                    if (mapped_state.thumb_ry > 0 && new_ry < 0) || (mapped_state.thumb_ry < 0 && new_ry > 0) {
-                                        mapped_state.thumb_ry = (reverse_coef * new_ry as f32) as i16; // 应用反向系数
-                                    } else {
-                                        mapped_state.thumb_ry = new_ry;
-                                    }
-                                    // println!("[ConMapper] x: {x:.3}, y: {y:.3}, thumb_rx: {}, thumb_ry: {}", mapped_state.thumb_rx, mapped_state.thumb_ry);
+                                    apply_right_trigger_adjustment(
+                                        &mut mapped_state,
+                                        d,
+                                        outer_size,
+                                        mid_size,
+                                        inner_size,
+                                        outer_str,
+                                        mid_str,
+                                        inner_str,
+                                        deadzone,
+                                        hipfire,
+                                        reverse_coef,
+                                        aim_height,
+                                        left_trigger_pressed,
+                                    );
                                 }
                             }
                         }

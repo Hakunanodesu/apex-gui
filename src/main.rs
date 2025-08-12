@@ -98,7 +98,7 @@ fn main() -> eframe::Result {
 
     let mut do_resize = true;
     let mut on_top = false;
-    let (window_w, window_h) = (280.0, 205.0);
+    let (window_w, window_h) = (280.0, 208.0);
     let options = NativeOptions {
         viewport: ViewportBuilder::default()
             .with_resizable(false),
@@ -670,6 +670,7 @@ fn main() -> eframe::Result {
             TopBottomPanel::bottom("lag_show_panel")
                 .resizable(false)
                 .show(ctx, |ui| {
+                    ui.add_space(1.0);
                     if let Some(det) = detector.as_ref() {
                         let fps_arc = det.fps();
                         if let Ok(fps_guard) = fps_arc.lock() {
@@ -680,6 +681,7 @@ fn main() -> eframe::Result {
                     } else {
                         ui.label("推理帧率: 0 fps");
                     }
+                    ui.add_space(0.0);
                 });
             
             // 卡密输入框
