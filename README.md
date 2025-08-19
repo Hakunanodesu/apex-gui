@@ -132,7 +132,3 @@ cargo run
    - Rust 版本 (`rustc --version`)
    - 错误信息和日志
    - 复现步骤
-
-## 许可证
-
-本项目采用 MIT 许可证 - 详见 [LICENSE.txt](LICENSE.txt) 文件。
