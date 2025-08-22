@@ -125,14 +125,15 @@ impl ConMapper {
                 // 处理检测结果并计算xy偏移
                 if let Some(ref det_arc) = det_result_clone {
                     if let Ok(det_guard) = det_arc.lock() {
-                        // 检查左右扳机是否按下（阈值设为128，即50%）
-                        let right_trigger_pressed = orig_state.right_trigger > 128;
-                        let left_trigger_pressed = orig_state.left_trigger > 128;
+                        // 检查左右扳机是否按下
+                        let right_trigger_pressed = orig_state.right_trigger > 0;
+                        let left_trigger_pressed = orig_state.left_trigger > 0;
                         
                         if let Some(detections) = &*det_guard {
                             if let Some(d) = detections.first() {
                                 // 只有当右扳机按下时才计算并应用结果
                                 if right_trigger_pressed {
+                                    // 应用映射（1-254和255都应用）
                                     apply_right_trigger_adjustment(
                                         &mut mapped_state,
                                         d,
@@ -148,6 +149,11 @@ impl ConMapper {
                                         aim_height,
                                         left_trigger_pressed,
                                     );
+                                    
+                                    // 控制扳机输出：只有达到255时才输出扳机值，否则输出0
+                                    if orig_state.right_trigger < 255 {
+                                        mapped_state.right_trigger = 0;
+                                    }
                                 }
                             }
                         }
