@@ -126,8 +126,8 @@ impl ConMapper {
                 if let Some(ref det_arc) = det_result_clone {
                     if let Ok(det_guard) = det_arc.lock() {
                         // 检查左右扳机是否按下
-                        let right_trigger_pressed = orig_state.right_trigger > 0;
-                        let left_trigger_pressed = orig_state.left_trigger > 0;
+                        let right_trigger_pressed = orig_state.right_trigger > 10;
+                        let left_trigger_pressed = orig_state.left_trigger > 10;
                         
                         if let Some(detections) = &*det_guard {
                             if let Some(d) = detections.first() {
@@ -151,7 +151,7 @@ impl ConMapper {
                                     );
                                     
                                     // 控制扳机输出：只有达到255时才输出扳机值，否则输出0
-                                    if orig_state.right_trigger < 255 {
+                                    if orig_state.right_trigger < 250 {
                                         mapped_state.right_trigger = 0;
                                     }
                                 }
