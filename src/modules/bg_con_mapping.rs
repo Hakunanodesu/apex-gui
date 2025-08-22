@@ -122,6 +122,11 @@ impl ConMapper {
                 let orig_state = state_clone.lock().unwrap().clone(); // 每次都用原始state
                 let mut mapped_state = orig_state.clone();
                 
+                // 控制扳机输出：只有达到250时才输出扳机值，否则输出0
+                if orig_state.right_trigger < 250 {
+                    mapped_state.right_trigger = 0;
+                }
+                
                 // 处理检测结果并计算xy偏移
                 if let Some(ref det_arc) = det_result_clone {
                     if let Ok(det_guard) = det_arc.lock() {
@@ -149,11 +154,6 @@ impl ConMapper {
                                         aim_height,
                                         left_trigger_pressed,
                                     );
-                                    
-                                    // 控制扳机输出：只有达到255时才输出扳机值，否则输出0
-                                    if orig_state.right_trigger < 250 {
-                                        mapped_state.right_trigger = 0;
-                                    }
                                 }
                             }
                         }
