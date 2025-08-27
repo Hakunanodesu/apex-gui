@@ -64,10 +64,15 @@ fn apply_left_click_adjustment(
     let dy = (d.y + (0.5 - aim_height) * d.h) - center;
     let dist = ((dx * dx + dy * dy).sqrt()).min(center);
     
-    let strength = if dist <= inner_size / 2.0 {
+    let strength = if 
+        (dx.abs() <= inner_size / 2.0 && dy.abs() <= inner_size / 2.0) 
+        || (dx.abs() <= d.w / 2.0 && dy.abs() <= d.h / 2.0) 
+    {
         let t = if inner_size > 0.0 { dist / (inner_size / 2.0) } else { 1.0 };
         inner_str * t * 50.0
-    } else if dist <= outer_size / 2.0 {
+    } else if 
+        dx.abs() <= outer_size / 2.0 && dy.abs() <= outer_size / 2.0
+    {
         outer_str * 50.0
     } else {
         // 超出outer区间，不移动
