@@ -225,7 +225,7 @@ impl DetectorThread {
                     last_time = std::time::Instant::now();
                 }
                 drop(buf_guard);
-                // thread::sleep(Duration::from_millis(1));
+                thread::sleep(Duration::from_millis(1));
             }
         });
 
