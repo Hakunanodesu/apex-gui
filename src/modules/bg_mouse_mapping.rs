@@ -46,7 +46,7 @@ fn get_mouse_button_state() -> (bool, bool) {
     let left_button_pressed = unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0;
     let right_button_pressed = unsafe { GetAsyncKeyState(VK_RBUTTON.0 as i32) } < 0;
     
-    (right_button_pressed, left_button_pressed)
+    (left_button_pressed, right_button_pressed)
 }
 
 /// 当鼠标右键按下时，基于检测结果进行修正
@@ -59,13 +59,15 @@ fn apply_left_click_adjustment(
     outer_str: f32,
     vertical_str: f32,
     aim_height: f32,
+    right_button_pressed: bool,
+    hipfire: f32,
 ) -> (f32, f32) {
     let center = outer_size / 2.0;
     let dx = d.x - center;
     let dy = (d.y + (0.5 - aim_height) * d.h) - center;
     let dist = ((dx * dx + dy * dy).sqrt()).min(center);
     
-    let strength = if 
+    let mut strength = if 
         dx.abs() <= inner_size / 2.0 && dy.abs() <= inner_size / 2.0
     {
         let t = if inner_size > 0.0 { dist / (inner_size / 2.0) } else { 1.0 };
@@ -83,6 +85,10 @@ fn apply_left_click_adjustment(
         // 超出outer区间，不移动
         0.0
     };
+
+    if !right_button_pressed {
+        strength = strength * hipfire;
+    }
     
     let (x, y) = (strength * dx / dist, vertical_str * strength * dy / dist);
 
@@ -105,6 +111,7 @@ impl MouseMapper {
         outer_str: f32,
         vertical_str: f32, // 新增垂直强度参数
         aim_height: f32,  // 新增瞄准高度参数（暂未使用）
+        hipfire: f32,
     ) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
@@ -131,7 +138,7 @@ impl MouseMapper {
                 if let Some(ref det_arc) = det_result_clone {
                     if let Ok(det_guard) = det_arc.lock() {
                         // 检查鼠标左右键是否按下
-                        let (_, left_button_pressed) = get_mouse_button_state();
+                        let (left_button_pressed, right_button_pressed) = get_mouse_button_state();
                         
                         if let Some(detections) = &*det_guard {
                             if let Some(d) = detections.first() {
@@ -147,6 +154,8 @@ impl MouseMapper {
                                         outer_str,
                                         vertical_str,
                                         aim_height,
+                                        right_button_pressed,
+                                        hipfire,
                                     );
                                     
                                     // 累积误差

@@ -352,7 +352,8 @@ fn main() -> eframe::Result {
                                                     let outer_str_val = outer_str.lock().unwrap().trim().parse::<f32>().unwrap_or(1.0);
                                                     let vertical_str_val = vertical_str.lock().unwrap().trim().parse::<f32>().unwrap_or(0.5);
                                                     let aim_height_val = aim_height.lock().unwrap().trim().parse::<f32>().unwrap_or(0.5);
-                                                    
+                                                    let hipfire_val = hipfire.lock().unwrap().trim().parse::<f32>().unwrap_or(0.0);
+
                                                     mouse_mapper = Some(MouseMapper::start(
                                                         Some(det.result()),
                                                         outer_val,
@@ -361,7 +362,8 @@ fn main() -> eframe::Result {
                                                         inner_str_val,
                                                         outer_str_val,
                                                         vertical_str_val,
-                                                        aim_height_val
+                                                        aim_height_val,
+                                                        hipfire_val
                                                     ));
                                                 } else {
                                                     mapping_active = false;
@@ -606,11 +608,10 @@ fn main() -> eframe::Result {
                             {
                                 let hipfire_guard = hipfire.lock().unwrap();
                                 if !hipfire_guard.trim().is_empty() {
-                                                                    match hipfire_guard.trim().parse::<f32>() {
-                                    Ok(v) if v < 0.0 || v > 1.0 => hipfire_err = Some("范围0.0-1.0"),
-                                    Ok(_) => {},
-                                    Err(_) => hipfire_err = Some("格式错误"),
-                                }
+                                    match hipfire_guard.trim().parse::<f32>() {
+                                        Ok(_) => {},
+                                        Err(_) => hipfire_err = Some("格式错误"),
+                                    }
                                 }
                             }
 
