@@ -1,60 +1,7 @@
 use std::env;
 use std::path::{PathBuf, Path};
-use std::error::Error;
-use sdl2::joystick::Joystick;
 use hidapi::HidApi;
 use egui::{Ui, TextStyle};
-use serde::{Serialize, Deserialize};
-use std::fs;
-
-#[derive(Serialize, Deserialize)]
-#[serde(default)]
-pub struct UserConfig {
-    pub outer_size: String,
-    pub mid_size: String,
-    pub inner_size: String,
-    pub outer_str: String,
-    pub inner_str: String,
-    pub deadzone: String,
-    pub hipfire: String,
-    pub vertical_str: String, // 垂直强度系数
-    pub aim_height: String,
-    pub mouse_mode: String, // 键鼠模式
-}
-
-impl Default for UserConfig {
-    fn default() -> Self {
-        Self {
-            outer_size: "320".to_string(),
-            mid_size: "200".to_string(),
-            inner_size: "80".to_string(),
-            outer_str: "0.2".to_string(),
-            inner_str: "0.4".to_string(),
-            deadzone: "0.0".to_string(),
-            hipfire: "0.6".to_string(),
-            vertical_str: "0.5".to_string(),
-            aim_height: "0.6".to_string(),
-            mouse_mode: "false".to_string(),
-        }
-    }
-}
-
-const CONFIG_PATH: &str = "config.json";
-
-pub fn load_config() -> UserConfig {
-    if std::path::Path::new(CONFIG_PATH).exists() {
-        let data = fs::read_to_string(CONFIG_PATH).unwrap_or_default();
-        serde_json::from_str(&data).unwrap_or_default()
-    } else {
-        UserConfig::default()
-    }
-}
-
-pub fn save_config(config: &UserConfig) {
-    if let Ok(data) = serde_json::to_string_pretty(config) {
-        let _ = fs::write(CONFIG_PATH, data);
-    }
-}
 
 use crate::modules::hidhide::run_hidhidecli;
 use crate::utils::ps_con_reenable::reenumerate;
@@ -100,33 +47,24 @@ pub fn driver_path_exist(target: &str) -> bool {
 /// 同步枚举所有 XInput 手柄，并隐藏指定设备。
 /// 
 /// # 返回
-/// - Vec<String>: 手柄名称列表，格式为 `"name (id)"`
-/// - Vec<GamepadId>: 对应的 gilrs `GamepadId` 列表
-pub fn enumerate_controllers() -> Result<Vec<String>, Box<dyn Error>> {
-    // 初始化 SDL
-    let sdl_ctx = sdl2::init()?;
-    // 打开原始 Joystick 子系统
-    let js = sdl_ctx.joystick()?;
-
-    let count = js.num_joysticks()?;
-    let mut name_list = Vec::with_capacity(count as usize);
-
-    // println!("检测到以下手柄：");
-    for id in 0..count {
-        let joystick: Joystick = js.open(id)?;
-        let name = joystick.name();
-        name_list.push(format!("{} ({})", name, id));
-        // println!("{} ({})", name, id);
+/// - bool: 操作是否成功
+pub fn enumerate_controllers() -> bool {
+    // 获取 HID 设备实例
+    let hid_instances = get_hid_instance();
+    
+    // 如果没有找到任何 HID 设备，返回 false
+    if hid_instances.is_empty() {
+        return false;
     }
-
+    
     // 隐藏所有通过 get_hid_instance() 获取到的设备
-    for path in get_hid_instance() {
+    for path in hid_instances {
         // 这里根据你的 run_hidhidecli 签名调整参数传递
         run_hidhidecli(&["--dev-hide", &path]).unwrap();
     }
     reenumerate();
 
-    Ok(name_list)
+    true
 }
 
 /// 检查是否存在 VID = "239A"，PID = "80F4" 的设备（Pico）
@@ -161,4 +99,37 @@ pub fn get_text_width(ui: &Ui, text: impl Into<String>, text_style: TextStyle) -
     // 只做排版，不会绘制／占位
     let galley = ui.painter().layout_no_wrap(text.into(), font_id, color);
     galley.size().x
+}
+
+/// 枚举models目录下的所有ONNX文件
+/// 返回文件名列表（不包含路径）
+pub fn enumerate_onnx_files() -> Vec<String> {
+    let current_dir = match env::current_dir() {
+        Ok(dir) => dir,
+        Err(_) => return Vec::new(),
+    };
+
+    let models_dir = current_dir.join("models");
+    let mut onnx_files = Vec::new();
+    
+    if let Ok(entries) = std::fs::read_dir(&models_dir) {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(extension) = path.extension() {
+                        if extension.to_string_lossy().to_lowercase() == "onnx" {
+                            if let Some(file_name) = path.file_name() {
+                                onnx_files.push(file_name.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 按文件名排序
+    onnx_files.sort();
+    onnx_files
 }

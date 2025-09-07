@@ -8,9 +8,63 @@ use ort::{
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+use std::path::Path;
 use image::{RgbImage, imageops::FilterType};
-// 直接嵌入ONNX模型文件（编译时嵌入）
-const EMBEDDED_ONNX_DATA: &[u8] = include_bytes!("../../apex.onnx");
+use serde::{Deserialize, Serialize};
+
+use crate::utils::console_redirect::log_error;
+
+/// 检测配置结构体
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DetectionConfig {
+    conf_thres: f32,
+    iou_thres: f32,
+    classes: String, // JSON中以字符串形式存储，如"0,1,2"或"0"
+}
+
+impl Default for DetectionConfig {
+    fn default() -> Self {
+        Self {
+            conf_thres: 0.4,
+            iou_thres: 0.9,
+            classes: "0".to_string(),
+        }
+    }
+}
+
+impl DetectionConfig {
+    /// 将classes字符串解析为Vec<usize>
+    fn parse_classes(&self) -> Vec<usize> {
+        self.classes
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect()
+    }
+}
+
+/// 从模型路径读取同名的JSON配置文件
+fn load_detection_config(model_path: &Path) -> DetectionConfig {
+    let config_path = model_path.with_extension("json");
+    
+    match std::fs::read_to_string(&config_path) {
+        Ok(content) => {
+            match serde_json::from_str::<DetectionConfig>(&content) {
+                Ok(config) => {
+                    // println!("从 {:?} 加载配置: {:?}", config_path, config);
+                    config
+                }
+                Err(e) => {
+                    log_error(&format!("解析配置文件失败 {:?}: {:?}，使用默认配置", config_path, e));
+                    DetectionConfig::default()
+                }
+            }
+        }
+        Err(e) => {
+            log_error(&format!("读取配置文件失败 {:?}: {:?}，使用默认配置", config_path, e));
+            DetectionConfig::default()
+        }
+    }
+}
 
 /// 检测结果结构体，仅供本文件内部和线程推理用
 #[derive(Clone, Debug)]
@@ -34,14 +88,17 @@ struct OnnxDetector {
 }
 
 impl OnnxDetector {
-    /// start 时把阈值和 classes 都传进来
-    pub fn new(src_size: usize) -> Result<Self> {
-        // 直接从内存加载嵌入的模型
+    /// start 时从同名JSON文件读取配置参数
+    pub fn new(src_size: usize, model_path: &Path) -> Result<Self> {
+        // 从同名JSON文件加载配置
+        let config = load_detection_config(model_path);
+        
+        // 从文件加载模型
         let session = Session::builder()?
             .with_execution_providers([DirectMLExecutionProvider::default().build()])?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_intra_threads(num_cpus::get_physical() as usize)?
-            .commit_from_memory(EMBEDDED_ONNX_DATA)?;
+            .commit_from_file(model_path)?;
 
         let input_name  = session.inputs[0].name.clone();
         let output_name = session.outputs[0].name.clone();
@@ -51,9 +108,9 @@ impl OnnxDetector {
             input_name,
             output_name,
             src_size,
-            conf_thres: 0.4,
-            iou_thres: 0.9,
-            classes: vec![0],
+            conf_thres: config.conf_thres,
+            iou_thres: config.iou_thres,
+            classes: config.parse_classes(),
         })
     }
 
@@ -164,73 +221,125 @@ fn iou(a: &Detection, b: &Detection) -> f32 {
     inter / (area_a + area_b - inter)
 }
 
-/// 检测线程，自动从buffer中取帧推理，对外只暴露线程控制和结果接口
+/// 检测线程封装
 pub struct DetectorThread {
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     result: Arc<Mutex<Option<Vec<Detection>>>>,
-    fps: Arc<Mutex<f32>>, // 新增
+    fps: Arc<Mutex<f32>>,
+    error_flag: Arc<AtomicBool>,
 }
 
 impl DetectorThread {
     /// 启动检测线程
-    /// buffer: 屏幕捕获线程的共享buffer
-    pub fn start(buffer: Arc<Mutex<Vec<u8>>>) -> anyhow::Result<Self> {
+    pub fn start(
+        buffer: Arc<Mutex<Vec<u8>>>,
+        model_path: &Path,
+    ) -> Result<Self> {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let result = Arc::new(Mutex::new(None));
         let fps = Arc::new(Mutex::new(0.0));
+        let error_flag = Arc::new(AtomicBool::new(false));
+
         let stop_flag_clone = stop_flag.clone();
         let result_clone = result.clone();
         let fps_clone = fps.clone();
+        let error_flag_clone = error_flag.clone();
 
-        // OnnxDetector只能在子线程里创建和用
+        // 创建检测器
+        let detector = match OnnxDetector::new(
+            320, // 固定输入尺寸
+            model_path,
+        ) {
+            Ok(detector) => detector,
+            Err(e) => {
+                log_error(&format!("创建检测器失败: {:?}", e));
+                error_flag.store(true, Ordering::SeqCst);
+                return Err(e);
+            }
+        };
+
         let handle = thread::spawn(move || {
-            let src_size = ((buffer.lock().unwrap().len() / 3) as f64).sqrt() as usize;
-            let mut detector = match OnnxDetector::new(src_size) {
-                Ok(det) => det,
-                Err(e) => {
-                    eprintln!("DetectorThread启动失败: {:?}", e);
-                    return;
-                }
-            };
+            let mut detector = detector;
             let mut infer_count = 0;
             let mut last_time = std::time::Instant::now();
             let mut last_buffer: Vec<u8> = Vec::new();
-            let mut last_infer_time = std::time::Instant::now(); // 新增：记录上次推理时间
+            let mut consecutive_errors = 0;
+            const MAX_CONSECUTIVE_ERRORS: u32 = 10;
             
             while !stop_flag_clone.load(Ordering::SeqCst) {
                 // 1. 拿到最新一帧
-                let buf_guard = buffer.lock().unwrap();
+                let buf_guard = match buffer.lock() {
+                    Ok(guard) => guard,
+                    Err(e) => {
+                        log_error(&format!("检测线程 - 获取缓冲区锁失败: {:?}", e));
+                        consecutive_errors += 1;
+                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                            error_flag_clone.store(true, Ordering::SeqCst);
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                };
+                
                 let slice: &[u8] = &buf_guard[..];
                 // 2. 只有 buffer 变化且时间间隔大于8ms才推理
-                if slice != last_buffer.as_slice() && last_infer_time.elapsed() >= Duration::from_millis(8) {
-                    last_infer_time = std::time::Instant::now(); // 推理开始前就更新时间
+                if slice != last_buffer.as_slice() {
+                    let last_infer_time = std::time::Instant::now(); // 推理开始前就更新时间
                     match detector.detect(slice) {
                         Ok((detections, _ms)) => {
-                            let mut res = result_clone.lock().unwrap();
-                            *res = Some(detections);
+                            match result_clone.lock() {
+                                Ok(mut res) => {
+                                    *res = Some(detections);
+                                    consecutive_errors = 0; // 重置错误计数
+                                }
+                                Err(e) => {
+                                    log_error(&format!("检测线程 - 设置结果失败: {:?}", e));
+                                    consecutive_errors += 1;
+                                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                        error_flag_clone.store(true, Ordering::SeqCst);
+                                        break;
+                                    }
+                                }
+                            }
                         }
                         Err(e) => {
-                            eprintln!("推理失败: {:?}", e);
+                            log_error(&format!("推理失败: {:?}", e));
+                            consecutive_errors += 1;
+                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                log_error(&format!("连续推理失败超过{}次，设置错误标志", MAX_CONSECUTIVE_ERRORS));
+                                error_flag_clone.store(true, Ordering::SeqCst);
+                                break;
+                            }
                         }
                     }
                     last_buffer.clear();
                     last_buffer.extend_from_slice(slice);
                     infer_count += 1;
+                    let elapsed = last_infer_time.elapsed();
+                    if elapsed < Duration::from_millis(8) {
+                        thread::sleep(Duration::from_millis(8) - elapsed);
+                    }
                 }
                 if last_time.elapsed().as_secs_f32() >= 1.0 {
-                    let mut fps_guard = fps_clone.lock().unwrap();
-                    *fps_guard = infer_count as f32;
+                    match fps_clone.lock() {
+                        Ok(mut fps_guard) => {
+                            *fps_guard = infer_count as f32;
+                        }
+                        Err(e) => {
+                            log_error(&format!("检测线程 - 设置FPS失败: {:?}", e));
+                        }
+                    }
                     infer_count = 0;
                     last_time = std::time::Instant::now();
                 }
                 drop(buf_guard);
-                thread::sleep(Duration::from_millis(1));
             }
         });
 
         // println!("智慧核心线程已启动");
-        Ok(Self { stop_flag, handle: Some(handle), result, fps })
+        Ok(Self { stop_flag, handle: Some(handle), result, fps, error_flag })
     }
 
     /// 获取最新推理结果
@@ -241,6 +350,11 @@ impl DetectorThread {
     /// 获取推理采样率（fps）
     pub fn fps(&self) -> Arc<Mutex<f32>> {
         self.fps.clone()
+    }
+
+    /// 获取错误标志
+    pub fn error_flag(&self) -> Arc<AtomicBool> {
+        self.error_flag.clone()
     }
 
     /// 停止线程

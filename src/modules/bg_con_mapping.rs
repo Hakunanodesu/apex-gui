@@ -9,6 +9,7 @@ use std::{
 };
 use vigem_client::{Client, TargetId, Xbox360Wired, XGamepad};
 use crate::modules::bg_onnx_dml_od::Detection;
+use crate::utils::console_redirect::log_error;
 
 // 新增：当右扳机按下时，基于检测结果对右摇杆进行修正
 fn apply_right_trigger_adjustment(
@@ -19,7 +20,7 @@ fn apply_right_trigger_adjustment(
     inner_size: f32,
     outer_str: f32,
     inner_str: f32,
-    deadzone: f32,
+    init_str: f32,
     hipfire: f32,
     vertical_str: f32,
     aim_height: f32,
@@ -34,7 +35,7 @@ fn apply_right_trigger_adjustment(
     {
         // inner区间，线性递减
         let t = if inner_size > 0.0 { dist / (inner_size / 2.0) } else { 1.0 };
-        deadzone * (1.0 - t) + inner_str * t
+        init_str * (1.0 - t) + inner_str * t
     } else if 
         (dx.abs() <= mid_size / 2.0 && dy.abs() <= mid_size / 2.0)
         || (dx.abs() <= d.w / 2.0 && dy.abs() <= d.h / 2.0)
@@ -73,6 +74,7 @@ fn apply_right_trigger_adjustment(
 pub struct ConMapper {
     stop_flag: Arc<AtomicBool>,
     handle: JoinHandle<()>,
+    error_flag: Arc<AtomicBool>,
 }
 
 impl ConMapper {
@@ -87,31 +89,61 @@ impl ConMapper {
         inner_size: f32,
         outer_str: f32,
         inner_str: f32,
-        deadzone: f32,
+        init_str: f32,
         hipfire: f32,
         vertical_str: f32, // 新增垂直强度参数
         aim_height: f32,  // 新增瞄准高度参数（暂未使用）
     ) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
+        let error_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
         let state_clone = state.clone();
         let client_clone = client.clone();
         let det_result_clone = det_result.clone();
+        let error_flag_clone = error_flag.clone();
 
         let handle = thread::spawn(move || {
             // 等待 SDL 读取线程就绪
             while !ready_flag.load(Ordering::SeqCst) {
+                if stop_clone.load(Ordering::SeqCst) {
+                    return; // 如果收到停止信号就退出
+                }
                 thread::sleep(Duration::from_millis(1));
             }
             // println!("ViGEm 映射线程已启动");
 
             let id = TargetId::XBOX360_WIRED;
             let mut tgt = Xbox360Wired::new(client_clone, id);
-            tgt.plugin().expect("plugin failed");
-            tgt.wait_ready().expect("wait_ready failed");
+            
+            if let Err(e) = tgt.plugin() {
+                log_error(&format!("手柄映射 - ViGEm插件连接失败: {:?}", e));
+                error_flag_clone.store(true, Ordering::SeqCst);
+                return;
+            }
+            
+            if let Err(e) = tgt.wait_ready() {
+                log_error(&format!("手柄映射 - ViGEm等待就绪失败: {:?}", e));
+                error_flag_clone.store(true, Ordering::SeqCst);
+                return;
+            }
+
+            let mut consecutive_errors = 0;
+            const MAX_CONSECUTIVE_ERRORS: u32 = 50;
 
             while !stop_clone.load(Ordering::SeqCst) {
-                let orig_state = state_clone.lock().unwrap().clone(); // 每次都用原始state
+                let orig_state = match state_clone.lock() {
+                    Ok(guard) => guard.clone(),
+                    Err(e) => {
+                        log_error(&format!("手柄映射 - 获取手柄状态失败: {:?}", e));
+                        consecutive_errors += 1;
+                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                            error_flag_clone.store(true, Ordering::SeqCst);
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                }; // 每次都用原始state
                 let mut mapped_state = orig_state.clone();
                 
                 // 控制扳机输出：只有达到250时才输出扳机值，否则输出0
@@ -121,49 +153,74 @@ impl ConMapper {
                 
                 // 处理检测结果并计算xy偏移
                 if let Some(ref det_arc) = det_result_clone {
-                    if let Ok(det_guard) = det_arc.lock() {
-                        // 检查左右扳机是否按下
-                        let right_trigger_pressed = orig_state.right_trigger > 10;
-                        let left_trigger_pressed = orig_state.left_trigger > 10;
-                        
-                        if let Some(detections) = &*det_guard {
-                            if let Some(d) = detections.first() {
-                                // 只有当右扳机按下时才计算并应用结果
-                                if right_trigger_pressed {
-                                    // 应用映射（1-254和255都应用）
-                                    apply_right_trigger_adjustment(
-                                        &mut mapped_state,
-                                        d,
-                                        outer_size,
-                                        mid_size,
-                                        inner_size,
-                                        outer_str,
-                                        inner_str,
-                                        deadzone,
-                                        hipfire,
-                                        vertical_str,
-                                        aim_height,
-                                        left_trigger_pressed,
-                                    );
+                    match det_arc.lock() {
+                        Ok(det_guard) => {
+                            // 检查左右扳机是否按下
+                            let right_trigger_pressed = orig_state.right_trigger > 10;
+                            let left_trigger_pressed = orig_state.left_trigger > 10;
+                            
+                            if let Some(detections) = &*det_guard {
+                                if let Some(d) = detections.first() {
+                                    // 只有当右扳机按下时才计算并应用结果
+                                    if right_trigger_pressed {
+                                        // 应用映射（10-254和255都应用）
+                                        apply_right_trigger_adjustment(
+                                            &mut mapped_state,
+                                            d,
+                                            outer_size,
+                                            mid_size,
+                                            inner_size,
+                                            outer_str,
+                                            inner_str,
+                                            init_str,
+                                            hipfire,
+                                            vertical_str,
+                                            aim_height,
+                                            left_trigger_pressed,
+                                        );
+                                    }
                                 }
+                            }
+                        }
+                        Err(e) => {
+                            log_error(&format!("手柄映射 - 获取检测结果失败: {:?}", e));
+                            consecutive_errors += 1;
+                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                error_flag_clone.store(true, Ordering::SeqCst);
+                                break;
                             }
                         }
                     }
                 }
                 
-                tgt.update(&mapped_state).ok();
+                if let Err(e) = tgt.update(&mapped_state) {
+                    log_error(&format!("手柄映射 - ViGEm更新状态失败: {:?}", e));
+                    consecutive_errors += 1;
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                        error_flag_clone.store(true, Ordering::SeqCst);
+                        break;
+                    }
+                } else {
+                    consecutive_errors = 0; // 重置错误计数
+                }
+                
                 thread::sleep(Duration::from_millis(1));
             }
 
-            tgt.unplug().ok();
+            let _ = tgt.unplug();
         });
 
-        ConMapper { stop_flag, handle }
+        ConMapper { stop_flag, handle, error_flag }
     }
 
     /// 停止映射线程并 join
     pub fn stop(self) {
         self.stop_flag.store(true, Ordering::SeqCst);
         let _ = self.handle.join();
+    }
+
+    /// 获取错误标志
+    pub fn error_flag(&self) -> Arc<AtomicBool> {
+        self.error_flag.clone()
     }
 }

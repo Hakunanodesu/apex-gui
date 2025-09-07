@@ -354,3 +354,56 @@ pub fn show_param_curve(
         painter.circle_filled(p3_end, 5.0, egui::Color32::LIGHT_GREEN);
     });
 }
+
+pub fn show_add_game_window(
+    ctx: &egui::Context,
+    show_window: &mut bool,
+    new_game_name: &mut String,
+) -> Option<String> {
+    let mut result = None;
+    
+    if *show_window {
+        egui::Window::new("添加新游戏")
+            .collapsible(false)
+            .resizable(false)
+            .title_bar(false)
+            .show(ctx, |ui| {
+                let response = ui.add(
+                    egui::TextEdit::singleline(new_game_name)
+                        .hint_text("输入游戏名称（回车确认）")
+                );
+                
+                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    if !new_game_name.is_empty() {
+                        result = Some(new_game_name.clone());
+                        *show_window = false;
+                        new_game_name.clear();
+                    }
+                }
+            });
+    }
+    
+    result
+}
+
+/// 截断文本并添加省略号
+/// 
+/// # Arguments
+/// 
+/// * `text` - 要截断的文本
+/// * `max_chars` - 最大字符数（包括省略号）
+/// 
+/// # Returns
+/// 
+/// 如果文本长度超过max_chars，返回截断后带省略号的文本；否则返回原文本
+pub fn truncate_text(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        text.to_string()
+    } else {
+        let mut truncated: String = text.chars().take(max_chars - 1).collect();
+        truncated.push('.');
+        truncated.push('.');
+        truncated.push('.');
+        truncated
+    }
+}

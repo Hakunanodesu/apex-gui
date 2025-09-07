@@ -24,22 +24,19 @@ mod modules;
 use crate::utils::{
     tools::{
         driver_path_exist, get_exe_path, enumerate_controllers, enumerate_pico,
-        get_text_width, UserConfig, load_config, save_config
+        get_text_width, enumerate_onnx_files
     }, 
     ui::{
         toggle_switch, DownloadState, download_widget, show_preview_panel, 
-        show_square_viewport, show_param_curve
+        show_square_viewport, show_param_curve, show_add_game_window, truncate_text
     },
     bg_dl_instl::spawn_download_thread,
-    console_redirect::ConsoleRedirector,
+    console_redirect::{ConsoleRedirector},
+    config::{UserConfig, load_config, save_config, DeviceConfig, handle_config_changes},
 };
 use crate::modules::{
-    bg_con_reading::ConReader,
-    bg_con_mapping::ConMapper,
     hidhide::run_hidhidecli,
-    bg_screen_cap::ScreenCapturer,
-    bg_onnx_dml_od::{DetectorThread},
-    bg_mouse_mapping::MouseMapper,
+    mapping_state_machine::MappingManager,
 };
 
 fn main() -> eframe::Result {
@@ -52,7 +49,7 @@ fn main() -> eframe::Result {
 
     // 卡密
     let mut kami: String = String::new();
-    let mut con_names = enumerate_controllers().unwrap();
+    let mut con_exist = enumerate_controllers();
     let mut pico_exist = enumerate_pico();
     let mut dl_state_vigembus = DownloadState::Idle;
     let mut dl_label_vigembus = String::new();
@@ -63,29 +60,53 @@ fn main() -> eframe::Result {
     let mut installing = false;
 
     let vg_client = Arc::new(Client::connect().unwrap());
-    let mut con_reader: Option<ConReader> = None;
-    let mut con_mapper: Option<ConMapper> = None;
-    let mut mouse_mapper: Option<MouseMapper> = None;
     let mut allow_mapping = true;
-    let mut mapping_active = false; // 映射状态
-    let mut show_config = false;
-    let mut screen_capturer: Option<ScreenCapturer> = None;
-    let mut detector: Option<DetectorThread> = None;
     let mut show_preview = false;
+    let mut on_top = false;
+    let mut _show_config = false;
 
     // ====== 配置文件读取 ======
-    let user_config = load_config();
-    let outer_size = Arc::new(Mutex::new(user_config.outer_size));
-    let mid_size = Arc::new(Mutex::new(user_config.mid_size));
-    let inner_size = Arc::new(Mutex::new(user_config.inner_size));
-    let outer_str = Arc::new(Mutex::new(user_config.outer_str));
-    let inner_str = Arc::new(Mutex::new(user_config.inner_str));
-    let deadzone = Arc::new(Mutex::new(user_config.deadzone));
-    let hipfire = Arc::new(Mutex::new(user_config.hipfire));
-    let vertical_str = Arc::new(Mutex::new(user_config.vertical_str));
-    let aim_height = Arc::new(Mutex::new(user_config.aim_height));
-    let mouse_mode = Arc::new(Mutex::new(user_config.mouse_mode.parse::<bool>().unwrap_or(false)));
+    let mut user_config = load_config();
+    let mut current_profile = user_config.current_profile.clone();
+    let mut current_device = user_config.current_device.clone();
+    let mut current_model = user_config.current_model.clone();
+    let mut selected_profile = current_profile.clone();
+    let mut selected_model = current_model.clone();
+    let mut show_add_game_dialog = false;
+    let mut new_game_name = String::new();
+    let mut available_models = enumerate_onnx_files();
+    let device_config = user_config.profiles
+        .get(&current_profile)
+        .and_then(|profile_config| profile_config.get(&current_device))
+        .cloned()
+        .unwrap_or_default();
+
+    let outer_size = Arc::new(Mutex::new(device_config.outer_size));
+    let mid_size = Arc::new(Mutex::new(device_config.mid_size));
+    let inner_size = Arc::new(Mutex::new(device_config.inner_size));
+    let outer_str = Arc::new(Mutex::new(device_config.outer_str));
+    let inner_str = Arc::new(Mutex::new(device_config.inner_str));
+    let init_str = Arc::new(Mutex::new(device_config.init_str));
+    let hipfire = Arc::new(Mutex::new(device_config.hipfire));
+    let vertical_str = Arc::new(Mutex::new(device_config.vertical_str));
+    let aim_height = Arc::new(Mutex::new(device_config.aim_height));
+    let mouse_mode = Arc::new(Mutex::new(current_device == "mouse"));
     // =========================
+
+    // 创建状态机管理器
+    let mut mapping_manager = MappingManager::new(
+        vg_client.clone(),
+        current_model.clone(),
+        outer_size.clone(),
+        mid_size.clone(),
+        inner_size.clone(),
+        outer_str.clone(),
+        inner_str.clone(),
+        init_str.clone(),
+        hipfire.clone(),
+        vertical_str.clone(),
+        aim_height.clone(),
+    );
 
     // 为保存配置克隆变量
     let outer_size_for_save = outer_size.clone();
@@ -93,15 +114,14 @@ fn main() -> eframe::Result {
     let inner_size_for_save = inner_size.clone();
     let outer_str_for_save = outer_str.clone();
     let inner_str_for_save = inner_str.clone();
-    let deadzone_for_save = deadzone.clone();
+    let init_str_for_save = init_str.clone();
     let hipfire_for_save = hipfire.clone();
     let vertical_str_for_save = vertical_str.clone();
     let aim_height_for_save = aim_height.clone();
     let mouse_mode_for_save = mouse_mode.clone();
 
     let mut do_resize = true;
-    let mut on_top = false;
-    let (window_w, window_h) = (280.0, 210.0);
+    let (window_w, window_h) = (260.0, 272.0);
     let options = NativeOptions {
         viewport: ViewportBuilder::default()
             .with_resizable(false),
@@ -148,11 +168,157 @@ fn main() -> eframe::Result {
                 let right_column_w = (total_w - col_0_w * 2.7).max(0.0);
                 installing = !matches!(dl_state_vigembus, DownloadState::Idle)
                     || !matches!(dl_state_hidhide, DownloadState::Idle);
+
+                // ====== 状态机更新 ======
+                let (state_do_resize, _state_show_config, state_show_preview) = 
+                    mapping_manager.update(&mut con_exist, &mut pico_exist);
+                
+                if state_do_resize {
+                    do_resize = true;
+                }
+                if state_show_preview && !show_preview {
+                    show_preview = state_show_preview;
+                }
+                // ========================
+
+                // 检查配置变化
+                if handle_config_changes(
+                    &selected_profile,
+                    &selected_model,
+                    &mut current_profile,
+                    &mut current_device,
+                    &mut current_model,
+                    mouse_mode.lock().unwrap().clone(),
+                    &outer_size,
+                    &mid_size,
+                    &inner_size,
+                    &outer_str,
+                    &inner_str,
+                    &init_str,
+                    &hipfire,
+                    &vertical_str,
+                    &aim_height,
+                ) {
+                    // 参数发生变化，强制重新渲染
+                    ctx.request_repaint();
+                    // 同步配置到状态机
+                    mapping_manager.update_config(current_model.clone());
+                }
+
+                // —— 第一行：选择游戏 开关 —— 
+                ui.horizontal(|ui| {
+                    ui.label("选择游戏");
+                    // 下拉框选择游戏，但不修改实际参数，只是切换选择
+                    let combo = egui::ComboBox::new("game_select_combobox", "")
+                        .selected_text(truncate_text(&selected_profile, 10))
+                        .width(100.0)
+                        .show_ui(ui, |cb_ui| {
+                            for game in user_config.profiles.keys() {
+                                let item_response = cb_ui.selectable_value(&mut selected_profile, game.clone(), truncate_text(game, 15));
+                                if item_response.hovered() {
+                                    show_tooltip_at_pointer(
+                                        &cb_ui.ctx(),
+                                        cb_ui.layer_id(),
+                                        item_response.id,
+                                        |ui| {
+                                            ui.label(game);
+                                        }
+                                    );
+                                }
+                            }
+                        });
+                    if combo.response.hovered() {
+                        show_tooltip_at_pointer(
+                            &ui.ctx(),
+                            ui.layer_id(),
+                            combo.response.id,
+                            |ui| {
+                                ui.label(&selected_profile);
+                            }
+                        );
+                    }
+                    // 添加游戏按钮
+                    if ui.button("➕").clicked() {
+                        show_add_game_dialog = true;
+                        new_game_name.clear();
+                    }
+                    // 删除游戏按钮
+                    ui.add_enabled_ui(!user_config.profiles.is_empty(), |ui| {
+                        if ui.button("➖").clicked() {
+                            let mut updated_config = user_config.clone();
+                            if updated_config.remove_profile(&selected_profile) {
+                                save_config(&updated_config);
+                                user_config = updated_config;
+                                selected_profile = user_config.current_profile.clone();
+                            }
+                        }
+                    });
+                });
+                // 添加游戏弹窗
+                if show_add_game_dialog {
+                    if let Some(game_name) = show_add_game_window(ctx, &mut show_add_game_dialog, &mut new_game_name) {
+                        let mut updated_config = user_config.clone();
+                        if updated_config.add_profile(game_name) {
+                            save_config(&updated_config);
+                            user_config = updated_config;
+                            selected_profile = user_config.current_profile.clone();
+                        }
+                    }
+                }
+                ui.add_space(7.0);
+
+                // —— 第二行：选择模型 开关 —— 
+                ui.horizontal(|ui| {
+                    ui.label("选择模型");
+                    // 模型选择下拉框
+                    let combo_response = egui::ComboBox::new("model_select_combobox", "")
+                        .selected_text(if selected_model.is_empty() {
+                            "".to_string()
+                        } else {
+                            truncate_text(&selected_model, 14)
+                        })
+                        .width(129.0)
+                        .show_ui(ui, |cb_ui| {
+                            // 添加所有ONNX文件
+                            for model_file in &available_models {
+                                let item_response = cb_ui.selectable_value(&mut selected_model, model_file.clone(), truncate_text(model_file, 21));
+                                if item_response.hovered() {
+                                    show_tooltip_at_pointer(
+                                        &cb_ui.ctx(),
+                                        cb_ui.layer_id(),
+                                        item_response.id,
+                                        |ui| {
+                                            ui.label(model_file);
+                                        }
+                                    );
+                                }
+                            }
+                        });
+                    // 显示完整模型名的提示
+                    if combo_response.response.hovered() && !selected_model.is_empty() {
+                        show_tooltip_at_pointer(
+                            &ui.ctx(),
+                            ui.layer_id(),
+                            combo_response.response.id,
+                            |ui| {
+                                ui.label(&selected_model);
+                            }
+                        );
+                    }
+                    // 刷新模型列表按钮
+                    ui.add_enabled_ui(!mapping_manager.is_active(), |ui| {
+                        if ui.button("🔄️").clicked() {
+                            available_models = enumerate_onnx_files();
+                        }
+                    });
+                });
+                ui.add_space(7.0);
+                
                 egui::Grid::new("main_grid")
                     .spacing([10.0, 10.0])
                     .striped(false)
                     .show(ui, |ui| {
-                        // —— 第一行：ViGemBus 安装按钮 —— 
+                        // —— 第三行：ViGemBus 安装按钮 —— 
                         ui.label("ViGemBus");
                         // 这里原封不动放你 download_widget 的代码
                         if driver_path_exist("ViGEm Bus Driver") {
@@ -162,37 +328,39 @@ fn main() -> eframe::Result {
                             ui.colored_label(Color32::RED, "✖");
                             dl_label_vigembus = "安装".to_owned();
                         }
-                        if matches!(dl_state_vigembus, DownloadState::Idle) {
-                            ui.add_enabled_ui(!mapping_active, |ui| {
-                                if ui.button(&dl_label_vigembus).clicked() {
-                                    dl_cancel_vigembus = Arc::new(AtomicBool::new(false));
-                                    let arc = spawn_download_thread(
-                                        "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe",
-                                        "ViGemBus_installer.exe",
-                                        dl_cancel_vigembus.clone(),
-                                    );
-                                    dl_state_vigembus = DownloadState::Downloading(arc, dl_cancel_vigembus.clone());
+                        ui.add_enabled_ui(!mouse_mode.lock().unwrap().clone(), |ui| {
+                            if matches!(dl_state_vigembus, DownloadState::Idle) {
+                                ui.add_enabled_ui(!mapping_manager.is_active(), |ui| {
+                                    if ui.button(&dl_label_vigembus).clicked() {
+                                        dl_cancel_vigembus = Arc::new(AtomicBool::new(false));
+                                        let arc = spawn_download_thread(
+                                            "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe",
+                                            "ViGemBus_installer.exe",
+                                            dl_cancel_vigembus.clone(),
+                                        );
+                                        dl_state_vigembus = DownloadState::Downloading(arc, dl_cancel_vigembus.clone());
+                                    }
+                                });
+                            } else if let DownloadState::Downloading(_, cancel_flag) = &mut dl_state_vigembus {
+                                if ui.button("取消安装").clicked() {
+                                    cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                                    dl_state_vigembus = DownloadState::Cancelling { cancelled_at: None };
                                 }
-                            });
-                        } else if let DownloadState::Downloading(_, cancel_flag) = &mut dl_state_vigembus {
-                            if ui.button("取消安装").clicked() {
-                                cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
-                                dl_state_vigembus = DownloadState::Cancelling { cancelled_at: None };
+                                download_widget(
+                                    ctx, ui, &mut dl_state_vigembus,
+                                    right_column_w, "ViGemBus_installer.exe"
+                                );
+                            } else {
+                                // 非 Idle/Downloading 时，调用进度渲染
+                                download_widget(
+                                    ctx, ui, &mut dl_state_vigembus,
+                                    right_column_w, "ViGemBus_installer.exe"
+                                );
                             }
-                            download_widget(
-                                ctx, ui, &mut dl_state_vigembus,
-                                right_column_w, "ViGemBus_installer.exe"
-                            );
-                        } else {
-                            // 非 Idle/Downloading 时，调用进度渲染
-                            download_widget(
-                                ctx, ui, &mut dl_state_vigembus,
-                                right_column_w, "ViGemBus_installer.exe"
-                            );
-                        }
+                        });
                         ui.end_row();
             
-                        // —— 第二行：HidHide 安装按钮 —— 
+                        // —— 第四行：HidHide 安装按钮 —— 
                         ui.label("HidHide");
                         if driver_path_exist("HidHide") {
                             ui.colored_label(Color32::GREEN, "✔");
@@ -201,36 +369,38 @@ fn main() -> eframe::Result {
                             ui.colored_label(Color32::RED,   "✖");
                             dl_label_hidhide = "安装".to_owned();
                         }
-                        if matches!(dl_state_hidhide, DownloadState::Idle) {
-                            ui.add_enabled_ui(!mapping_active, |ui| {
-                                if ui.button(&dl_label_hidhide).clicked() {
-                                    dl_cancel_hidhide = Arc::new(AtomicBool::new(false));
-                                    let arc = spawn_download_thread(
-                                        "https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe",
-                                        "HidHide_installer.exe",
-                                        dl_cancel_hidhide.clone(),
-                                    );
-                                    dl_state_hidhide = DownloadState::Downloading(arc, dl_cancel_hidhide.clone());
+                        ui.add_enabled_ui(!mouse_mode.lock().unwrap().clone(), |ui| {
+                            if matches!(dl_state_hidhide, DownloadState::Idle) {
+                                ui.add_enabled_ui(!mapping_manager.is_active(), |ui| {
+                                    if ui.button(&dl_label_hidhide).clicked() {
+                                        dl_cancel_hidhide = Arc::new(AtomicBool::new(false));
+                                        let arc = spawn_download_thread(
+                                            "https://github.com/nefarius/HidHide/releases/download/v1.5.230.0/HidHide_1.5.230_x64.exe",
+                                            "HidHide_installer.exe",
+                                            dl_cancel_hidhide.clone(),
+                                        );
+                                        dl_state_hidhide = DownloadState::Downloading(arc, dl_cancel_hidhide.clone());
+                                    }
+                                });
+                            } else if let DownloadState::Downloading(_, cancel_flag) = &mut dl_state_hidhide {
+                                if ui.button("取消安装").clicked() {
+                                    cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                                    dl_state_hidhide = DownloadState::Cancelling { cancelled_at: None };
                                 }
-                            });
-                        } else if let DownloadState::Downloading(_, cancel_flag) = &mut dl_state_hidhide {
-                            if ui.button("取消安装").clicked() {
-                                cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
-                                dl_state_hidhide = DownloadState::Cancelling { cancelled_at: None };
+                                download_widget(
+                                    ctx, ui, &mut dl_state_hidhide, 
+                                    right_column_w, "HidHide_installer.exe"
+                                );
+                            } else {
+                                download_widget(
+                                    ctx, ui, &mut dl_state_hidhide, 
+                                    right_column_w, "HidHide_installer.exe"
+                                );
                             }
-                            download_widget(
-                                ctx, ui, &mut dl_state_hidhide, 
-                                right_column_w, "HidHide_installer.exe"
-                            );
-                        } else {
-                            download_widget(
-                                ctx, ui, &mut dl_state_hidhide, 
-                                right_column_w, "HidHide_installer.exe"
-                            );
-                        }
+                        });
                         ui.end_row();
             
-                        // —— 第三行：已识别手柄列表 —— 
+                        // —— 第五行：已识别手柄列表 —— 
                         if mouse_mode.lock().unwrap().clone() {
                             ui.label("存在Pico");
                             if pico_exist {
@@ -240,14 +410,14 @@ fn main() -> eframe::Result {
                             }
                         } else {
                             ui.label("存在手柄");
-                            if con_names.is_empty() {
-                                ui.colored_label(Color32::RED, "✖");
-                            } else {
+                            if con_exist {
                                 ui.colored_label(Color32::GREEN, "✔");
+                            } else {
+                                ui.colored_label(Color32::RED, "✖");
                             }
                         }
-                        ui.add_enabled_ui(!mapping_active && !installing, |ui| {
-                            let btn = ui.button("刷新 ⓘ");
+                        ui.add_enabled_ui(!installing && !installing && !mapping_manager.is_active(), |ui| {
+                            let btn = ui.button("🔄️ ⓘ");
                             if !mouse_mode.lock().unwrap().clone() {
                                 if btn.hovered() {
                                     show_tooltip_at_pointer(
@@ -255,25 +425,13 @@ fn main() -> eframe::Result {
                                         ui.layer_id(),
                                         btn.id,
                                         |ui| {
-                                            if con_names.is_empty() {
-                                                ui.add(
-                                                    Label::new("未列出手柄，请刷新")
-                                                );
-                                            } else {
-                                                ui.add(
-                                                    Label::new(
-                                                        egui::RichText::new(
-                                                            "⚠️\nXbox 系手柄在每次软件打开并检测到后需重新连接手柄\n⚠️"
-                                                        ).color(Color32::ORANGE)
-                                                    )
-                                                );
-                                                ui.label("当前已检测到的手柄：");
-                                                for (i, name) in con_names.iter().enumerate() {
-                                                    ui.add(
-                                                        Label::new(format!("{}) {}", i + 1, name))
-                                                    );
-                                                }
-                                            };
+                                            ui.add(
+                                                Label::new(
+                                                    egui::RichText::new(
+                                                        "⚠️\nXbox 系手柄在每次软件打开并检测到后需重新连接手柄\n⚠️"
+                                                    ).color(Color32::ORANGE)
+                                                )
+                                            );
                                         }
                                     );
                                 }
@@ -282,17 +440,17 @@ fn main() -> eframe::Result {
                                 if mouse_mode.lock().unwrap().clone() {
                                     pico_exist = enumerate_pico();
                                 } else {
-                                    con_names = enumerate_controllers().unwrap();
+                                    con_exist = enumerate_controllers();
                                 }
                             }
                         });
                         ui.end_row();
             
-                        // —— 第四行：智能映射 开关 —— 
+                        // —— 第六行：智能映射 开关 —— 
                         ui.label("智能映射");
                         ui.add_enabled_ui(
                             (
-                                !con_names.is_empty() 
+                                con_exist 
                                 && !installing 
                                 && allow_mapping 
                                 && !mouse_mode.lock().unwrap().clone()
@@ -302,149 +460,13 @@ fn main() -> eframe::Result {
                                 && mouse_mode.lock().unwrap().clone()
                             ),
                             |ui| {
+                            let mut mapping_active = mapping_manager.is_active();
                             if ui.add(toggle_switch(&mut mapping_active)).clicked() {
                                 if mapping_active {
-                                    if mouse_mode.lock().unwrap().clone() {
-                                        pico_exist = enumerate_pico();
-                                    } else {
-                                        con_names = enumerate_controllers().unwrap();
-                                    }
-                                    if (
-                                        !con_names.is_empty() && !mouse_mode.lock().unwrap().clone()
-                                    ) || (
-                                        pico_exist && mouse_mode.lock().unwrap().clone()
-                                    ) {
-                                        // 1. 启动屏幕抓取（只做一次）
-                                        if screen_capturer.is_none() {
-                                            let outer_guard = outer_size.clone();
-                                            let outer_val = 
-                                                outer_guard
-                                                    .lock().unwrap().trim()
-                                                    .parse::<f32>().unwrap_or(320.0);
-                                            let outer_usize = outer_val.round() as usize;
-                                            screen_capturer = Some(
-                                                ScreenCapturer::start(outer_usize)
-                                                    .expect("无法启动 ScreenCapturer")
-                                            );
-                                        }
-                                        
-                                        // 2. 初始化 detector（依赖 screen_capturer）
-                                        if detector.is_none() {
-                                            if let Some(capt) = screen_capturer.as_ref() {
-                                                let buffer_arc = capt.buffer();
-                                                detector = Some(
-                                                    DetectorThread::start(buffer_arc)
-                                                        .expect("无法启动 DetectorThread")
-                                                );
-                                            } else {
-                                                mapping_active = false;
-                                            }
-                                        }
-                                        
-                                        // 3. 启动读取线程（仅在非键鼠模式下）
-                                        if mouse_mode.lock().unwrap().clone() {
-                                            if mouse_mapper.is_none() && detector.is_some() {
-                                                if let Some(det) = detector.as_ref() {
-                                                    let outer_val = outer_size.lock().unwrap().trim().parse::<f32>().unwrap_or(320.0);
-                                                    let mid_val = mid_size.lock().unwrap().trim().parse::<f32>().unwrap_or(200.0);
-                                                    let inner_val = inner_size.lock().unwrap().trim().parse::<f32>().unwrap_or(100.0);
-                                                    let inner_str_val = inner_str.lock().unwrap().trim().parse::<f32>().unwrap_or(1.0);
-                                                    let outer_str_val = outer_str.lock().unwrap().trim().parse::<f32>().unwrap_or(1.0);
-                                                    let vertical_str_val = vertical_str.lock().unwrap().trim().parse::<f32>().unwrap_or(0.5);
-                                                    let aim_height_val = aim_height.lock().unwrap().trim().parse::<f32>().unwrap_or(0.5);
-                                                    let hipfire_val = hipfire.lock().unwrap().trim().parse::<f32>().unwrap_or(0.0);
-
-                                                    mouse_mapper = Some(MouseMapper::start(
-                                                        Some(det.result()),
-                                                        outer_val,
-                                                        mid_val,
-                                                        inner_val,
-                                                        inner_str_val,
-                                                        outer_str_val,
-                                                        vertical_str_val,
-                                                        aim_height_val,
-                                                        hipfire_val
-                                                    ));
-                                                } else {
-                                                    mapping_active = false;
-                                                }
-                                            }
-                                        } else {
-                                            if con_reader.is_none() {
-                                                con_reader = Some(ConReader::start());
-                                            }
-                                            
-                                            // 4. 启动映射器（依赖 detector 和 reader）
-                                            if con_mapper.is_none() && detector.is_some() {
-                                                if let Some(reader) = con_reader.as_ref() {
-                                                    if let Some(det) = detector.as_ref() {
-                                                        let state = reader.state();
-                                                        let ready = reader.ready();
-                                                        let outer_val = outer_size.lock().unwrap().trim().parse::<f32>().unwrap_or(320.0);
-                                                        let mid_val = mid_size.lock().unwrap().trim().parse::<f32>().unwrap_or(200.0);
-                                                        let inner_val = inner_size.lock().unwrap().trim().parse::<f32>().unwrap_or(100.0);
-                                                        let outer_str_val = outer_str.lock().unwrap().trim().parse::<f32>().unwrap_or(1.0);
-                                                        let inner_str_val = inner_str.lock().unwrap().trim().parse::<f32>().unwrap_or(1.0);
-                                                        let deadzone_val = deadzone.lock().unwrap().trim().parse::<f32>().unwrap_or(0.0);
-                                                        let hipfire_val = hipfire.lock().unwrap().trim().parse::<f32>().unwrap_or(0.0);
-                                                        let vertical_str_val = vertical_str.lock().unwrap().trim().parse::<f32>().unwrap_or(0.5);
-                                                        let aim_height_val = aim_height.lock().unwrap().trim().parse::<f32>().unwrap_or(0.5);
-                                                        
-                                                        con_mapper = Some(ConMapper::start(
-                                                            state,
-                                                            vg_client.clone(),
-                                                            ready,
-                                                            Some(det.result()),
-                                                            outer_val,
-                                                            mid_val,
-                                                            inner_val,
-                                                            outer_str_val,
-                                                            inner_str_val,
-                                                            deadzone_val,
-                                                            hipfire_val,
-                                                            vertical_str_val,
-                                                            aim_height_val
-                                                        ));
-                                                    } else {
-                                                        mapping_active = false;
-                                                    }
-                                                } else {
-                                                    mapping_active = false;
-                                                }
-                                            }
-                                        }
-                                        do_resize = true;
-                                        show_config = false;
-                                    } else {
-                                        mapping_active = false;
-                                    }
+                                    let mouse_mode_val = mouse_mode.lock().unwrap().clone();
+                                    mapping_manager.request_start(mouse_mode_val);
                                 } else {
-                                    // 按照启动的反序关闭组件
-                                    // 1. 先关闭映射器（最后启动的，仅在非键鼠模式下）
-                                    if mouse_mode.lock().unwrap().clone() {
-                                        if let Some(mapper) = mouse_mapper.take() {
-                                            mapper.stop();
-                                        }
-                                    } else {
-                                        if let Some(mapper) = con_mapper.take() {
-                                            mapper.stop();
-                                        }
-                                        // 2. 关闭读取线程
-                                        if let Some(reader) = con_reader.take() {
-                                            reader.stop();
-                                        }
-                                    }
-                                    // 3. 关闭检测器
-                                    if let Some(det) = detector.take() {
-                                        det.stop();
-                                    }
-                                    // 4. 最后关闭屏幕捕获器（最先启动的）
-                                    if let Some(capt) = screen_capturer.take() {
-                                        capt.stop();
-                                    }
-                                    do_resize = true;
-                                    show_preview = false;
-                                    on_top = false;
+                                    mapping_manager.request_stop();
                                 }
                             }
                         });
@@ -455,7 +477,7 @@ fn main() -> eframe::Result {
                         }
                         ui.end_row();
                         
-                        if mapping_active {
+                        if mapping_manager.is_active() {
                             // 预览开关
                             ui.label("识别预览");
                             if ui.add(toggle_switch(&mut show_preview)).clicked() {
@@ -499,7 +521,7 @@ fn main() -> eframe::Result {
                     });
 
                 // 识别参数设置
-                if !mapping_active {
+                if !mapping_manager.is_active() {
                     ui.add_space(7.0);
                     let ch = egui::CollapsingHeader::new("参数设置")
                         .default_open(false)
@@ -512,7 +534,7 @@ fn main() -> eframe::Result {
                                 &inner_size.lock().unwrap(),
                                 &outer_str.lock().unwrap(),
                                 &inner_str.lock().unwrap(),
-                                &deadzone.lock().unwrap(),
+                                &init_str.lock().unwrap(),
                             );
                             let monitor_size = 
                                 ctx.input(|i| i.viewport().monitor_size)
@@ -527,7 +549,7 @@ fn main() -> eframe::Result {
                             let mut outer_str_err = None;
 
                             let mut inner_str_err = None;
-                            let mut deadzone_err = None;
+                            let mut init_str_err = None;
                             let mut hipfire_err = None;
                             {
                                 let outer_guard = outer_size.lock().unwrap();
@@ -596,13 +618,13 @@ fn main() -> eframe::Result {
                                 }
                             }
                             {
-                                let deadzone_guard = deadzone.lock().unwrap();
-                                if !deadzone_guard.trim().is_empty() {
-                                                                    match deadzone_guard.trim().parse::<f32>() {
-                                    Ok(v) if v < 0.0 || v > 1.0 => deadzone_err = Some("范围0.0-1.0"),
-                                    Ok(_) => {},
-                                    Err(_) => deadzone_err = Some("格式错误"),
-                                }
+                                let init_str_guard = init_str.lock().unwrap();
+                                if !init_str_guard.trim().is_empty() {
+                                    match init_str_guard.trim().parse::<f32>() {
+                                        Ok(v) if v < 0.0 || v > 1.0 => init_str_err = Some("范围0.0-1.0"),
+                                        Ok(_) => {},
+                                        Err(_) => init_str_err = Some("格式错误"),
+                                    }
                                 }
                             }
                             {
@@ -662,12 +684,12 @@ fn main() -> eframe::Result {
                                 ui.label("腰射系数");
                                 let mut hipfire_guard = hipfire.lock().unwrap();
                                 ui.add(TextEdit::singleline(&mut *hipfire_guard).hint_text(""));
-                                ui.label("死区大小");
-                                let mut deadzone_guard = deadzone.lock().unwrap();
-                                ui.add(TextEdit::singleline(&mut *deadzone_guard).hint_text(""));
+                                ui.label("起步强度");
+                                let mut init_str_guard = init_str.lock().unwrap();
+                                ui.add(TextEdit::singleline(&mut *init_str_guard).hint_text(""));
                                 if let Some(err) = hipfire_err {
                                     ui.colored_label(Color32::RED, err);
-                                } else if let Some(err) = deadzone_err {
+                                } else if let Some(err) = init_str_err {
                                     ui.colored_label(Color32::RED, err);
                                 } else {
                                     ui.label("");
@@ -701,7 +723,7 @@ fn main() -> eframe::Result {
                         });
                     if ch.body_returned.is_some() {
                         ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(
-                            window_w + 40.0, 
+                            window_w, 
                             window_h + 308.0
                         )));
                         allow_mapping = false;
@@ -713,9 +735,9 @@ fn main() -> eframe::Result {
 
                 ui.add_space(7.0);
                 // 预览面板
-                if show_preview && mapping_active {
-                    let capturer = screen_capturer.as_ref().map(|c| (c.buffer(), c.square_size));
-                    let detector = detector.as_ref().map(|d| d.result());
+                if show_preview && mapping_manager.is_active() {
+                    let capturer = mapping_manager.get_screen_capturer().as_ref().map(|c| (c.buffer(), c.square_size));
+                    let detector = mapping_manager.get_detector().as_ref().map(|d| d.result());
                     show_preview_panel(ui, capturer, detector);
                 }                
             });
@@ -725,7 +747,7 @@ fn main() -> eframe::Result {
                 .resizable(false)
                 .show(ctx, |ui| {
                     ui.add_space(1.0);
-                    if let Some(det) = detector.as_ref() {
+                    if let Some(det) = mapping_manager.get_detector().as_ref() {
                         let fps_arc = det.fps();
                         if let Ok(fps_guard) = fps_arc.lock() {
                             ui.label(format!("推理帧率: {:.0} fps", *fps_guard));
@@ -742,7 +764,7 @@ fn main() -> eframe::Result {
             TopBottomPanel::bottom("kami_input")
                 .resizable(false) // 禁止拖拽调整大小
                 .show(ctx, |ui| {
-                    ui.add_enabled_ui(!mapping_active, |ui| {
+                    ui.add_enabled_ui(!mapping_manager.is_active(), |ui| {
                         ui.add_sized(
                             [(total_w - 16.0).max(0.0), 0.0],
                             TextEdit::singleline(&mut kami)
@@ -753,18 +775,35 @@ fn main() -> eframe::Result {
         }
     )?;
     // ====== 配置文件写回 ======
-    save_config(&UserConfig {
+    let mut updated_config: UserConfig = load_config();  // 加载当前配置以保留其他游戏的设置
+    let device_config = DeviceConfig {
         outer_size: outer_size_for_save.lock().unwrap().clone(),
         mid_size: mid_size_for_save.lock().unwrap().clone(),
         inner_size: inner_size_for_save.lock().unwrap().clone(),
         outer_str: outer_str_for_save.lock().unwrap().clone(),
         inner_str: inner_str_for_save.lock().unwrap().clone(),
-        deadzone: deadzone_for_save.lock().unwrap().clone(),
+        init_str: init_str_for_save.lock().unwrap().clone(),
         hipfire: hipfire_for_save.lock().unwrap().clone(),
         vertical_str: vertical_str_for_save.lock().unwrap().clone(),
         aim_height: aim_height_for_save.lock().unwrap().clone(),
-        mouse_mode: mouse_mode_for_save.lock().unwrap().to_string(),
-    });
+    };
+
+    // 更新当前游戏和设备的配置
+    let current_device_final = if mouse_mode_for_save.lock().unwrap().clone() {
+        "mouse".to_string()
+    } else {
+        "controller".to_string()
+    };
+    
+    if let Some(profile_config) = updated_config.profiles.get_mut(&updated_config.current_profile) {
+        profile_config.insert(current_device_final.clone(), device_config);
+    }
+    updated_config.current_device = current_device_final;
+    // 模型选择通过handle_config_changes处理，这里保持最新值
+    let latest_config = load_config();
+    updated_config.current_model = latest_config.current_model;
+    
+    save_config(&updated_config);
     // =========================
     run_hidhidecli(&["--cloak-off"]).unwrap();
     Ok(())

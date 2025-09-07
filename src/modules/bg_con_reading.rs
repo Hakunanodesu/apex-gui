@@ -14,6 +14,8 @@ use sdl2::{
 };
 use vigem_client::{XGamepad, XButtons};
 
+use crate::utils::console_redirect::log_error;
+
 
 fn scale_to_u8(v: i16) -> u8 {
     (((v as i32 + 32768) * 255 / 65535) as u8).clamp(0, 255)
@@ -121,6 +123,7 @@ pub struct ConReader {
     state: Arc<Mutex<XGamepad>>,
     ready_flag: Arc<AtomicBool>,
     handle: JoinHandle<()>,
+    error_flag: Arc<AtomicBool>,
 }
 
 impl ConReader {
@@ -129,24 +132,64 @@ impl ConReader {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(XGamepad::default()));
         let ready_flag = Arc::new(AtomicBool::new(false));
+        let error_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
         let state_clone = state.clone();
         let ready_clone = ready_flag.clone();
+        let error_flag_clone = error_flag.clone();
 
         let handle = thread::spawn(move || {
-            let sdl_ctx = sdl2::init().expect("SDL init failed");
-            let js_sub = sdl_ctx.joystick().expect("SDL joystick subsystem failed");
-            let mut pump = sdl_ctx.event_pump().unwrap();
+            let sdl_ctx = match sdl2::init() {
+                Ok(ctx) => ctx,
+                Err(e) => {
+                    log_error(&format!("手柄读取 - SDL初始化失败: {}", e));
+                    error_flag_clone.store(true, Ordering::SeqCst);
+                    return;
+                }
+            };
+            
+            let js_sub = match sdl_ctx.joystick() {
+                Ok(sub) => sub,
+                Err(e) => {
+                    log_error(&format!("手柄读取 - SDL手柄子系统初始化失败: {}", e));
+                    error_flag_clone.store(true, Ordering::SeqCst);
+                    return;
+                }
+            };
+            
+            let mut pump = match sdl_ctx.event_pump() {
+                Ok(pump) => pump,
+                Err(e) => {
+                    log_error(&format!("手柄读取 - SDL事件泵初始化失败: {}", e));
+                    error_flag_clone.store(true, Ordering::SeqCst);
+                    return;
+                }
+            };
 
             // 构建 (instance_id, device_index) 映射表
-            let js_iter = 0..js_sub.num_joysticks().unwrap();
+            let js_count = match js_sub.num_joysticks() {
+                Ok(count) => count,
+                Err(e) => {
+                    log_error(&format!("手柄读取 - 获取手柄数量失败: {}", e));
+                    error_flag_clone.store(true, Ordering::SeqCst);
+                    return;
+                }
+            };
+            
+            let js_iter = 0..js_count;
             let mut id_map = Vec::new();
             let mut joysticks = Vec::new();
             for dev_idx in js_iter.clone() {
-                if let Ok(joy) = js_sub.open(dev_idx) {
-                    id_map.push((joy.instance_id(), dev_idx));
-                    // println!("打开手柄: {:?}", joy.name());
-                    joysticks.push(joy);
+                match js_sub.open(dev_idx) {
+                    Ok(joy) => {
+                        id_map.push((joy.instance_id(), dev_idx));
+                        // println!("打开手柄: {:?}", joy.name());
+                        joysticks.push(joy);
+                    }
+                    Err(e) => {
+                        log_error(&format!("手柄读取 - 打开手柄{}失败: {}", dev_idx, e));
+                        // 这里不设置错误标志，因为某些手柄打开失败是正常的
+                    }
                 }
             }
 
@@ -164,6 +207,9 @@ impl ConReader {
                 let _ = pump.enable_event(*ev);
             }
 
+            let mut consecutive_errors = 0;
+            const MAX_CONSECUTIVE_ERRORS: u32 = 100; // 允许更多错误，因为手柄断开连接是常见的
+            
             // 循环处理
             while !stop_clone.load(Ordering::SeqCst) {
                 for evt in pump.poll_iter() {
@@ -186,32 +232,45 @@ impl ConReader {
                     let is_ps = vid == 0x054C;
 
                     // 分发事件到状态
-                    let mut lock = state_clone.lock().unwrap();
-                    match evt {
-                        Event::JoyAxisMotion { axis_idx, value, .. } => {
-                            // println!("axis_id: {}, value: {}", axis_idx, value);
-                            apply_event(&mut *lock, &JoystickEvent::Axis { axis_idx, value }, is_ps);
+                    match state_clone.lock() {
+                        Ok(mut lock) => {
+                            match evt {
+                                Event::JoyAxisMotion { axis_idx, value, .. } => {
+                                    // println!("axis_id: {}, value: {}", axis_idx, value);
+                                    apply_event(&mut *lock, &JoystickEvent::Axis { axis_idx, value }, is_ps);
+                                }
+                                Event::JoyButtonDown { button_idx, .. } => {
+                                    // println!("button_down: {}", button_idx);
+                                    apply_event(&mut *lock, &JoystickEvent::ButtonDown { button_idx }, is_ps);
+                                }
+                                Event::JoyButtonUp { button_idx, .. } => {
+                                    // println!("button_up: {}", button_idx);
+                                    apply_event(&mut *lock, &JoystickEvent::ButtonUp { button_idx }, is_ps);
+                                }
+                                Event::JoyHatMotion { state, .. } => {
+                                    // println!("hat_state: {:?}", state);
+                                    apply_event(&mut *lock, &JoystickEvent::HatMotion { state }, is_ps);
+                                }
+                                _ => {}
+                            }
+                            consecutive_errors = 0; // 重置错误计数
                         }
-                        Event::JoyButtonDown { button_idx, .. } => {
-                            // println!("button_down: {}", button_idx);
-                            apply_event(&mut *lock, &JoystickEvent::ButtonDown { button_idx }, is_ps);
+                        Err(e) => {
+                            log_error(&format!("手柄读取 - 获取状态锁失败: {:?}", e));
+                            consecutive_errors += 1;
+                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                log_error(&format!("手柄读取 - 连续错误超过{}次，设置错误标志", MAX_CONSECUTIVE_ERRORS));
+                                error_flag_clone.store(true, Ordering::SeqCst);
+                                break;
+                            }
                         }
-                        Event::JoyButtonUp { button_idx, .. } => {
-                            // println!("button_up: {}", button_idx);
-                            apply_event(&mut *lock, &JoystickEvent::ButtonUp { button_idx }, is_ps);
-                        }
-                        Event::JoyHatMotion { state, .. } => {
-                            // println!("hat_state: {:?}", state);
-                            apply_event(&mut *lock, &JoystickEvent::HatMotion { state }, is_ps);
-                        }
-                        _ => {}
                     }
                 }
                 thread::sleep(Duration::from_millis(1));
             }
         });
 
-        ConReader { stop_flag, state, ready_flag, handle }
+        ConReader { stop_flag, state, ready_flag, handle, error_flag }
     }
 
     /// 停止线程并等待 join 完成
@@ -229,5 +288,10 @@ impl ConReader {
     /// 获取 ready_flag，用于映射线程等待
     pub fn ready(&self) -> Arc<AtomicBool> {
         self.ready_flag.clone()
+    }
+
+    /// 获取错误标志
+    pub fn error_flag(&self) -> Arc<AtomicBool> {
+        self.error_flag.clone()
     }
 }
