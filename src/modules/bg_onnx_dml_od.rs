@@ -264,35 +264,39 @@ impl DetectorThread {
             let mut infer_count = 0;
             let mut last_time = std::time::Instant::now();
             let mut last_buffer: Vec<u8> = Vec::new();
+            let mut last_infer_time = std::time::Instant::now();
             let mut consecutive_errors = 0;
             const MAX_CONSECUTIVE_ERRORS: u32 = 10;
             
             while !stop_flag_clone.load(Ordering::SeqCst) {
-                // 1. 拿到最新一帧
-                let buf_guard = match buffer.lock() {
-                    Ok(guard) => guard,
-                    Err(e) => {
-                        log_error(&format!("检测线程 - 获取缓冲区锁失败: {:?}", e));
-                        consecutive_errors += 1;
-                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                            error_flag_clone.store(true, Ordering::SeqCst);
-                            break;
+                // 1. 快速获取缓冲区快照
+                let current_buffer = {
+                    let buf_guard = match buffer.lock() {
+                        Ok(guard) => guard,
+                        Err(e) => {
+                            log_error(&format!("检测线程 - 获取缓冲区锁失败: {:?}", e));
+                            consecutive_errors += 1;
+                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                error_flag_clone.store(true, Ordering::SeqCst);
+                                break;
+                            }
+                            thread::sleep(Duration::from_millis(10));
+                            continue;
                         }
-                        thread::sleep(Duration::from_millis(10));
-                        continue;
-                    }
+                    };
+                    // 立即克隆数据并释放锁
+                    buf_guard.clone()
                 };
                 
-                let slice: &[u8] = &buf_guard[..];
                 // 2. 只有 buffer 变化且时间间隔大于8ms才推理
-                if slice != last_buffer.as_slice() {
-                    let last_infer_time = std::time::Instant::now(); // 推理开始前就更新时间
-                    match detector.detect(slice) {
+                if current_buffer != last_buffer && last_infer_time.elapsed() > Duration::from_millis(8) {
+                    last_infer_time = std::time::Instant::now();
+                    match detector.detect(&current_buffer) {
                         Ok((detections, _ms)) => {
                             match result_clone.lock() {
                                 Ok(mut res) => {
                                     *res = Some(detections);
-                                    consecutive_errors = 0; // 重置错误计数
+                                    consecutive_errors = 0;
                                 }
                                 Err(e) => {
                                     log_error(&format!("检测线程 - 设置结果失败: {:?}", e));
@@ -314,14 +318,11 @@ impl DetectorThread {
                             }
                         }
                     }
-                    last_buffer.clear();
-                    last_buffer.extend_from_slice(slice);
+                    last_buffer = current_buffer; // 直接赋值，避免重复分配
                     infer_count += 1;
-                    let elapsed = last_infer_time.elapsed();
-                    if elapsed < Duration::from_millis(8) {
-                        thread::sleep(Duration::from_millis(8) - elapsed);
-                    }
                 }
+                
+                // FPS 计算逻辑保持不变
                 if last_time.elapsed().as_secs_f32() >= 1.0 {
                     match fps_clone.lock() {
                         Ok(mut fps_guard) => {
@@ -334,7 +335,6 @@ impl DetectorThread {
                     infer_count = 0;
                     last_time = std::time::Instant::now();
                 }
-                drop(buf_guard);
             }
         });
 
