@@ -495,25 +495,24 @@ fn main() -> eframe::Result {
                         if mapping_manager.is_active() {
                             // 预览开关
                             ui.label("识别预览");
-                            if ui.add(toggle_switch(&mut show_preview)).clicked() {
-                                if show_preview {
-                                    let outer_guard = outer_size.clone();
-                                    let outer_val = 
-                                        outer_guard
-                                            .lock().unwrap().trim()
-                                            .parse::<f32>().unwrap_or(320.0);
-                                    ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(
-                                        f32::max(window_w, outer_val / ctx.pixels_per_point() + 16.0), 
-                                        window_h + outer_val / ctx.pixels_per_point() + 16.0
-                                    )));
-                                } else {
-                                    do_resize = true;
-                                    ctx.send_viewport_cmd(
-                                        ViewportCommand::WindowLevel(
-                                            WindowLevel::Normal
-                                        )
-                                    );
-                                }
+                            ui.add(toggle_switch(&mut show_preview));
+                            if show_preview {
+                                let outer_guard = outer_size.clone();
+                                let outer_val = 
+                                    outer_guard
+                                        .lock().unwrap().trim()
+                                        .parse::<f32>().unwrap_or(320.0);
+                                ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(
+                                    f32::max(window_w, outer_val / ctx.pixels_per_point() + 16.0), 
+                                    window_h + outer_val / ctx.pixels_per_point() + 16.0
+                                )));
+                            } else {
+                                do_resize = true;
+                                ctx.send_viewport_cmd(
+                                    ViewportCommand::WindowLevel(
+                                        WindowLevel::Normal
+                                    )
+                                );
                             }
                             // 置顶开关
                             ui.label("窗口置顶");
