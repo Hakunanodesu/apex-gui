@@ -488,7 +488,9 @@ fn main() -> eframe::Result {
                         ui.label("键鼠模式");
                         {
                             let mut mouse_mode_guard = mouse_mode.lock().unwrap();
-                            if ui.add(toggle_switch(&mut *mouse_mode_guard)).clicked() {}
+                            ui.add_enabled_ui(!mapping_manager.is_active(), |ui| {
+                                ui.add(toggle_switch(&mut *mouse_mode_guard))
+                            });
                         }
                         ui.end_row();
                         
