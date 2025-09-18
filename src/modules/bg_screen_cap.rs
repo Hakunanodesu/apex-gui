@@ -5,7 +5,7 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use windows_capture::{
@@ -146,50 +146,6 @@ pub struct ScreenCapturer {
 impl ScreenCapturer {
     /// 静态方法：创建并启动后台抓取线程
     pub fn start(square_size: usize) -> Result<Self, Box<dyn Error>> {
-        // 首先尝试使用 Custom(16ms) 设置
-        match Self::start_with_settings(square_size, true) {
-            Ok(capturer) => {
-                // 启动一个一次性检测线程，检测Custom设置是否正常工作
-                let buffer_for_check = capturer.buffer.clone();
-                let error_flag = capturer.error_flag.clone();
-                
-                thread::spawn(move || {
-                    // 等待2秒让捕获稳定
-                    thread::sleep(Duration::from_secs(2));
-                    
-                    // 检查缓冲区是否有更新
-                    let mut initial_buffer = Vec::new();
-                    
-                    // 获取初始缓冲区状态
-                    if let Ok(buffer) = buffer_for_check.lock() {
-                        initial_buffer = buffer.clone();
-                    }
-                    
-                    // 等待500ms，看缓冲区是否有变化
-                    thread::sleep(Duration::from_millis(500));
-                    
-                    if let Ok(buffer) = buffer_for_check.lock() {
-                        // 如果缓冲区没有变化，说明Custom设置可能不工作
-                        if buffer.len() == initial_buffer.len() && *buffer == initial_buffer {
-                            log_error("屏幕捕获 - Custom(16ms)设置可能未正常工作，建议重启程序让其自动回退到Default");
-                            error_flag.store(true, Ordering::SeqCst);
-                        }
-                    }
-                    // 检测完成，线程自然结束
-                });
-                
-                Ok(capturer)
-            }
-            Err(e) => {
-                log_error(&format!("屏幕捕获 - Custom(16ms)设置启动失败，回退到Default: {:?}", e));
-                // 回退到 Default 设置
-                Self::start_with_settings(square_size, false)
-            }
-        }
-    }
-
-    /// 内部方法：使用指定设置启动
-    fn start_with_settings(square_size: usize, use_custom: bool) -> Result<Self, Box<dyn Error>> {
         // 1. 准备共享数据
         let buf = vec![0u8; square_size * square_size * 3];
         let buffer = Arc::new(Mutex::new(buf));
@@ -199,18 +155,12 @@ impl ScreenCapturer {
 
         // 2. 构造 capture 设置
         let monitor = Monitor::primary().expect("没有主显示器");
-        let min_update_interval = if use_custom {
-            MinimumUpdateIntervalSettings::Custom(Duration::from_millis(16))
-        } else {
-            MinimumUpdateIntervalSettings::Default
-        };
-
         let settings = Settings::new(
             monitor,
             CursorCaptureSettings::WithoutCursor,
             DrawBorderSettings::WithoutBorder,
             SecondaryWindowSettings::Default,
-            min_update_interval,
+            MinimumUpdateIntervalSettings::Default, // 改为默认设置
             DirtyRegionSettings::Default,
             ColorFormat::Rgba8,
             // 把 running、buffer、sq、error_flag 打包传给 handler
@@ -219,24 +169,16 @@ impl ScreenCapturer {
 
         // 3. 启动线程
         let error_flag_clone = error_flag.clone();
-        let setting_type = if use_custom { "Custom(16ms)" } else { "Default" };
-        
         let handle = thread::spawn(move || {
             // CaptureHandler::start 会内部轮询 running flag，并不断写入 buffer
             if let Err(e) = CaptureHandler::start(settings) {
-                log_error(&format!("屏幕捕获线程启动失败 ({}): {:?}", setting_type, e));
+                log_error(&format!("屏幕捕获线程启动失败: {:?}", e));
                 error_flag_clone.store(true, Ordering::SeqCst);
             }
         });
 
-        // println!("屏幕捕获线程已启动 ({})", setting_type);
-        Ok(ScreenCapturer { 
-            buffer, 
-            running, 
-            handle, 
-            square_size, 
-            error_flag,
-        })
+        // println!("屏幕捕获线程已启动");
+        Ok(ScreenCapturer { buffer, running, handle, square_size, error_flag })
     }
 
     /// 消费式停止：发出停止信号并等待线程退出
