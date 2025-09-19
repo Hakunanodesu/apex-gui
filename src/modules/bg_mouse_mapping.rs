@@ -79,11 +79,11 @@ fn apply_left_click_adjustment(
         (dx.abs() <= mid_size / 2.0 && dy.abs() <= mid_size / 2.0)
         || (dx.abs() <= d.w / 2.0 && dy.abs() <= d.h / 2.0) 
     {
-        inner_str * 50.0
+        inner_str * 20.0
     } else if 
         dx.abs() <= outer_size / 2.0 && dy.abs() <= outer_size / 2.0
     {
-        outer_str * 50.0
+        outer_str * 20.0
     } else {
         // 超出outer区间，不移动
         0.0
