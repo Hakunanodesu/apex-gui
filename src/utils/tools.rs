@@ -15,8 +15,8 @@ pub fn get_hid_instance() -> Vec<String> {
 
     // 遍历所有设备，匹配 vendor_id
     for device in api.device_list() {
-        if device.vendor_id() == 0x054c 
-            || device.vendor_id() == 0x045e 
+        if device.vendor_id() == 0x054c // Playstation
+            || device.vendor_id() == 0x045e // Xbox
         {
             let raw = device.path().to_string_lossy();
             // 拆分

@@ -70,6 +70,7 @@ fn apply_right_trigger_adjustment(
 
     mapped_state.thumb_rx = mapped_state.thumb_rx.saturating_add(rx);
     mapped_state.thumb_ry = mapped_state.thumb_ry.saturating_add(ry);
+    println!("rx: {}, ry: {}", rx, ry);
 }
 
 pub struct ConMapper {
