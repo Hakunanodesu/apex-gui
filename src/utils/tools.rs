@@ -56,7 +56,7 @@ pub fn enumerate_controllers() -> bool {
     
     // 如果没有找到任何 HID 设备，返回 false
     if hid_instances.is_empty() {
-        return true;
+        return false;
     }
     
     // 隐藏所有通过 get_hid_instance() 获取到的设备
