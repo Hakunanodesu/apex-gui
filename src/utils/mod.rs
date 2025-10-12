@@ -2,6 +2,5 @@
 pub mod ui;
 pub mod tools;
 pub mod bg_dl_instl;
-pub mod ps_con_reenable;
 pub mod console_redirect;
 pub mod config;

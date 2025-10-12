@@ -127,6 +127,7 @@ pub struct ConReader {
 
 impl ConReader {
     /// 启动线程，返回一个实例
+    /// 默认读取除0号外的所有手柄（索引0被虚拟手柄占用）
     pub fn start(is_ps_config: bool) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(XGamepad::default()));
@@ -165,7 +166,7 @@ impl ConReader {
                 }
             };
 
-            // 构建 (instance_id, device_index) 映射表
+            // 获取手柄数量
             let js_count = match js_sub.num_joysticks() {
                 Ok(count) => count,
                 Err(e) => {
@@ -175,21 +176,25 @@ impl ConReader {
                 }
             };
             
-            let js_iter = 0..js_count;
-            let mut id_map = Vec::new();
+            // 打开除0号外的所有手柄
             let mut joysticks = Vec::new();
-            for dev_idx in js_iter.clone() {
+            for dev_idx in 1..js_count {  // 从1开始，跳过0号虚拟手柄
                 match js_sub.open(dev_idx) {
                     Ok(joy) => {
-                        id_map.push((joy.instance_id(), dev_idx));
-                        // println!("打开手柄: {:?}", joy.name());
+                        // println!("成功打开物理手柄索引{}: {}", dev_idx, joy.name());
                         joysticks.push(joy);
                     }
                     Err(e) => {
-                        log_error(&format!("手柄读取 - 打开手柄{}失败: {}", dev_idx, e));
-                        // 这里不设置错误标志，因为某些手柄打开失败是正常的
+                        log_error(&format!("手柄读取 - 打开手柄索引{}失败: {}", dev_idx, e));
+                        // 单个手柄打开失败不影响其他手柄
                     }
                 }
+            }
+            
+            if joysticks.is_empty() {
+                log_error("手柄读取 - 没有可用的物理手柄（0号已被虚拟手柄占用）");
+                error_flag_clone.store(true, Ordering::SeqCst);
+                return;
             }
 
             // 标记就绪

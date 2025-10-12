@@ -15,7 +15,7 @@ use eframe::{
         ViewportBuilder,
     }
 };
-use vigem_client::Client;
+use vigem_client::{Client, Xbox360Wired, TargetId};
 
 mod utils;
 mod modules;
@@ -70,6 +70,10 @@ fn main() -> eframe::Result {
             None
         }
     };
+    
+    // 虚拟手柄管理（在手柄模式下占用0号位置）
+    let virtual_gamepad: Arc<Mutex<Option<vigem_client::Xbox360Wired<Arc<Client>>>>> = Arc::new(Mutex::new(None));
+    
     let mut show_preview = false;
     let mut on_top = false;
     let mut _show_config = false;
@@ -103,10 +107,33 @@ fn main() -> eframe::Result {
     let aim_height = Arc::new(Mutex::new(device_config.aim_height));
     let mouse_mode = Arc::new(Mutex::new(current_device == "mouse"));
     // =========================
+    
+    // 如果初始状态是手柄模式，立即创建虚拟手柄
+    if current_device == "controller" {
+        if let Some(ref client) = vg_client {
+            let id = TargetId::XBOX360_WIRED;
+            let mut tgt = Xbox360Wired::new(client.clone(), id);
+            match tgt.plugin() {
+                Ok(_) => {
+                    match tgt.wait_ready() {
+                        Ok(_) => {
+                            // println!("初始化：已创建虚拟手柄占用0号位置");
+                            *virtual_gamepad.lock().unwrap() = Some(tgt);
+                        }
+                        Err(e) => {
+                            log_error(&format!("初始化：虚拟手柄等待就绪失败: {:?}", e));
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_error(&format!("初始化：创建虚拟手柄失败: {:?}", e));
+                }
+            }
+        }
+    }
 
     // 创建状态机管理器
     let mut mapping_manager = MappingManager::new(
-        vg_client.clone(),
         current_model.clone(),
         current_aim_enable.clone(), // 瞄准辅助开关
         is_ps, // PS 手柄开关
@@ -141,6 +168,7 @@ fn main() -> eframe::Result {
             .with_resizable(false),
         ..Default::default()
     };
+    let virtual_gamepad_for_cleanup = virtual_gamepad.clone();
     run_simple_native(
         "Assisted Pursuit with Effortless eXecution",
         options,
@@ -185,7 +213,7 @@ fn main() -> eframe::Result {
 
                 // ====== 状态机更新 ======
                 let (state_do_resize, _state_show_config, state_show_preview, state_disable_on_top) = 
-                    mapping_manager.update(&mut con_exist, &mut pico_exist);
+                    mapping_manager.update(&mut con_exist, &mut pico_exist, virtual_gamepad.clone());
                 
                 if state_do_resize {
                     do_resize = true;
@@ -451,7 +479,7 @@ fn main() -> eframe::Result {
                                             ui.add(
                                                 Label::new(
                                                     egui::RichText::new(
-                                                        "⚠️\nXbox 系手柄在每次软件打开并检测到后需重新连接手柄\n⚠️"
+                                                        "⚠️\n首次使用的手柄在刷新之后请重新拔插\n⚠️"
                                                     ).color(Color32::ORANGE)
                                                 )
                                             );
@@ -472,8 +500,46 @@ fn main() -> eframe::Result {
                         ui.label("键鼠模式");
                         {
                             let mut mouse_mode_guard = mouse_mode.lock().unwrap();
+                            let old_mouse_mode = *mouse_mode_guard;
+                            let vg_clone = virtual_gamepad.clone();
                             ui.add_enabled_ui(!mapping_manager.is_active(), |ui| {
-                                ui.add(toggle_switch(&mut *mouse_mode_guard))
+                                if ui.add(toggle_switch(&mut *mouse_mode_guard)).changed() {
+                                    // 键鼠模式切换时的处理
+                                    if !*mouse_mode_guard && old_mouse_mode {
+                                        // 从键鼠模式切换到手柄模式：创建虚拟手柄
+                                        if let Some(ref client) = vg_client {
+                                            let id = TargetId::XBOX360_WIRED;
+                                            let mut tgt = Xbox360Wired::new(client.clone(), id);
+                                            match tgt.plugin() {
+                                                Ok(_) => {
+                                                    match tgt.wait_ready() {
+                                                        Ok(_) => {
+                                                            // println!("已创建虚拟手柄占用0号位置");
+                                                            *vg_clone.lock().unwrap() = Some(tgt);
+                                                        }
+                                                        Err(e) => {
+                                                            log_error(&format!("虚拟手柄等待就绪失败: {:?}", e));
+                                                            *mouse_mode_guard = old_mouse_mode; // 恢复原状态
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    log_error(&format!("创建虚拟手柄失败: {:?}", e));
+                                                    *mouse_mode_guard = old_mouse_mode; // 恢复原状态
+                                                }
+                                            }
+                                        } else {
+                                            log_error("无法创建虚拟手柄：ViGEmBus客户端未连接");
+                                            *mouse_mode_guard = old_mouse_mode; // 恢复原状态
+                                        }
+                                    } else if *mouse_mode_guard && !old_mouse_mode {
+                                        // 从手柄模式切换到键鼠模式：释放虚拟手柄
+                                        if let Some(mut vg) = vg_clone.lock().unwrap().take() {
+                                            let _ = vg.unplug();
+                                            // println!("已释放虚拟手柄");
+                                        }
+                                    }
+                                }
                             });
                         }
                         ui.label("瞄准启用");
@@ -846,6 +912,14 @@ fn main() -> eframe::Result {
     
     save_config(&updated_config);
     // =========================
+    
+    // 释放虚拟手柄（如果存在）
+    if let Some(mut vg) = virtual_gamepad_for_cleanup.lock().unwrap().take() {
+        if let Err(e) = vg.unplug() {
+            log_error(&format!("警告: 无法释放虚拟手柄: {:?}", e));
+        }
+    }
+    
     // 尝试关闭 HidHide 屏蔽功能，如果失败则记录错误但不中断程序退出
     if let Err(e) = run_hidhidecli(&["--cloak-off"]) {
         log_error(&format!("警告: 无法关闭 HidHide 屏蔽功能: {}", e));

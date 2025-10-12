@@ -2,7 +2,7 @@ use std::{
     sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}},
     time::Instant,
 };
-use vigem_client::Client;
+use vigem_client::{Client, Xbox360Wired};
 
 use crate::modules::{
     bg_con_reading::ConReader,
@@ -46,7 +46,6 @@ pub struct MappingManager {
     mouse_mapper: Option<MouseMapper>,
     
     // 配置参数
-    vg_client: Option<Arc<Client>>,
     current_model: String,
     aim_enable: Arc<AtomicBool>, // 瞄准辅助开关
     is_ps: bool, // PS 手柄开关
@@ -67,7 +66,6 @@ pub struct MappingManager {
 
 impl MappingManager {
     pub fn new(
-        vg_client: Option<Arc<Client>>,
         current_model: String,
         aim_enable: Arc<AtomicBool>, // 瞄准辅助开关
         is_ps: bool, // PS 手柄开关
@@ -89,7 +87,6 @@ impl MappingManager {
             con_reader: None,
             con_mapper: None,
             mouse_mapper: None,
-            vg_client,
             current_model,
             aim_enable,
             is_ps,
@@ -145,7 +142,7 @@ impl MappingManager {
     }
     
     // 更新状态机
-    pub fn update(&mut self, con_exist: &mut bool, pico_exist: &mut bool) -> (bool, bool, bool, bool) {
+    pub fn update(&mut self, con_exist: &mut bool, pico_exist: &mut bool, virtual_gamepad: Arc<Mutex<Option<Xbox360Wired<Arc<Client>>>>>) -> (bool, bool, bool, bool) {
         let mut do_resize = false;
         let mut show_config = false;
         let mut show_preview = false;
@@ -225,7 +222,7 @@ impl MappingManager {
             }
             
             MappingState::StartingMapper => {
-                match self.try_start_mapper() {
+                match self.try_start_mapper(virtual_gamepad.clone()) {
                     Ok(()) => {
                         self.state = MappingState::Running;
                         do_resize = true;
@@ -257,6 +254,7 @@ impl MappingManager {
             
             MappingState::Stopping => {
                 self.cleanup_all_components(con_exist, pico_exist);
+                // 注意：虚拟手柄已通过 request_stop() 返回，不在这里处理
                 self.state = MappingState::Idle;
                 do_resize = true;
                 show_preview = false;
@@ -272,7 +270,7 @@ impl MappingManager {
                         // 设备检查失败，无需清理
                     }
                     MappingState::StartingCapture => {
-                        // 屏幕捕获启动失败，无需清理
+                        // 屏幕捕获启动失败，无需清理（虚拟手柄由main.rs管理）
                     }
                     MappingState::StartingDetector => {
                         // 检测器启动失败，清理屏幕捕获器
@@ -348,7 +346,7 @@ impl MappingManager {
     }
     
     // 尝试启动映射器
-    fn try_start_mapper(&mut self) -> Result<(), String> {
+    fn try_start_mapper(&mut self, virtual_gamepad_ref: Arc<Mutex<Option<Xbox360Wired<Arc<Client>>>>>) -> Result<(), String> {
         let params = self.extract_mapping_params()?;
         
         if self.mouse_mode {
@@ -368,14 +366,12 @@ impl MappingManager {
                     .ok_or("手柄读取器未初始化")?;
                 let det = self.detector.as_ref()
                     .ok_or("检测线程未初始化")?;
-                let vg_client = self.vg_client.as_ref()
-                    .ok_or("ViGEmBus 客户端未连接")?;
                 
                 let state = reader.state();
                 let ready = reader.ready();
                 
                 self.con_mapper = Some(ConMapper::start(
-                    state, vg_client.clone(), ready, Some(det.result()),
+                    state, virtual_gamepad_ref, ready, Some(det.result()),
                     params.0, params.1, params.2, params.3, params.4,
                     params.5, params.6, params.7, params.8, self.aim_enable.clone()
                 ));
@@ -470,6 +466,7 @@ impl MappingManager {
             if let Some(reader) = self.con_reader.take() {
                 reader.stop();
             }
+            // 虚拟手柄由main.rs管理，不在这里释放
         }
         
         if let Some(det) = self.detector.take() {

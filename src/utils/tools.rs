@@ -4,7 +4,6 @@ use hidapi::HidApi;
 use egui::{Ui, TextStyle};
 
 use crate::modules::hidhide::run_hidhidecli;
-use crate::utils::ps_con_reenable::reenumerate;
 use crate::utils::console_redirect::log_error;
 
 /// 返回所有 vendor ID 为指定值的 HID 设备实例列表
@@ -18,6 +17,7 @@ pub fn get_hid_instance() -> Vec<String> {
         if device.vendor_id() == 0x054c // Playstation
             || device.vendor_id() == 0x045e // Xbox
             || device.vendor_id() == 0x413d // Mojhon
+            || device.vendor_id() == 0x3537 // GameSir
         {
             let raw = device.path().to_string_lossy();
             // 拆分
@@ -62,7 +62,7 @@ pub fn enumerate_controllers() -> bool {
     // 隐藏所有通过 get_hid_instance() 获取到的设备
     for path in hid_instances {
         // 这里根据你的 run_hidhidecli 签名调整参数传递
-        // run_hidhidecli(&["--dev-hide", &path]).unwrap();
+        run_hidhidecli(&["--dev-hide", &path]).unwrap();
     }
     // reenumerate();
 

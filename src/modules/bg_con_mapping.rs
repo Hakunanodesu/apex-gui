@@ -7,7 +7,7 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
-use vigem_client::{Client, TargetId, Xbox360Wired, XGamepad};
+use vigem_client::{Client, Xbox360Wired, XGamepad};
 use crate::modules::bg_onnx_dml_od::Detection;
 use crate::utils::console_redirect::log_error;
 
@@ -80,10 +80,10 @@ pub struct ConMapper {
 }
 
 impl ConMapper {
-    /// 启动映射线程
+    /// 启动映射线程，使用已创建的虚拟手柄（通过引用）
     pub fn start(
         state: Arc<Mutex<XGamepad>>,
-        client: Arc<Client>,
+        virtual_gamepad: Arc<Mutex<Option<Xbox360Wired<Arc<Client>>>>>,
         ready_flag: Arc<AtomicBool>,
         det_result: Option<Arc<Mutex<Option<Vec<Detection>>>>>,
         outer_size: f32,
@@ -101,9 +101,9 @@ impl ConMapper {
         let error_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
         let state_clone = state.clone();
-        let client_clone = client.clone();
         let det_result_clone = det_result.clone();
         let error_flag_clone = error_flag.clone();
+        let vg_clone = virtual_gamepad.clone();
 
         let handle = thread::spawn(move || {
             // 等待 SDL 读取线程就绪
@@ -113,22 +113,8 @@ impl ConMapper {
                 }
                 thread::sleep(Duration::from_millis(1));
             }
-            // println!("ViGEm 映射线程已启动");
-
-            let id = TargetId::XBOX360_WIRED;
-            let mut tgt = Xbox360Wired::new(client_clone, id);
             
-            if let Err(e) = tgt.plugin() {
-                log_error(&format!("手柄映射 - ViGEm插件连接失败: {:?}", e));
-                error_flag_clone.store(true, Ordering::SeqCst);
-                return;
-            }
-            
-            if let Err(e) = tgt.wait_ready() {
-                log_error(&format!("手柄映射 - ViGEm等待就绪失败: {:?}", e));
-                error_flag_clone.store(true, Ordering::SeqCst);
-                return;
-            }
+            // println!("手柄映射线程已启动，使用0号虚拟手柄");
 
             let mut consecutive_errors = 0;
             const MAX_CONSECUTIVE_ERRORS: u32 = 50;
@@ -197,21 +183,25 @@ impl ConMapper {
                     }
                 }
                 
-                if let Err(e) = tgt.update(&mapped_state) {
-                    log_error(&format!("手柄映射 - ViGEm更新状态失败: {:?}", e));
-                    consecutive_errors += 1;
-                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                        error_flag_clone.store(true, Ordering::SeqCst);
-                        break;
+                // 更新虚拟手柄状态
+                if let Some(ref mut vg) = *vg_clone.lock().unwrap() {
+                    if let Err(e) = vg.update(&mapped_state) {
+                        log_error(&format!("手柄映射 - ViGEm更新状态失败: {:?}", e));
+                        consecutive_errors += 1;
+                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                            error_flag_clone.store(true, Ordering::SeqCst);
+                            break;
+                        }
+                    } else {
+                        consecutive_errors = 0; // 重置错误计数
                     }
-                } else {
-                    consecutive_errors = 0; // 重置错误计数
                 }
                 
                 thread::sleep(Duration::from_millis(1));
             }
 
-            let _ = tgt.unplug();
+            // 注意：不在这里 unplug 虚拟手柄，它应该在整个手柄模式期间保持存在
+            // 虚拟手柄的生命周期由 main.rs 管理
         });
 
         ConMapper { stop_flag, handle, error_flag }
