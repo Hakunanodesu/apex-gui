@@ -537,9 +537,12 @@ impl eframe::App for MyApp {
         
         // 设置窗口边框的 margin
         egui::CentralPanel::default().show(ctx, |ui| {
+
             // 第一部分
             // 第一行：label | 下拉框 | 添加按钮 | 删除按钮
             ui.horizontal(|ui| {
+                ui.set_enabled(!self.core_enabled);
+
                 // Label - 使用固定宽度区域确保对齐
                 ui.add_sized(
                     egui::Vec2::new(CHARACTER_WIDTH * 3.0, ROW_HEIGHT),
@@ -614,6 +617,8 @@ impl eframe::App for MyApp {
                         
             // 第二行：label | 下拉框 | 添加按钮 | 删除按钮
             ui.horizontal(|ui| {
+                ui.set_enabled(!self.core_enabled);
+
                 // Label - 使用固定宽度区域确保对齐
                 ui.add_sized(
                     egui::Vec2::new(CHARACTER_WIDTH * 3.0, ROW_HEIGHT),
@@ -665,6 +670,8 @@ impl eframe::App for MyApp {
 
             // 第二部分
             ui.horizontal(|ui| {
+                ui.set_enabled(!self.core_enabled);
+
                 ui.add_sized(
                     egui::Vec2::new(
                         CHARACTER_WIDTH * 5.0,
@@ -675,6 +682,8 @@ impl eframe::App for MyApp {
             });
 
             ui.horizontal(|ui| {
+                ui.set_enabled(!self.core_enabled);
+
                 ui.add_sized(
                     egui::Vec2::new(CHARACTER_WIDTH * 1.0, ROW_HEIGHT),
                     egui::Label::new("")
@@ -769,9 +778,14 @@ impl eframe::App for MyApp {
                             egui::Label::new("")
                         );
 
+                        let preview_button_color = if self.preview_window_created { Some(GREEN) } else { None };
+                        let mut preview_button = egui::Button::new("预览");
+                        if let Some(color) = preview_button_color {
+                            preview_button = preview_button.fill(color);
+                        }
                         if ui.add_sized(
                             egui::Vec2::new(CHARACTER_WIDTH * 3.0, ROW_HEIGHT),
-                            egui::Button::new("预览")
+                            preview_button
                         ).clicked() {
                             self.show_preview = true;
                         }
@@ -1112,20 +1126,19 @@ impl eframe::App for MyApp {
 
             ui.horizontal(|ui| {                
                 ui.add_sized(
-                    egui::Vec2::new((ui.available_width() - CHARACTER_WIDTH * 7.4) / 2.0 - SPACING, ROW_HEIGHT),
+                    egui::Vec2::new((ui.available_width() - CHARACTER_WIDTH * 5.0) / 2.0 - SPACING, ROW_HEIGHT),
                     egui::Label::new("")
                 );
 
-                let button_text = if self.core_enabled { "智慧核心 ON" } else { "智慧核心 OFF" };
                 let button_color = if self.core_enabled { Some(GREEN) } else { None };
                 
-                let mut button = egui::Button::new(button_text);
+                let mut button = egui::Button::new("智慧核心");
                 if let Some(color) = button_color {
                     button = button.fill(color);
                 }
                 
                 if ui.add_sized(
-                    egui::Vec2::new(CHARACTER_WIDTH * 7.4, ROW_HEIGHT),
+                    egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                     button
                 ).clicked() {
                     self.toggle_core();
@@ -1136,19 +1149,26 @@ impl eframe::App for MyApp {
                     egui::Label::new("")
                 );
 
+                let inference_preview_button_color = if self.inference_preview_window_created { Some(GREEN) } else { None };
+                let mut inference_preview_button = egui::Button::new("预览");
+                if let Some(color) = inference_preview_button_color {
+                    inference_preview_button = inference_preview_button.fill(color);
+                }
+                ui.set_enabled(self.core_enabled);
                 if ui.add_sized(
                     egui::Vec2::new(CHARACTER_WIDTH * 3.0, ROW_HEIGHT),
-                    egui::Button::new("预览")
+                    inference_preview_button
                 ).clicked() {
-                    if self.core_enabled {
-                        self.show_inference_preview = true;
-                    }
+                    self.show_inference_preview = true;
                 }
+                ui.set_enabled(true); // 恢复启用状态
             });
 
             ui.separator();
 
             ui.horizontal(|ui| {
+                ui.set_enabled(!self.core_enabled);
+                
                 ui.add_sized(
                     egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
                     egui::Label::new("许可证")
@@ -1465,7 +1485,7 @@ impl eframe::App for MyApp {
                     .with_inner_size([outer_diameter_for_window, outer_diameter_for_window])
                     .with_resizable(false) // 不允许调整大小
                     .with_always_on_top() // 置顶
-                    .with_decorations(true) // 有标准窗口装饰（最小化、最大化、关闭按钮）
+                    .with_decorations(false) // 有标准窗口装饰（最小化、最大化、关闭按钮）
                     .with_maximize_button(false), // 禁用最大化按钮
                 move |ctx, _class| {
                     egui::CentralPanel::default()
@@ -1476,6 +1496,13 @@ impl eframe::App for MyApp {
                             // 窗口大小是物理像素，需要转换为逻辑像素进行绘制
                             // outer_diameter_logical_clone 是物理像素，需要除以 pixels_per_point 转换为逻辑像素
                             let radius_logical = (outer_diameter_logical_clone / 2.0) / pixels_per_point_clone;
+                            
+                            // 绘制窗口边框
+                            ui.painter().rect_stroke(
+                                rect,
+                                0.0,
+                                egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 100, 100)),
+                            );
                             
                             // 绘制圆形背景
                             ui.painter().circle_filled(
@@ -1524,6 +1551,12 @@ impl eframe::App for MyApp {
                                 }
                             }
                             
+                            // 处理窗口拖动：检测鼠标拖拽，允许通过点击窗口内部拖动窗口
+                            let response = ui.interact(rect, egui::Id::new("preview_drag_area"), egui::Sense::drag());
+                            if response.drag_started() {
+                                ctx.send_viewport_cmd_to(ctx.viewport_id(), egui::ViewportCommand::StartDrag);
+                            }
+                            
                             // 处理关闭窗口的逻辑
                             // 检测用户点击关闭按钮或按 ESC 键
                             if ui.input(|i| i.viewport().close_requested()) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1534,6 +1567,9 @@ impl eframe::App for MyApp {
                             }
                             
                         });
+                    
+                    // 请求延迟刷新（约60fps），避免阻塞主窗口
+                    ctx.request_repaint_after(std::time::Duration::from_millis(20));
                 },
             );
             
@@ -1575,7 +1611,7 @@ impl eframe::App for MyApp {
             let pixels_per_point = ctx.pixels_per_point();
             // 窗口大小使用物理像素，需要转换为逻辑像素
             // 为下方的label留出空间（约30逻辑像素）
-            let label_height = 30.0;
+            let label_height = ROW_HEIGHT;
             let window_size_logical = (square_size as f32) / pixels_per_point;
             let window_height_logical = window_size_logical + label_height;
             
@@ -1589,7 +1625,7 @@ impl eframe::App for MyApp {
                     .with_inner_size([window_size_logical, window_height_logical])
                     .with_resizable(false) // 不允许调整大小
                     .with_always_on_top()
-                    .with_decorations(true)
+                    .with_decorations(false)
                     .with_maximize_button(false),
                 move |ctx, _class| {
                     egui::CentralPanel::default()
@@ -1710,18 +1746,27 @@ impl eframe::App for MyApp {
                                     
                                     // 格式化显示文本：推理帧率/屏幕捕获帧率
                                     let fps_text = if detection_fps > 0.0 || capture_fps > 0.0 {
-                                        format!("{:.1}/{:.1}", detection_fps, capture_fps)
+                                        format!(" {}/{}", detection_fps, capture_fps)
                                     } else {
-                                        "等待数据...".to_string()
+                                        " 等待数据...".to_string()
                                     };
                                     
-                                    ui.label(
-                                        egui::RichText::new(fps_text)
-                                            .font(egui::FontId::monospace(14.0))
-                                            .color(egui::Color32::WHITE)
-                                    );
+                                    ui.label(fps_text);
                                 });
                             });
+
+                            // 绘制窗口边框
+                            ui.painter().rect_stroke(
+                                rect,
+                                0.0,
+                                egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 100, 100)),
+                            );
+                            
+                            // 处理窗口拖动：检测鼠标拖拽，允许通过点击窗口内部拖动窗口
+                            let response = ui.interact(rect, egui::Id::new("inference_preview_drag_area"), egui::Sense::drag());
+                            if response.drag_started() {
+                                ctx.send_viewport_cmd_to(ctx.viewport_id(), egui::ViewportCommand::StartDrag);
+                            }
                             
                             // 处理关闭窗口的逻辑
                             if ui.input(|i| i.viewport().close_requested()) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -1730,6 +1775,9 @@ impl eframe::App for MyApp {
                                 });
                             }
                         });
+                    
+                    // 请求延迟刷新（约60fps），避免阻塞主窗口
+                    ctx.request_repaint_after(std::time::Duration::from_millis(20));
                 },
             );
             
