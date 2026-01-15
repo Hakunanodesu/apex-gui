@@ -81,7 +81,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         let width_full = fb.width() as usize;
         let height_full = fb.height() as usize;
         let stride = width_full * 4; // RGBA/BGRA 每像素4字节
-        let src: &mut [u8] = match fb.as_nopadding_buffer() {
+        let src: &[u8] = match fb.as_nopadding_buffer() {
             Ok(src) => src,
             Err(e) => {
                 log_error(&format!("屏幕捕获 - 获取缓冲区失败: {:?}", e));
@@ -94,63 +94,68 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         let sq = self.square_size;
         let x_off = (width_full.saturating_sub(sq)) / 2;
         let y_off = (height_full.saturating_sub(sq)) / 2;
-
-        // 4. 拷贝中心正方形到共享缓冲区
+        
+        // 4. 在锁外准备数据，避免长时间持有锁
+        let buffer_size = sq * sq * 3;
+        let mut temp_buffer = vec![0u8; buffer_size];
+        
+        // 5. 优化像素拷贝：先验证边界，减少循环内检查
+        let max_src_start = (y_off + sq - 1) * stride + (x_off + sq) * 4;
+        if max_src_start > src.len() {
+            log_error("屏幕捕获 - 源缓冲区越界");
+            self.error_flag.store(true, Ordering::SeqCst);
+            return Ok(()); // 跳过这一帧
+        }
+        
+        // 6. 直接写入CHW格式，使用更高效的循环
+        for row in 0..sq {
+            let src_row_start = (y_off + row) * stride + x_off * 4;
+            let src_row = &src[src_row_start..src_row_start + sq * 4];
+            
+            for col in 0..sq {
+                let src_pixel = &src_row[col * 4..col * 4 + 3];
+                let chw_idx = row * sq + col;
+                
+                temp_buffer[0 * sq * sq + chw_idx] = src_pixel[0]; // R
+                temp_buffer[1 * sq * sq + chw_idx] = src_pixel[1]; // G
+                temp_buffer[2 * sq * sq + chw_idx] = src_pixel[2]; // B
+            }
+        }
+        
+        // 7. 快速写入锁，最小化锁持有时间
         match self.buffer.lock() {
             Ok(mut dst) => {
-                // dst 长度应当为 sq * sq * 3
-                if dst.len() != sq * sq * 3 {
-                    dst.resize(sq * sq * 3, 0);
+                // 确保大小正确
+                if dst.len() != buffer_size {
+                    dst.resize(buffer_size, 0);
                 }
-                // 先清零
-                for v in dst.iter_mut() { *v = 0; }
-                // 直接写入CHW格式
-                // R通道
-                for row in 0..sq {
-                    let src_start = (y_off + row) * stride + x_off * 4;
-                    if src_start + sq * 4 <= src.len() {
-                        let src_row = &src[src_start..src_start + sq * 4];
-                        for col in 0..sq {
-                            let src_idx = col * 4;
-                            if src_idx + 2 < src_row.len() {
-                                let r = src_row[src_idx];
-                                let g = src_row[src_idx + 1];
-                                let b = src_row[src_idx + 2];
-                                let chw_idx = row * sq + col;
-                                if chw_idx < sq * sq {
-                                    dst[0 * sq * sq + chw_idx] = r; // R
-                                    dst[1 * sq * sq + chw_idx] = g; // G
-                                    dst[2 * sq * sq + chw_idx] = b; // B
-                                }
-                            }
-                        }
-                    }
-                }
+                // 直接拷贝，不需要清零
+                dst.copy_from_slice(&temp_buffer);
                 // 缓冲区更新后，递增版本号
                 self.version.fetch_add(1, Ordering::Relaxed);
-                
-                // 统计捕获帧率
-                if let Ok(mut count_guard) = self.capture_count.lock() {
-                    *count_guard += 1;
-                    
-                    if let Ok(mut time_guard) = self.last_fps_time.lock() {
-                        if time_guard.elapsed().as_secs_f32() >= 1.0 {
-                            if let Ok(mut fps_guard) = self.fps.lock() {
-                                *fps_guard = *count_guard as f32;
-                                *count_guard = 0;
-                                *time_guard = Instant::now();
-                            }
-                        }
-                    }
-                }
             }
             Err(e) => {
                 log_error(&format!("屏幕捕获 - 获取缓冲区锁失败: {:?}", e));
                 self.error_flag.store(true, Ordering::SeqCst);
             }
         }
+        
+        // 8. FPS统计移到锁外，避免增加buffer锁持有时间
+        if let Ok(mut count_guard) = self.capture_count.lock() {
+            *count_guard += 1;
+            
+            if let Ok(mut time_guard) = self.last_fps_time.lock() {
+                if time_guard.elapsed().as_secs_f32() >= 1.0 {
+                    if let Ok(mut fps_guard) = self.fps.lock() {
+                        *fps_guard = *count_guard as f32;
+                        *count_guard = 0;
+                        *time_guard = Instant::now();
+                    }
+                }
+            }
+        }
 
-        // 6. 检查停止标志
+        // 9. 检查停止标志
         if !self.running.load(Ordering::SeqCst) {
             capture_control.stop();
         }
