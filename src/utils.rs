@@ -19,6 +19,69 @@ pub struct AssistCurve {
     pub outer_strength: f32,
 }
 
+/// 手柄轴映射（SDL axis index -> 逻辑轴，None 表示未配置）
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct ConMappingAxis {
+    pub lx: Option<u8>,
+    pub ly: Option<u8>,
+    pub rx: Option<u8>,
+    pub ry: Option<u8>,
+    pub lt: Option<u8>,
+    pub rt: Option<u8>,
+}
+
+impl Default for ConMappingAxis {
+    fn default() -> Self {
+        Self { lx: None, ly: None, rx: None, ry: None, lt: None, rt: None }
+    }
+}
+
+/// 手柄按键映射（SDL button index -> 逻辑键，None 表示未配置）
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
+pub struct ConMappingButton {
+    pub lb: Option<u8>,
+    pub rb: Option<u8>,
+    pub ls: Option<u8>,
+    pub rs: Option<u8>,
+    pub back: Option<u8>,
+    pub start: Option<u8>,
+    pub x: Option<u8>,
+    pub y: Option<u8>,
+    pub a: Option<u8>,
+    pub b: Option<u8>,
+}
+
+impl Default for ConMappingButton {
+    fn default() -> Self {
+        Self {
+            lb: None, rb: None, ls: None, rs: None,
+            back: None, start: None, x: None, y: None, a: None, b: None,
+        }
+    }
+}
+
+/// 手柄键位映射（调试窗口内容，保存到配置；任意为空则不允许启动智慧核心）
+#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default)]
+pub struct ConMapping {
+    #[serde(default)]
+    pub axis: ConMappingAxis,
+    #[serde(default)]
+    pub button: ConMappingButton,
+}
+
+impl ConMapping {
+    /// 是否全部已配置（无空值）才允许启动智慧核心
+    pub fn is_complete(&self) -> bool {
+        let a = &self.axis;
+        let b = &self.button;
+        a.lx.is_some() && a.ly.is_some() && a.rx.is_some() && a.ry.is_some()
+            && a.lt.is_some() && a.rt.is_some()
+            && b.lb.is_some() && b.rb.is_some() && b.ls.is_some() && b.rs.is_some()
+            && b.back.is_some() && b.start.is_some()
+            && b.x.is_some() && b.y.is_some() && b.a.is_some() && b.b.is_some()
+    }
+}
+
 /// 配置文件结构
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 pub struct ConfigFile {
@@ -26,8 +89,9 @@ pub struct ConfigFile {
     pub assist_curve: AssistCurve,
     pub aa_activate_mode: String,
     pub use_controller: bool,
-    pub ps_mode: bool,
     pub vertical_strength_coefficient: f32,
+    #[serde(default)]
+    pub con_mapping: Option<ConMapping>,
 }
 
 /// 读取 configs/.current 文件，返回当前配置和模型

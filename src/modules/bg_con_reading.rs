@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     sync::{
         Arc,
         Mutex,
@@ -14,84 +15,123 @@ use sdl2::{
 use vigem_client::{XGamepad, XButtons};
 
 use crate::utils::console_redirect::log_error;
+use crate::utils::ConMapping;
 
+static DEBUG_PRINT_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_debug_print_enabled(enabled: bool) {
+    DEBUG_PRINT_ENABLED.store(enabled, Ordering::Relaxed);
+}
 
 fn scale_to_u8(v: i16) -> u8 {
     (((v as i32 + 32768) * 255 / 65535) as u8).clamp(0, 255)
 }
 
-fn map_button(idx: u8, is_ps: bool) -> Option<u16> {
-    if is_ps {
-        Some(match idx {
-            1 => XButtons::A,
-            2 => XButtons::B,
-            0 => XButtons::X,
-            3 => XButtons::Y,
-            4 => XButtons::LB,
-            5 => XButtons::RB,
-            8 => XButtons::BACK,
-            9 => XButtons::START,
-            10 => XButtons::LTHUMB,
-            11 => XButtons::RTHUMB,
-            _ => return None,
-        })
-    } else {
-        Some(match idx {
-            0 => XButtons::A,
-            1 => XButtons::B,
-            2 => XButtons::X,
-            3 => XButtons::Y,
-            4 => XButtons::LB,
-            5 => XButtons::RB,
-            6 => XButtons::BACK,
-            7 => XButtons::START,
-            8 => XButtons::LTHUMB,
-            9 => XButtons::RTHUMB,
-            _ => return None,
-        })
-    }
+fn map_button(idx: u8, m: &ConMapping) -> Option<u16> {
+    let b = &m.button;
+    if b.a == Some(idx) { return Some(XButtons::A); }
+    if b.b == Some(idx) { return Some(XButtons::B); }
+    if b.x == Some(idx) { return Some(XButtons::X); }
+    if b.y == Some(idx) { return Some(XButtons::Y); }
+    if b.lb == Some(idx) { return Some(XButtons::LB); }
+    if b.rb == Some(idx) { return Some(XButtons::RB); }
+    if b.back == Some(idx) { return Some(XButtons::BACK); }
+    if b.start == Some(idx) { return Some(XButtons::START); }
+    if b.ls == Some(idx) { return Some(XButtons::LTHUMB); }
+    if b.rs == Some(idx) { return Some(XButtons::RTHUMB); }
+    None
 }
 
-fn map_axis(state: &mut XGamepad, axis_idx: u8, value: i16, is_ps: bool) {
-    if is_ps {
-        match axis_idx {
-            0 => state.thumb_lx = value,
-            1 => state.thumb_ly = value.saturating_neg(),
-            2 => state.thumb_rx = value,
-            5 => state.thumb_ry = value.saturating_neg(),
-            3 => state.left_trigger = scale_to_u8(value),
-            4 => state.right_trigger = scale_to_u8(value),
-            _ => {}
-        }
-    } else {
-        match axis_idx {
-            0 => state.thumb_lx = value,
-            1 => state.thumb_ly = value.saturating_neg(),
-            3 => state.thumb_rx = value,
-            4 => state.thumb_ry = value.saturating_neg(),
-            2 => state.left_trigger = scale_to_u8(value),
-            5 => state.right_trigger = scale_to_u8(value),
-            _ => {}
-        }
-    }
+fn map_axis(state: &mut XGamepad, axis_idx: u8, value: i16, m: &ConMapping) {
+    let a = &m.axis;
+    if a.lx == Some(axis_idx) { state.thumb_lx = value; }
+    if a.ly == Some(axis_idx) { state.thumb_ly = value.saturating_neg(); }
+    if a.rx == Some(axis_idx) { state.thumb_rx = value; }
+    if a.ry == Some(axis_idx) { state.thumb_ry = value.saturating_neg(); }
+    if a.lt == Some(axis_idx) { state.left_trigger = scale_to_u8(value); }
+    if a.rt == Some(axis_idx) { state.right_trigger = scale_to_u8(value); }
 }
 
-fn apply_event(state: &mut XGamepad, evt: &JoystickEvent, is_ps: bool) {
+// 仅用于调试打印，记录 0~5 号轴的最近一次值（线程本地，无需互斥）
+thread_local! {
+    static AXIS_VALUES: RefCell<[i16; 6]> = RefCell::new([0; 6]);
+    // 记录 0~12 号按钮的最近一次状态（0/1）
+    static BUTTON_VALUES: RefCell<[u8; 13]> = RefCell::new([0; 13]);
+}
+
+fn debug_print_axes_and_buttons() {
+    if !DEBUG_PRINT_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    AXIS_VALUES.with(|axis_cell| {
+        BUTTON_VALUES.with(|btn_cell| {
+            let axes = axis_cell.borrow();
+            let btns = btn_cell.borrow();
+
+            println!("axis_idx:");
+            println!("[0] -> {:+06}", axes[0]);
+            println!("[1] -> {:+06}", axes[1]);
+            println!("[2] -> {:+06}", axes[2]);
+            println!("[3] -> {:+06}", axes[3]);
+            println!("[4] -> {:+06}", axes[4]);
+            println!("[5] -> {:+06}", axes[5]);
+            println!("button_idx:");
+            println!("[0] -> {}, [1] -> {}, [2] -> {}, [3] -> {}, [4] -> {}, [5] -> {}", btns[0], btns[1], btns[2], btns[3], btns[4], btns[5]);
+            println!("[6] -> {}, [7] -> {}, [8] -> {}, [9] -> {}, [10] -> {}, [11] -> {}", btns[6], btns[7], btns[8], btns[9], btns[10], btns[11]);
+        });
+    });
+    // 光标上移 10 行，下一次事件覆盖这 10 行
+    print!("\x1b[10A");
+}
+
+fn apply_event(state: &mut XGamepad, evt: &JoystickEvent, mapping: &ConMapping) {
+    let debug_only = DEBUG_PRINT_ENABLED.load(Ordering::Relaxed);
+
     match evt {
         JoystickEvent::Axis { axis_idx, value } => {
-            map_axis(state, *axis_idx, *value, is_ps)
+            if debug_only {
+                AXIS_VALUES.with(|cell| {
+                    let mut arr = cell.borrow_mut();
+                    if (*axis_idx as usize) < 6 {
+                        arr[*axis_idx as usize] = *value;
+                    }
+                });
+                return;
+            }
+            map_axis(state, *axis_idx, *value, mapping);
         }
         JoystickEvent::ButtonDown { button_idx } => {
-            if let Some(bit) = map_button(*button_idx, is_ps) {
+            if debug_only {
+                BUTTON_VALUES.with(|cell| {
+                    let mut arr = cell.borrow_mut();
+                    if (*button_idx as usize) < 13 {
+                        arr[*button_idx as usize] = 1;
+                    }
+                });
+                return;
+            }
+            if let Some(bit) = map_button(*button_idx, mapping) {
                 *state.buttons.as_mut() |= bit;
             }
         }
         JoystickEvent::ButtonUp { button_idx } => {
-            if let Some(bit) = map_button(*button_idx, is_ps) {
+            if debug_only {
+                BUTTON_VALUES.with(|cell| {
+                    let mut arr = cell.borrow_mut();
+                    if (*button_idx as usize) < 13 {
+                        arr[*button_idx as usize] = 0;
+                    }
+                });
+                return;
+            }
+            if let Some(bit) = map_button(*button_idx, mapping) {
                 *state.buttons.as_mut() &= !bit;
             }
         }
         JoystickEvent::HatMotion { state: hat } => {
+            if debug_only {
+                return;
+            }
             let dpad_mask = XButtons::UP | XButtons::DOWN | XButtons::LEFT | XButtons::RIGHT;
             *state.buttons.as_mut() &= !dpad_mask;
             match hat {
@@ -127,8 +167,8 @@ pub struct ConReader {
 
 impl ConReader {
     /// 启动线程，返回一个实例
-    /// 默认读取除0号外的所有手柄（索引0被虚拟手柄占用）
-    pub fn start(is_ps_config: bool) -> Self {
+    /// mapping 为手柄键位映射（从配置文件读取，智慧核心启动时传入）
+    pub fn start(mapping: ConMapping) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(XGamepad::default()));
         let ready_flag = Arc::new(AtomicBool::new(false));
@@ -137,6 +177,7 @@ impl ConReader {
         let state_clone = state.clone();
         let ready_clone = ready_flag.clone();
         let error_flag_clone = error_flag.clone();
+        let mapping_clone = mapping.clone();
 
         let handle = thread::spawn(move || {
             let sdl_ctx = match sdl2::init() {
@@ -216,6 +257,7 @@ impl ConReader {
             
             // 循环处理
             while !stop_clone.load(Ordering::SeqCst) {
+                let mut had_joy_event = false;
                 for evt in pump.poll_iter() {
                     // 过滤手柄事件
                     match evt {
@@ -226,28 +268,25 @@ impl ConReader {
                         _ => continue,
                     };
 
-                    // 使用配置的 is_ps 值
-                    let is_ps = is_ps_config;
-
                     // 分发事件到状态
                     match state_clone.lock() {
                         Ok(mut lock) => {
                             match evt {
                                 Event::JoyAxisMotion { axis_idx, value, .. } => {
-                                    // println!("axis_id: {}, value: {}", axis_idx, value);
-                                    apply_event(&mut *lock, &JoystickEvent::Axis { axis_idx, value }, is_ps);
+                                    apply_event(&mut *lock, &JoystickEvent::Axis { axis_idx, value }, &mapping_clone);
+                                    had_joy_event = true;
                                 }
                                 Event::JoyButtonDown { button_idx, .. } => {
-                                    // println!("button_down: {}", button_idx);
-                                    apply_event(&mut *lock, &JoystickEvent::ButtonDown { button_idx }, is_ps);
+                                    apply_event(&mut *lock, &JoystickEvent::ButtonDown { button_idx }, &mapping_clone);
+                                    had_joy_event = true;
                                 }
                                 Event::JoyButtonUp { button_idx, .. } => {
-                                    // println!("button_up: {}", button_idx);
-                                    apply_event(&mut *lock, &JoystickEvent::ButtonUp { button_idx }, is_ps);
+                                    apply_event(&mut *lock, &JoystickEvent::ButtonUp { button_idx }, &mapping_clone);
+                                    had_joy_event = true;
                                 }
                                 Event::JoyHatMotion { state, .. } => {
-                                    // println!("hat_state: {:?}", state);
-                                    apply_event(&mut *lock, &JoystickEvent::HatMotion { state }, is_ps);
+                                    apply_event(&mut *lock, &JoystickEvent::HatMotion { state }, &mapping_clone);
+                                    had_joy_event = true;
                                 }
                                 _ => {}
                             }
@@ -263,6 +302,9 @@ impl ConReader {
                             }
                         }
                     }
+                }
+                if had_joy_event {
+                    debug_print_axes_and_buttons();
                 }
                 thread::sleep(Duration::from_millis(1));
             }

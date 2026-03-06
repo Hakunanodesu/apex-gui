@@ -1,12 +1,10 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 use vigem_client::{Client, Xbox360Wired};
 
 mod utils;
 mod modules;
-use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, ConfigFile, check_dir_exist};
+use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, ConfigFile, ConMapping, check_dir_exist};
 use utils::enum_device_tool::{enumerate_controllers, enumerate_pico};
 use modules::mapping_state_machine::MappingManager;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -126,7 +124,6 @@ struct MyApp {
     
     // 输入设备选择
     use_controller: bool, // 是否使用手柄
-    ps_mode: bool, // PS模式（仅在手柄模式下有效）
     
     // 吸附方式选择
     aa_activate_mode_selected: String,
@@ -186,6 +183,27 @@ struct MyApp {
     show_inference_preview: bool, // 是否显示推理预览窗口
     inference_preview_window_created: bool, // 推理预览窗口是否已创建
     preview_allowed: bool, // 预览是否允许显示（需要智慧核心运行）
+
+    // 调试输出
+    debug_enabled: bool,
+    show_debug_window: bool, // 手柄键位调试窗口
+    // 手柄键位调试窗口输入框
+    debug_axis_lx: String,
+    debug_axis_ly: String,
+    debug_axis_rx: String,
+    debug_axis_ry: String,
+    debug_axis_lt: String,
+    debug_axis_rt: String,
+    debug_btn_lb: String,
+    debug_btn_rb: String,
+    debug_btn_ls: String,
+    debug_btn_rs: String,
+    debug_btn_back: String,
+    debug_btn_start: String,
+    debug_btn_x: String,
+    debug_btn_y: String,
+    debug_btn_a: String,
+    debug_btn_b: String,
 }
 
 impl Default for MyApp {
@@ -227,7 +245,6 @@ impl Default for MyApp {
         let mapping_manager = MappingManager::new(
             model_selected.clone(),
             aim_enable.clone(),
-            false, // is_ps，将在加载配置时更新
             outer_size.clone(),
             mid_size.clone(),
             inner_size.clone(),
@@ -248,7 +265,6 @@ impl Default for MyApp {
             delete_config_confirm: None,
             add_config_dialog: None,
             use_controller: false, // 默认不使用手柄
-            ps_mode: false, // 默认不使用PS模式
             aa_activate_mode_selected: String::new(),
             aa_activate_mode_items: vec!["瞄准 & 开火".to_string(), "仅开火".to_string()],
             screen_height,
@@ -285,6 +301,24 @@ impl Default for MyApp {
             show_inference_preview: false,
             inference_preview_window_created: false,
             preview_allowed: false,
+            debug_enabled: false,
+            show_debug_window: false,
+            debug_axis_lx: String::new(),
+            debug_axis_ly: String::new(),
+            debug_axis_rx: String::new(),
+            debug_axis_ry: String::new(),
+            debug_axis_lt: String::new(),
+            debug_axis_rt: String::new(),
+            debug_btn_lb: String::new(),
+            debug_btn_rb: String::new(),
+            debug_btn_ls: String::new(),
+            debug_btn_rs: String::new(),
+            debug_btn_back: String::new(),
+            debug_btn_start: String::new(),
+            debug_btn_x: String::new(),
+            debug_btn_y: String::new(),
+            debug_btn_a: String::new(),
+            debug_btn_b: String::new(),
         };
         
         // 软件打开时创建 vigembus 虚拟手柄
@@ -313,7 +347,6 @@ impl MyApp {
     /// 从 ConfigFile 加载配置到 UI
     fn load_config(&mut self, config: &ConfigFile) {
         self.use_controller = config.use_controller;
-        self.ps_mode = config.ps_mode;
         self.aa_activate_mode_selected = config.aa_activate_mode.clone();
         self.outer_diameter = config.assist_curve.outer_diameter;
         self.outer_strength = config.assist_curve.outer_strength;
@@ -324,9 +357,75 @@ impl MyApp {
         self.hipfire_strength_factor = config.assist_curve.hipfire;
         self.vertical_strength_factor = config.vertical_strength_coefficient;
         self.aim_height_factor = config.aim_height_coefficient;
+        if let Some(ref m) = config.con_mapping {
+            self.debug_axis_lx = m.axis.lx.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_axis_ly = m.axis.ly.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_axis_rx = m.axis.rx.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_axis_ry = m.axis.ry.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_axis_lt = m.axis.lt.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_axis_rt = m.axis.rt.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_lb = m.button.lb.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_rb = m.button.rb.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_ls = m.button.ls.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_rs = m.button.rs.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_back = m.button.back.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_start = m.button.start.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_x = m.button.x.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_y = m.button.y.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_a = m.button.a.map(|n| n.to_string()).unwrap_or_default();
+            self.debug_btn_b = m.button.b.map(|n| n.to_string()).unwrap_or_default();
+        } else {
+            self.debug_axis_lx.clear();
+            self.debug_axis_ly.clear();
+            self.debug_axis_rx.clear();
+            self.debug_axis_ry.clear();
+            self.debug_axis_lt.clear();
+            self.debug_axis_rt.clear();
+            self.debug_btn_lb.clear();
+            self.debug_btn_rb.clear();
+            self.debug_btn_ls.clear();
+            self.debug_btn_rs.clear();
+            self.debug_btn_back.clear();
+            self.debug_btn_start.clear();
+            self.debug_btn_x.clear();
+            self.debug_btn_y.clear();
+            self.debug_btn_a.clear();
+            self.debug_btn_b.clear();
+        }
         self.config_changed = false;
     }
     
+    /// 将调试窗口输入框解析为 ConMapping（空字符串为 None，非空解析为 u8）
+    fn debug_to_con_mapping(&self) -> ConMapping {
+        use utils::{ConMappingAxis, ConMappingButton};
+        let parse_u8 = |s: &str| {
+            let s = s.trim();
+            if s.is_empty() { None } else { s.parse().ok() }
+        };
+        ConMapping {
+            axis: ConMappingAxis {
+                lx: parse_u8(&self.debug_axis_lx),
+                ly: parse_u8(&self.debug_axis_ly),
+                rx: parse_u8(&self.debug_axis_rx),
+                ry: parse_u8(&self.debug_axis_ry),
+                lt: parse_u8(&self.debug_axis_lt),
+                rt: parse_u8(&self.debug_axis_rt),
+            },
+            button: ConMappingButton {
+                lb: parse_u8(&self.debug_btn_lb),
+                rb: parse_u8(&self.debug_btn_rb),
+                ls: parse_u8(&self.debug_btn_ls),
+                rs: parse_u8(&self.debug_btn_rs),
+                back: parse_u8(&self.debug_btn_back),
+                start: parse_u8(&self.debug_btn_start),
+                x: parse_u8(&self.debug_btn_x),
+                y: parse_u8(&self.debug_btn_y),
+                a: parse_u8(&self.debug_btn_a),
+                b: parse_u8(&self.debug_btn_b),
+            },
+        }
+    }
+
     /// 将当前 UI 状态保存为 ConfigFile
     fn to_config_file(&self) -> ConfigFile {
         ConfigFile {
@@ -342,8 +441,8 @@ impl MyApp {
             },
             aa_activate_mode: self.aa_activate_mode_selected.clone(),
             use_controller: self.use_controller,
-            ps_mode: self.ps_mode,
             vertical_strength_coefficient: self.vertical_strength_factor,
+            con_mapping: Some(self.debug_to_con_mapping()),
         }
     }
     
@@ -442,14 +541,23 @@ impl MyApp {
             self.aim_enable.store(aim_enable, Ordering::Relaxed);
             self.mapping_manager.update_aim_enable(aim_enable);
             
-            // 更新 PS 模式
-            self.mapping_manager.update_is_ps(self.ps_mode);
-            
             // 更新模型配置
             self.mapping_manager.update_config(self.model_selected.clone());
             
             // 确定鼠标模式（不使用手柄就是鼠标模式）
             let mouse_mode = !self.use_controller;
+            
+            // 手柄模式下：任意映射为空则打开调试窗口且不允许启动智慧核心
+            if !mouse_mode {
+                let mapping = self.debug_to_con_mapping();
+                if !mapping.is_complete() {
+                    self.show_debug_window = true;
+                    self.debug_enabled = true;
+                    modules::bg_con_reading::set_debug_print_enabled(true);
+                    self.mapping_manager.start_con_reader_for_debug();
+                    return;
+                }
+            }
             
             // 确保虚拟手柄（如果不是鼠标模式）
             if !mouse_mode {
@@ -464,8 +572,9 @@ impl MyApp {
                 }
             }
             
-            // 使用 MappingManager 启动
-            self.mapping_manager.request_start(mouse_mode);
+            // 使用 MappingManager 启动（手柄模式传入键位映射，鼠标模式传 None）
+            let con_mapping = if mouse_mode { None } else { Some(self.debug_to_con_mapping()) };
+            self.mapping_manager.request_start(mouse_mode, con_mapping);
             self.core_enabled = true;
             self.preview_allowed = false;
         }
@@ -494,8 +603,8 @@ impl MyApp {
             },
             aa_activate_mode: "仅开火".to_string(),
             use_controller: false,
-            ps_mode: false,
             vertical_strength_coefficient: 0.4,
+            con_mapping: Some(ConMapping::default()),
         }
     }
 }
@@ -698,42 +807,29 @@ impl eframe::App for MyApp {
                             egui::Label::new("输入设备")
                         );
 
-                        ui.vertical(|ui| {
-                            // 键鼠 radiobutton（与手柄互斥）
-                            if ui.add_sized(
-                                egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
-                                egui::RadioButton::new(!self.use_controller, "键鼠")
-                            ).clicked() {
-                                self.use_controller = false;
-                                self.mark_config_changed();
-                                self.save_config();
-                            }
-                        
-                            ui.horizontal(|ui| {
-                                // 手柄 radiobutton
-                                if ui.add_sized(
-                                    egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
-                                    egui::RadioButton::new(self.use_controller, "手柄")
-                                ).clicked() {
-                                    self.use_controller = true;
-                                    self.mark_config_changed();
-                                    self.save_config();
-                                }
-
-                                // PS 模式 checkbox（始终显示，但根据 use_controller 状态禁用/启用）
-                                ui.set_enabled(self.use_controller);
-                                let mut ps_mode = self.ps_mode;
-                                if ui.add_sized(
-                                    egui::Vec2::new(CHARACTER_WIDTH * 5.2, ROW_HEIGHT), 
-                                    egui::Checkbox::new(&mut ps_mode, "PS模式")
-                                ).changed() {
-                                    self.ps_mode = ps_mode;
-                                    self.mark_config_changed();
-                                    self.save_config();
-                                }
-                                ui.set_enabled(true); // 恢复启用状态
-                            });
+                        // ui.vertical(|ui| {
+                        // 键鼠 radiobutton（与手柄互斥）
+                        if ui.add_sized(
+                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
+                            egui::RadioButton::new(!self.use_controller, "键鼠")
+                        ).clicked() {
+                            self.use_controller = false;
+                            self.mark_config_changed();
+                            self.save_config();
+                        }
+                    
+                        ui.horizontal(|ui| {
+                            // 手柄 radiobutton
+                        if ui.add_sized(
+                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
+                            egui::RadioButton::new(self.use_controller, "手柄")
+                        ).clicked() {
+                            self.use_controller = true;
+                            self.mark_config_changed();
+                            self.save_config();
+                        }
                         });
+                        // });
                     });
 
                     ui.horizontal(|ui| {
@@ -1173,14 +1269,14 @@ impl eframe::App for MyApp {
                     egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
                     egui::Label::new("许可证")
                 );
-
+                
                 // 输入框
                 ui.add_sized(
                     egui::Vec2::new(ui.available_width() - CHARACTER_WIDTH * 1.6 - SPACING * 2.0, ROW_HEIGHT),
                     egui::TextEdit::singleline(&mut self.license_key)
                         .hint_text("请输入许可证")
                 );
-
+                
                 if ui.add_sized(
                     egui::Vec2::new(CHARACTER_WIDTH * 1.6, ROW_HEIGHT),
                     egui::Button::new("?")
@@ -1189,6 +1285,24 @@ impl eframe::App for MyApp {
                     self.help_window_vigem_ready = Some(check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver"));
                     self.help_window_controller_ready = Some(enumerate_controllers());
                     self.show_help_window = true;
+                }
+            });
+
+            // 右下角调试：按钮打开空窗口（智慧核心运行时禁用）
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.set_enabled(!self.core_enabled);
+                if ui.button("手柄键位调试").clicked() {
+                    // 如果没有物理手柄，只弹帮助窗口，不打开调试窗口
+                    if !enumerate_controllers() {
+                        self.help_window_vigem_ready = Some(check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver"));
+                        self.help_window_controller_ready = Some(false);
+                        self.show_help_window = true;
+                        return;
+                    }
+                    self.show_debug_window = true;
+                    self.debug_enabled = true;
+                    modules::bg_con_reading::set_debug_print_enabled(true);
+                    self.mapping_manager.start_con_reader_for_debug();
                 }
             });
         });
@@ -1279,7 +1393,6 @@ impl eframe::App for MyApp {
                             self.config_selected.clear();
                             // 重置所有配置数据到默认值
                             self.use_controller = false;
-                            self.ps_mode = false;
                             self.aa_activate_mode_selected = String::new();
                             self.outer_diameter = 0.0;
                             self.outer_strength = 0.0;
@@ -1784,6 +1897,94 @@ impl eframe::App for MyApp {
             // 标记窗口已创建，重置 show_inference_preview
             self.inference_preview_window_created = true;
             self.show_inference_preview = false;
+        }
+        
+        // 手柄键位调试窗口（遮罩 + 居中弹窗，同帮助窗口）
+        if self.show_debug_window {
+            modal_blocker(ctx);
+            
+            let dialog_width = CHARACTER_WIDTH * 13.2 + SPACING * 6.0;
+            let dialog_height = ROW_HEIGHT * 11.0 + SPACING * 12.0;
+            let dialog_pos = egui::pos2(
+                ctx.screen_rect().center().x - dialog_width / 2.0,
+                ctx.screen_rect().center().y - dialog_height / 2.0,
+            );
+            
+            let input_w = CHARACTER_WIDTH * 2.6;
+            let label_w = CHARACTER_WIDTH * 4.0;
+            
+            egui::Area::new(egui::Id::new("debug_dialog"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(dialog_pos)
+                .show(ctx, |ui| {
+                    egui::Frame::popup(ui.style())
+                        .fill(ctx.style().visuals.window_fill())
+                        .show(ui, |ui| {
+                            ui.add_sized(egui::Vec2::new(dialog_width - SPACING * 2.0, ROW_HEIGHT), egui::Label::new("axis"));
+                            ui.horizontal(|ui| {
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("lx"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_lx).hint_text(""));
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("ly"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_ly).hint_text(""));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("rx"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_rx).hint_text(""));
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("ry"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_ry).hint_text(""));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("lt"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_lt).hint_text(""));
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("rt"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_rt).hint_text(""));
+                            });
+                            
+                            ui.add_sized(egui::Vec2::new(dialog_width - SPACING * 2.0, ROW_HEIGHT), egui::Label::new("button"));
+                            ui.horizontal(|ui| {
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("lb"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_lb).hint_text(""));
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("rb"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_rb).hint_text(""));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("ls"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_ls).hint_text(""));
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("rs"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_rs).hint_text(""));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("back"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_back).hint_text(""));
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("start"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_start).hint_text(""));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("X"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_x).hint_text(""));
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("Y"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_y).hint_text(""));
+                            });
+                            ui.horizontal(|ui| {
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("A"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_a).hint_text(""));
+                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("B"));
+                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_b).hint_text(""));
+                            });
+                            
+                            ui.horizontal(|ui| {
+                                ui.add_sized(egui::Vec2::new((dialog_width - CHARACTER_WIDTH * 3.0) / 2.0 - SPACING * 1.75, ROW_HEIGHT), egui::Label::new(""));
+                                if ui.add_sized(egui::Vec2::new(CHARACTER_WIDTH * 3.0, ROW_HEIGHT), egui::Button::new("关闭")).clicked() {
+                                    self.show_debug_window = false;
+                                    self.debug_enabled = false;
+                                    modules::bg_con_reading::set_debug_print_enabled(false);
+                                    self.mapping_manager.stop_con_reader_for_debug();
+                                    self.mark_config_changed();
+                                    self.save_config();
+                                }
+                            });
+                        });
+                });
         }
         
         // 显示帮助窗口

@@ -4,6 +4,7 @@ use std::{
 };
 use vigem_client::{Client, Xbox360Wired};
 
+use crate::utils::ConMapping;
 use crate::modules::{
     bg_con_reading::ConReader,
     bg_con_mapping::ConMapper,
@@ -47,8 +48,8 @@ pub struct MappingManager {
     
     // 配置参数
     current_model: String,
+    con_mapping: Option<ConMapping>, // 手柄键位映射（启动智慧核心时从配置读取）
     aim_enable: Arc<AtomicBool>, // 瞄准辅助开关
-    is_ps: bool, // PS 手柄开关
     outer_size: Arc<Mutex<String>>,
     mid_size: Arc<Mutex<String>>,
     inner_size: Arc<Mutex<String>>,
@@ -68,7 +69,6 @@ impl MappingManager {
     pub fn new(
         current_model: String,
         aim_enable: Arc<AtomicBool>, // 瞄准辅助开关
-        is_ps: bool, // PS 手柄开关
         outer_size: Arc<Mutex<String>>,
         mid_size: Arc<Mutex<String>>,
         inner_size: Arc<Mutex<String>>,
@@ -88,8 +88,8 @@ impl MappingManager {
             con_mapper: None,
             mouse_mapper: None,
             current_model,
+            con_mapping: None,
             aim_enable,
-            is_ps,
             outer_size,
             mid_size,
             inner_size,
@@ -126,10 +126,11 @@ impl MappingManager {
         }
     }
     
-    // 请求启动映射
-    pub fn request_start(&mut self, mouse_mode: bool) {
+    // 请求启动映射（con_mapping 从当前配置的手柄键位调试内容读取）
+    pub fn request_start(&mut self, mouse_mode: bool, con_mapping: Option<ConMapping>) {
         if matches!(self.state, MappingState::Idle) {
             self.mouse_mode = mouse_mode;
+            self.con_mapping = con_mapping;
             self.state = MappingState::CheckingDevice;
         }
     }
@@ -216,7 +217,8 @@ impl MappingManager {
                 // 仅在手柄模式下
                 if !self.mouse_mode {
                     if self.con_reader.is_none() {
-                        self.con_reader = Some(ConReader::start(self.is_ps));
+                        let mapping = self.con_mapping.clone().unwrap_or_default();
+                        self.con_reader = Some(ConReader::start(mapping));
                     }
                 }
                 self.state = MappingState::StartingMapper;
@@ -517,10 +519,6 @@ impl MappingManager {
         self.aim_enable.store(aim_enable, Ordering::SeqCst);
     }
 
-    pub fn update_is_ps(&mut self, is_ps: bool) {
-        self.is_ps = is_ps;
-    }
-
     // 提供对组件的只读访问，用于UI显示
     pub fn get_screen_capturer(&self) -> &Option<ScreenCapturer> {
         &self.screen_capturer
@@ -528,5 +526,21 @@ impl MappingManager {
     
     pub fn get_detector(&self) -> &Option<DetectorThread> {
         &self.detector
+    }
+
+    /// 仅用于调试窗口：若当前未运行智慧核心且尚未启动 ConReader，则启动 ConReader（使用默认键位映射）
+    pub fn start_con_reader_for_debug(&mut self) {
+        if matches!(self.state, MappingState::Idle) && self.con_reader.is_none() {
+            self.con_reader = Some(ConReader::start(ConMapping::default()));
+        }
+    }
+
+    /// 仅用于调试窗口：若当前未运行智慧核心，则停止 ConReader
+    pub fn stop_con_reader_for_debug(&mut self) {
+        if matches!(self.state, MappingState::Idle) {
+            if let Some(reader) = self.con_reader.take() {
+                reader.stop();
+            }
+        }
     }
 } 
