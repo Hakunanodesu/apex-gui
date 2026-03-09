@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 use vigem_client::{Client, Xbox360Wired};
@@ -124,6 +126,7 @@ struct MyApp {
     
     // 输入设备选择
     use_controller: bool, // 是否使用手柄
+    rt_rapid_fire: Arc<AtomicBool>, // 右扳机连点开关（跨线程共享）
     
     // 吸附方式选择
     aa_activate_mode_selected: String,
@@ -231,6 +234,7 @@ impl Default for MyApp {
         
         // 初始化参数共享结构
         let aim_enable = Arc::new(AtomicBool::new(false));
+        let rt_rapid_fire = Arc::new(AtomicBool::new(false));
         let outer_size = Arc::new(Mutex::new(String::new()));
         let mid_size = Arc::new(Mutex::new(String::new()));
         let inner_size = Arc::new(Mutex::new(String::new()));
@@ -254,6 +258,7 @@ impl Default for MyApp {
             hipfire.clone(),
             vertical_str.clone(),
             aim_height.clone(),
+            rt_rapid_fire.clone(),
         );
         
         let mut app = Self {
@@ -265,6 +270,7 @@ impl Default for MyApp {
             delete_config_confirm: None,
             add_config_dialog: None,
             use_controller: false, // 默认不使用手柄
+            rt_rapid_fire,
             aa_activate_mode_selected: String::new(),
             aa_activate_mode_items: vec!["瞄准 & 开火".to_string(), "仅开火".to_string()],
             screen_height,
@@ -807,7 +813,6 @@ impl eframe::App for MyApp {
                             egui::Label::new("输入设备")
                         );
 
-                        // ui.vertical(|ui| {
                         // 键鼠 radiobutton（与手柄互斥）
                         if ui.add_sized(
                             egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
@@ -820,16 +825,25 @@ impl eframe::App for MyApp {
                     
                         ui.horizontal(|ui| {
                             // 手柄 radiobutton
-                        if ui.add_sized(
-                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
-                            egui::RadioButton::new(self.use_controller, "手柄")
-                        ).clicked() {
-                            self.use_controller = true;
-                            self.mark_config_changed();
-                            self.save_config();
-                        }
+                            if ui.add_sized(
+                                egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
+                                egui::RadioButton::new(self.use_controller, "手柄")
+                            ).clicked() {
+                                self.use_controller = true;
+                                self.mark_config_changed();
+                                self.save_config();
+                            }
+
+                            // 右扳机连点开关（仅在手柄模式下可用）
+                            let mut rapid_enabled = self.rt_rapid_fire.load(Ordering::Relaxed);
+                            let enabled_before = rapid_enabled;
+                            ui.add_enabled_ui(self.use_controller, |ui| {
+                                ui.checkbox(&mut rapid_enabled, "连点");
+                            });
+                            if rapid_enabled != enabled_before {
+                                self.rt_rapid_fire.store(rapid_enabled, Ordering::Relaxed);
+                            }
                         });
-                        // });
                     });
 
                     ui.horizontal(|ui| {
@@ -1554,10 +1568,18 @@ impl eframe::App for MyApp {
             }
         }
         
-        // 显示预览窗口
+        // 显示预览窗口（仅在智慧核心未开启时）
+        // 如果智慧核心开启，则强制关闭吸附曲线预览窗口
+        if self.core_enabled && self.preview_window_created {
+            let viewport_id = egui::ViewportId::from_hash_of("preview_window");
+            ctx.send_viewport_cmd_to(viewport_id, egui::ViewportCommand::Close);
+            self.preview_window_created = false;
+            self.show_preview = false;
+        }
+
         // 如果用户点击了预览按钮，设置标志
         // 如果窗口已创建，持续显示窗口（需要每帧都调用 show_viewport_immediate）
-        if self.show_preview || self.preview_window_created {
+        if !self.core_enabled && (self.show_preview || self.preview_window_created) {
             // 如果用户点击了预览按钮，重置创建标志（允许重新创建）
             if self.show_preview && self.preview_window_created {
                 let viewport_id = egui::ViewportId::from_hash_of("preview_window");
@@ -1899,16 +1921,15 @@ impl eframe::App for MyApp {
             self.show_inference_preview = false;
         }
         
-        // 手柄键位调试窗口（遮罩 + 居中弹窗，同帮助窗口）
+        // 手柄键位调试窗口：覆盖整个主窗口，下方展示调试输出
         if self.show_debug_window {
-            modal_blocker(ctx);
-            
-            let dialog_width = CHARACTER_WIDTH * 13.2 + SPACING * 6.0;
-            let dialog_height = ROW_HEIGHT * 11.0 + SPACING * 12.0;
-            let dialog_pos = egui::pos2(
-                ctx.screen_rect().center().x - dialog_width / 2.0,
-                ctx.screen_rect().center().y - dialog_height / 2.0,
-            );
+            // 强制连续刷新，保证调试输出实时更新
+            ctx.request_repaint();
+
+            let screen_rect = ctx.screen_rect();
+            let dialog_width = screen_rect.width();
+            let dialog_height = screen_rect.height();
+            let dialog_pos = screen_rect.min;
             
             let input_w = CHARACTER_WIDTH * 2.6;
             let label_w = CHARACTER_WIDTH * 4.0;
@@ -1920,7 +1941,10 @@ impl eframe::App for MyApp {
                     egui::Frame::popup(ui.style())
                         .fill(ctx.style().visuals.window_fill())
                         .show(ui, |ui| {
-                            ui.add_sized(egui::Vec2::new(dialog_width - SPACING * 2.0, ROW_HEIGHT), egui::Label::new("axis"));
+                            ui.set_min_size(egui::Vec2::new(dialog_width, dialog_height));
+
+                            // 上半部分：映射输入
+                            ui.add_sized(egui::Vec2::new(CHARACTER_WIDTH * 3.4, ROW_HEIGHT), egui::Label::new("axis"));
                             ui.horizontal(|ui| {
                                 ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("lx"));
                                 ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_lx).hint_text(""));
@@ -1940,7 +1964,7 @@ impl eframe::App for MyApp {
                                 ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_rt).hint_text(""));
                             });
                             
-                            ui.add_sized(egui::Vec2::new(dialog_width - SPACING * 2.0, ROW_HEIGHT), egui::Label::new("button"));
+                            ui.add_sized(egui::Vec2::new(CHARACTER_WIDTH * 4.6, ROW_HEIGHT), egui::Label::new("button"));
                             ui.horizontal(|ui| {
                                 ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("lb"));
                                 ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_lb).hint_text(""));
@@ -1971,7 +1995,31 @@ impl eframe::App for MyApp {
                                 ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("B"));
                                 ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_b).hint_text(""));
                             });
-                            
+
+                            // 中间：调试输出（固定区域，无滚动条）
+                            ui.add_sized(
+                                egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
+                                egui::Label::new("调试输出"),
+                            );
+
+                            let available_for_scroll = ui.available_height() - ROW_HEIGHT * 2.0 - SPACING * 2.0;
+                            let text_area_height = available_for_scroll.max(ROW_HEIGHT * 3.0);
+
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::Vec2::new(dialog_width - SPACING * 2.0, text_area_height),
+                                egui::Sense::hover(),
+                            );
+
+                            let text = modules::bg_con_reading::get_debug_text();
+                            ui.painter().text(
+                                rect.min,
+                                egui::Align2::LEFT_TOP,
+                                text,
+                                egui::TextStyle::Monospace.resolve(ui.style()),
+                                ui.visuals().text_color(),
+                            );
+                                                        
+                            // 底部：关闭按钮
                             ui.horizontal(|ui| {
                                 ui.add_sized(egui::Vec2::new((dialog_width - CHARACTER_WIDTH * 3.0) / 2.0 - SPACING * 1.75, ROW_HEIGHT), egui::Label::new(""));
                                 if ui.add_sized(egui::Vec2::new(CHARACTER_WIDTH * 3.0, ROW_HEIGHT), egui::Button::new("关闭")).clicked() {

@@ -18,9 +18,14 @@ use crate::utils::console_redirect::log_error;
 use crate::utils::ConMapping;
 
 static DEBUG_PRINT_ENABLED: AtomicBool = AtomicBool::new(false);
+static DEBUG_TEXT: Mutex<String> = Mutex::new(String::new());
 
 pub fn set_debug_print_enabled(enabled: bool) {
     DEBUG_PRINT_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+pub fn get_debug_text() -> String {
+    DEBUG_TEXT.lock().map(|s| s.clone()).unwrap_or_default()
 }
 
 fn scale_to_u8(v: i16) -> u8 {
@@ -68,20 +73,33 @@ fn debug_print_axes_and_buttons() {
             let axes = axis_cell.borrow();
             let btns = btn_cell.borrow();
 
-            println!("axis_idx:");
-            println!("[0] -> {:+06}", axes[0]);
-            println!("[1] -> {:+06}", axes[1]);
-            println!("[2] -> {:+06}", axes[2]);
-            println!("[3] -> {:+06}", axes[3]);
-            println!("[4] -> {:+06}", axes[4]);
-            println!("[5] -> {:+06}", axes[5]);
-            println!("button_idx:");
-            println!("[0] -> {}, [1] -> {}, [2] -> {}, [3] -> {}, [4] -> {}, [5] -> {}", btns[0], btns[1], btns[2], btns[3], btns[4], btns[5]);
-            println!("[6] -> {}, [7] -> {}, [8] -> {}, [9] -> {}, [10] -> {}, [11] -> {}", btns[6], btns[7], btns[8], btns[9], btns[10], btns[11]);
+            let mut s = String::new();
+            use std::fmt::Write;
+
+            let _ = writeln!(s, "axis_idx:");
+            let _ = writeln!(s, "[0]->{:+06}", axes[0]);
+            let _ = writeln!(s, "[1]->{:+06}", axes[1]);
+            let _ = writeln!(s, "[2]->{:+06}", axes[2]);
+            let _ = writeln!(s, "[3]->{:+06}", axes[3]);
+            let _ = writeln!(s, "[4]->{:+06}", axes[4]);
+            let _ = writeln!(s, "[5]->{:+06}", axes[5]);
+            let _ = writeln!(s, "button_idx:");
+            let _ = writeln!(
+                s,
+                "[0]->{}, [1]->{}, [2]->{}, [3]->{}, [4]->{}, [5]->{}",
+                btns[0], btns[1], btns[2], btns[3], btns[4], btns[5]
+            );
+            let _ = writeln!(
+                s,
+                "[6]->{}, [7]->{}, [8]->{}, [9]->{}, [10]->{}, [11]->{}",
+                btns[6], btns[7], btns[8], btns[9], btns[10], btns[11]
+            );
+
+            if let Ok(mut lock) = DEBUG_TEXT.lock() {
+                *lock = s;
+            }
         });
     });
-    // 光标上移 10 行，下一次事件覆盖这 10 行
-    print!("\x1b[10A");
 }
 
 fn apply_event(state: &mut XGamepad, evt: &JoystickEvent, mapping: &ConMapping) {

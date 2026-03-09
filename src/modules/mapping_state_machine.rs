@@ -59,6 +59,7 @@ pub struct MappingManager {
     hipfire: Arc<Mutex<String>>,
     vertical_str: Arc<Mutex<String>>,
     aim_height: Arc<Mutex<String>>,
+    rt_rapid_fire: Arc<AtomicBool>, // 右扳机连点开关
     
     // 状态标志
     device_available: bool,
@@ -78,6 +79,7 @@ impl MappingManager {
         hipfire: Arc<Mutex<String>>,
         vertical_str: Arc<Mutex<String>>,
         aim_height: Arc<Mutex<String>>,
+        rt_rapid_fire: Arc<AtomicBool>,
     ) -> Self {
         Self {
             state: MappingState::Idle,
@@ -99,6 +101,7 @@ impl MappingManager {
             hipfire,
             vertical_str,
             aim_height,
+            rt_rapid_fire,
             device_available: false,
             last_error_check: Instant::now(),
         }
@@ -389,7 +392,7 @@ impl MappingManager {
                 self.con_mapper = Some(ConMapper::start(
                     state, virtual_gamepad_ref, ready, Some(det.result()),
                     params.0, params.1, params.2, params.3, params.4,
-                    params.5, params.6, params.7, params.8, self.aim_enable.clone()
+                    params.5, params.6, params.7, params.8, self.aim_enable.clone(), self.rt_rapid_fire.clone()
                 ));
             }
         }

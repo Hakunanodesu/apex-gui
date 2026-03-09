@@ -96,6 +96,7 @@ impl ConMapper {
         aim_height: f32,  // 新增瞄准高度参数
         hipfire: f32,
         aim_enable: Arc<AtomicBool>, // 新增瞄准辅助开关
+        rt_rapid_fire: Arc<AtomicBool>, // 右扳机连点开关
     ) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let error_flag = Arc::new(AtomicBool::new(false));
@@ -104,6 +105,7 @@ impl ConMapper {
         let det_result_clone = det_result.clone();
         let error_flag_clone = error_flag.clone();
         let vg_clone = virtual_gamepad.clone();
+        let rt_rapid_fire_clone = rt_rapid_fire.clone();
 
         let handle = thread::spawn(move || {
             // 等待 SDL 读取线程就绪
@@ -118,6 +120,8 @@ impl ConMapper {
 
             let mut consecutive_errors = 0;
             const MAX_CONSECUTIVE_ERRORS: u32 = 50;
+            // 连点模式：根据当前输出状态反转扳机状态
+            let mut rapid_high: bool = false;
 
             while !stop_clone.load(Ordering::SeqCst) {
                 let orig_state = match state_clone.lock() {
@@ -135,19 +139,25 @@ impl ConMapper {
                 }; // 每次都用原始state
                 let mut mapped_state = orig_state.clone();
                 
-                // 控制扳机输出：只有达到250时才输出扳机值，否则输出0
-                if orig_state.right_trigger < 250 {
-                    mapped_state.right_trigger = 0;
+                // 预先检查左右扳机是否按下
+                let right_trigger_pressed = orig_state.right_trigger > 0;
+                let left_trigger_pressed = orig_state.left_trigger > 0;
+
+                // 控制扳机输出
+                if rt_rapid_fire_clone.load(Ordering::SeqCst) && right_trigger_pressed {
+                    // 连点模式：在按住右扳机时，每一帧把当前输出翻转为相反状态
+                    rapid_high = !rapid_high;
+                    mapped_state.right_trigger = if rapid_high { 255 } else { 0 };
+                } else {
+                    // 非连点模式：完全原生映射扳机（保留原始触发值），并重置连点状态
+                    rapid_high = false;
+                    // mapped_state 已经从 orig_state 克隆，因此这里无需额外处理
                 }
                 
                 // 处理检测结果并计算xy偏移
                 if let Some(ref det_arc) = det_result_clone {
                     match det_arc.lock() {
                         Ok(det_guard) => {
-                            // 检查左右扳机是否按下
-                            let right_trigger_pressed = orig_state.right_trigger > 10;
-                            let left_trigger_pressed = orig_state.left_trigger > 10;
-                            
                             if let Some(detections) = &*det_guard {
                                 if let Some(d) = detections.first() {
                                     // 当右扳机按下时总是计算并应用结果
