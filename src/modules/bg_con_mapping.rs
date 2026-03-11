@@ -147,7 +147,8 @@ impl ConMapper {
                 if rt_rapid_fire_clone.load(Ordering::SeqCst) && right_trigger_pressed {
                     // 连点模式：在按住右扳机时，每一帧把当前输出翻转为相反状态
                     rapid_high = !rapid_high;
-                    mapped_state.right_trigger = if rapid_high { 255 } else { 0 };
+                    // 高电平时输出当前原始扳机值，低电平为0
+                    mapped_state.right_trigger = if rapid_high { orig_state.right_trigger } else { 0 };
                 } else {
                     // 非连点模式：完全原生映射扳机（保留原始触发值），并重置连点状态
                     rapid_high = false;
