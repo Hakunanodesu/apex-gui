@@ -30,6 +30,8 @@ struct CaptureHandler {
     buffer: Arc<Mutex<Vec<u8>>>,
     /// 缓冲区版本号，每次更新时递增
     version: Arc<AtomicU64>,
+    /// 单次截图耗时（ms）
+    capture_latency_ms: Arc<Mutex<f32>>,
     /// 捕获帧率统计
     fps: Arc<Mutex<f32>>,
     /// 捕获计数
@@ -43,17 +45,18 @@ struct CaptureHandler {
 }
 
 impl GraphicsCaptureApiHandler for CaptureHandler {
-    type Flags = (Arc<AtomicBool>, Arc<Mutex<Vec<u8>>>, Arc<AtomicU64>, Arc<Mutex<f32>>, Arc<Mutex<u32>>, Arc<Mutex<Instant>>, usize, Arc<AtomicBool>);
+    type Flags = (Arc<AtomicBool>, Arc<Mutex<Vec<u8>>>, Arc<AtomicU64>, Arc<Mutex<f32>>, Arc<Mutex<f32>>, Arc<Mutex<u32>>, Arc<Mutex<Instant>>, usize, Arc<AtomicBool>);
     type Error = Box<dyn Error + Send + Sync>;
 
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        let (running, buffer, version, fps, capture_count, last_fps_time, square_size, error_flag) = ctx.flags;
+        let (running, buffer, version, capture_latency_ms, fps, capture_count, last_fps_time, square_size, error_flag) = ctx.flags;
 
         Ok(Self {
             _start: Instant::now(),
             running,
             buffer,
             version,
+            capture_latency_ms,
             fps,
             capture_count,
             last_fps_time,
@@ -67,6 +70,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
         frame: &mut Frame,
         capture_control: InternalCaptureControl,
     ) -> Result<(), Self::Error> {
+        let start = Instant::now();
         // 1. 获取 FrameBuffer 实例
         let mut fb = match frame.buffer() {
             Ok(fb) => fb,
@@ -89,7 +93,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
                 return Err(e.into());
             }
         }; // 不含 padding，每行紧凑
-
+        
         // 3. 计算中心正方形区域左上角坐标
         let sq = self.square_size;
         let x_off = (width_full.saturating_sub(sq)) / 2;
@@ -140,10 +144,16 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             }
         }
         
-        // 8. FPS统计移到锁外，避免增加buffer锁持有时间
+        // 8. 记录单次截图耗时（ms）
+        let elapsed_ms = start.elapsed().as_secs_f32() * 1000.0;
+        if let Ok(mut guard) = self.capture_latency_ms.lock() {
+            *guard = elapsed_ms;
+        }
+
+        // 9. 统计 FPS（在锁外进行）
         if let Ok(mut count_guard) = self.capture_count.lock() {
             *count_guard += 1;
-            
+
             if let Ok(mut time_guard) = self.last_fps_time.lock() {
                 if time_guard.elapsed().as_secs_f32() >= 1.0 {
                     if let Ok(mut fps_guard) = self.fps.lock() {
@@ -155,7 +165,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             }
         }
 
-        // 9. 检查停止标志
+        // 10. 检查停止标志
         if !self.running.load(Ordering::SeqCst) {
             capture_control.stop();
         }
@@ -172,6 +182,7 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
 pub struct ScreenCapturer {
     buffer: Arc<Mutex<Vec<u8>>>,
     version: Arc<AtomicU64>,
+    capture_latency_ms: Arc<Mutex<f32>>,
     fps: Arc<Mutex<f32>>,
     running: Arc<AtomicBool>,
     handle: JoinHandle<()>,
@@ -186,7 +197,8 @@ impl ScreenCapturer {
         let buf = vec![0u8; square_size * square_size * 3];
         let buffer = Arc::new(Mutex::new(buf));
         let version = Arc::new(AtomicU64::new(0));
-        let fps = Arc::new(Mutex::new(0.0));
+        let capture_latency_ms = Arc::new(Mutex::new(0.0f32));
+        let fps = Arc::new(Mutex::new(0.0f32));
         let capture_count = Arc::new(Mutex::new(0u32));
         let last_fps_time = Arc::new(Mutex::new(Instant::now()));
         let running = Arc::new(AtomicBool::new(true));
@@ -204,8 +216,8 @@ impl ScreenCapturer {
             // MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_millis(5)),
             DirtyRegionSettings::Default,
             ColorFormat::Rgba8,
-            // 把 running、buffer、version、fps、capture_count、last_fps_time、sq、error_flag 打包传给 handler
-            (running.clone(), buffer.clone(), version.clone(), fps.clone(), capture_count.clone(), last_fps_time.clone(), sq, error_flag.clone()),
+            // 把 running、buffer、version、capture_latency_ms、fps、capture_count、last_fps_time、sq、error_flag 打包传给 handler
+            (running.clone(), buffer.clone(), version.clone(), capture_latency_ms.clone(), fps.clone(), capture_count.clone(), last_fps_time.clone(), sq, error_flag.clone()),
         );
 
         // 3. 启动线程
@@ -219,7 +231,7 @@ impl ScreenCapturer {
         });
 
         // println!("屏幕捕获线程已启动");
-        Ok(ScreenCapturer { buffer, version, fps, running, handle, square_size, error_flag })
+        Ok(ScreenCapturer { buffer, version, capture_latency_ms, fps, running, handle, square_size, error_flag })
     }
 
     /// 消费式停止：发出停止信号并等待线程退出
@@ -240,7 +252,12 @@ impl ScreenCapturer {
         self.version.clone()
     }
 
-    /// 获取捕获帧率
+    /// 获取单次截图耗时（ms）
+    pub fn capture_latency_ms(&self) -> Arc<Mutex<f32>> {
+        self.capture_latency_ms.clone()
+    }
+
+    /// 获取截图帧率（FPS）
     pub fn fps(&self) -> Arc<Mutex<f32>> {
         self.fps.clone()
     }

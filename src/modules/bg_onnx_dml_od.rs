@@ -9,8 +9,11 @@ use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use std::path::Path;
-use image::{RgbImage, imageops::FilterType};
 use serde::{Deserialize, Serialize};
+use fast_image_resize as fir;
+use fast_image_resize::images::Image;
+use fast_image_resize::{PixelType, ResizeOptions, Resizer};
+use std::num::NonZeroU32;
 
 use crate::utils::console_redirect::log_error;
 
@@ -119,42 +122,84 @@ impl OnnxDetector {
     }
 
     /// detect 里拿到 raw 输出后，用这三个参数来过滤和 NMS
-    pub fn detect(&mut self, buffer: &[u8]) -> Result<(Vec<Detection>, f64)> {
-        let start = std::time::Instant::now();
-        // resize 到配置的推理尺寸
+    /// 返回值依次为：检测结果，预处理耗时（ms），推理耗时（ms）
+    pub fn detect(&mut self, buffer: &[u8]) -> Result<(Vec<Detection>, f32, f32)> {
+        // 预处理：从 CHW u8 buffer 使用 fast_image_resize 做最近邻缩放，再归一化为 NCHW f32
+        let preprocess_start = std::time::Instant::now();
         let src_size = self.src_size;
         let inference_size = self.inference_size;
-        let mut img = RgbImage::new(src_size as u32, src_size as u32);
-        // CHW -> HWC
+
+        let src_width = NonZeroU32::new(src_size as u32).unwrap();
+        let src_height = NonZeroU32::new(src_size as u32).unwrap();
+        let dst_width = NonZeroU32::new(inference_size as u32).unwrap();
+        let dst_height = NonZeroU32::new(inference_size as u32).unwrap();
+
+        let src_w_u32 = src_width.get();
+        let src_h_u32 = src_height.get();
+
+        // 1. CHW u8 -> HWC u8 (RGB packed)，供 fast_image_resize 使用
+        let mut src_rgb: Vec<u8> = vec![0; (src_w_u32 * src_h_u32 * 3) as usize];
         for row in 0..src_size {
             for col in 0..src_size {
                 let chw_idx = row * src_size + col;
                 let r = buffer[0 * src_size * src_size + chw_idx];
                 let g = buffer[1 * src_size * src_size + chw_idx];
                 let b = buffer[2 * src_size * src_size + chw_idx];
-                img.put_pixel(col as u32, row as u32, image::Rgb([r, g, b]));
+                let rgb_idx = (row * src_size + col) * 3;
+                src_rgb[rgb_idx] = r;
+                src_rgb[rgb_idx + 1] = g;
+                src_rgb[rgb_idx + 2] = b;
             }
         }
-        let resized = image::imageops::resize(&img, inference_size as u32, inference_size as u32, FilterType::Triangle);
-        // HWC -> CHW
-        let mut chw: Vec<u8> = vec![0; 3 * inference_size * inference_size];
+
+        let src_image = Image::from_vec_u8(
+            src_width.get(),
+            src_height.get(),
+            src_rgb,
+            PixelType::U8x3,
+        ).expect("创建 fast_image_resize 源图失败");
+
+        let mut dst_image = Image::new(
+            dst_width.get(),
+            dst_height.get(),
+            PixelType::U8x3,
+        );
+
+        let mut resizer = Resizer::new();
+        let options = ResizeOptions::new().resize_alg(fir::ResizeAlg::Nearest);
+        resizer
+            .resize(&src_image, &mut dst_image, &options)
+            .map_err(|e| anyhow::anyhow!("fast_image_resize 失败: {:?}", e))?;
+
+        let dst_buf = dst_image.buffer().to_vec();
+
+        // 2. HWC u8 (RGB packed) -> NCHW f32（归一化到 [0,1]）
+        let mut data: Vec<f32> = vec![0.0; 3 * inference_size * inference_size];
         for row in 0..inference_size {
             for col in 0..inference_size {
-                let pixel = resized.get_pixel(col as u32, row as u32).0;
-                let chw_idx = (row * inference_size + col) as usize;
-                chw[0 * inference_size * inference_size + chw_idx] = pixel[0];
-                chw[1 * inference_size * inference_size + chw_idx] = pixel[1];
-                chw[2 * inference_size * inference_size + chw_idx] = pixel[2];
+                let rgb_idx = (row * inference_size + col) * 3;
+                let r_u8 = dst_buf[rgb_idx];
+                let g_u8 = dst_buf[rgb_idx + 1];
+                let b_u8 = dst_buf[rgb_idx + 2];
+
+                let r = r_u8 as f32 / 255.0;
+                let g = g_u8 as f32 / 255.0;
+                let b = b_u8 as f32 / 255.0;
+
+                let dst = row * inference_size + col;
+                data[0 * inference_size * inference_size + dst] = r;
+                data[1 * inference_size * inference_size + dst] = g;
+                data[2 * inference_size * inference_size + dst] = b;
             }
         }
-        // 归一化并送入 ONNX
+
         let array: Array4<f32> = Array4::from_shape_vec(
             (1, 3, inference_size, inference_size),
-            chw.iter().map(|&b| b as f32 / 255.0).collect(),
+            data,
         )?;
 
-        // 2. 转成 Ort Tensor
         let input_tensor: Tensor<f32> = Tensor::from_array(array)?;
+        let preprocess_ms = preprocess_start.elapsed().as_secs_f32() * 1000.0;
 
         // 3. 创建 I/O binding —— 这里就需要 &mut self.session
         let mut binding = self.session.create_binding()?;
@@ -165,7 +210,9 @@ impl OnnxDetector {
         )?;
 
         // 4. 运行推理
+        let infer_start = std::time::Instant::now();
         let mut outputs = self.session.run_binding(&mut binding)?;
+        let infer_ms = infer_start.elapsed().as_secs_f32() * 1000.0;
         let dv = outputs
             .remove(&self.output_name)
             .expect("模型输出缺失");
@@ -207,10 +254,7 @@ impl OnnxDetector {
             cand.retain(|d| iou(&top, d) < self.iou_thres);
         }
 
-        let elapsed = start.elapsed();
-        let ms = elapsed.as_secs_f64() * 1000.0;
-        // println!("detect 耗时: {:.3} ms", ms);
-        Ok((keep, ms))
+        Ok((keep, preprocess_ms, infer_ms))
     }
 }
 
@@ -231,7 +275,10 @@ pub struct DetectorThread {
     stop_flag: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
     result: Arc<Mutex<Option<Vec<Detection>>>>,
-    fps: Arc<Mutex<f32>>,
+    /// 单次推理耗时（ms）
+    infer_latency_ms: Arc<Mutex<f32>>,
+    /// 单次截图到输入模型 resize 耗时（ms）
+    preprocess_latency_ms: Arc<Mutex<f32>>,
     error_flag: Arc<AtomicBool>,
 }
 
@@ -244,12 +291,14 @@ impl DetectorThread {
     ) -> Result<Self> {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let result = Arc::new(Mutex::new(None));
-        let fps = Arc::new(Mutex::new(0.0));
+        let infer_latency_ms = Arc::new(Mutex::new(0.0f32));
+        let preprocess_latency_ms = Arc::new(Mutex::new(0.0f32));
         let error_flag = Arc::new(AtomicBool::new(false));
 
         let stop_flag_clone = stop_flag.clone();
         let result_clone = result.clone();
-        let fps_clone = fps.clone();
+        let infer_latency_ms_clone = infer_latency_ms.clone();
+        let preprocess_latency_ms_clone = preprocess_latency_ms.clone();
         let error_flag_clone = error_flag.clone();
         let version_clone = version.clone();
 
@@ -277,8 +326,6 @@ impl DetectorThread {
 
         let handle = thread::spawn(move || {
             let mut detector = detector;
-            let mut infer_count = 0;
-            let mut last_time = std::time::Instant::now();
             let mut last_version: u64 = 0;
             let mut consecutive_errors = 0;
             const MAX_CONSECUTIVE_ERRORS: u32 = 10;
@@ -309,10 +356,17 @@ impl DetectorThread {
                     
                     // 3. 进行推理
                     match detector.detect(&current_buffer) {
-                        Ok((detections, _ms)) => {
+                        Ok((detections, preprocess_ms, infer_ms)) => {
                             match result_clone.lock() {
                                 Ok(mut res) => {
                                     *res = Some(detections);
+                                    // 更新延迟统计
+                                    if let Ok(mut guard) = preprocess_latency_ms_clone.lock() {
+                                        *guard = preprocess_ms;
+                                    }
+                                    if let Ok(mut guard) = infer_latency_ms_clone.lock() {
+                                        *guard = infer_ms;
+                                    }
                                     consecutive_errors = 0;
                                 }
                                 Err(e) => {
@@ -336,28 +390,13 @@ impl DetectorThread {
                         }
                     }
                     last_version = current_version; // 更新版本号
-                    infer_count += 1;
-                }
-                
-                // FPS 计算逻辑保持不变
-                if last_time.elapsed().as_secs_f32() >= 1.0 {
-                    match fps_clone.lock() {
-                        Ok(mut fps_guard) => {
-                            *fps_guard = infer_count as f32;
-                        }
-                        Err(e) => {
-                            log_error(&format!("检测线程 - 设置FPS失败: {:?}", e));
-                        }
-                    }
-                    infer_count = 0;
-                    last_time = std::time::Instant::now();
                 }
                 thread::sleep(Duration::from_millis(1));
             }
         });
 
         // println!("智慧核心线程已启动");
-        Ok(Self { stop_flag, handle: Some(handle), result, fps, error_flag })
+        Ok(Self { stop_flag, handle: Some(handle), result, infer_latency_ms, preprocess_latency_ms, error_flag })
     }
 
     /// 获取最新推理结果
@@ -365,9 +404,14 @@ impl DetectorThread {
         self.result.clone()
     }
 
-    /// 获取推理采样率（fps）
-    pub fn fps(&self) -> Arc<Mutex<f32>> {
-        self.fps.clone()
+    /// 获取单次推理耗时（ms）
+    pub fn infer_latency_ms(&self) -> Arc<Mutex<f32>> {
+        self.infer_latency_ms.clone()
+    }
+
+    /// 获取单次截图到输入模型 resize 耗时（ms）
+    pub fn preprocess_latency_ms(&self) -> Arc<Mutex<f32>> {
+        self.preprocess_latency_ms.clone()
     }
 
     /// 获取错误标志

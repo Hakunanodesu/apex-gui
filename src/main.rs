@@ -3,6 +3,8 @@
 use eframe::egui;
 use std::sync::{Arc, Mutex};
 use vigem_client::{Client, Xbox360Wired};
+use serde::Deserialize;
+use std::path::Path;
 
 mod utils;
 mod modules;
@@ -134,6 +136,8 @@ struct MyApp {
     
     // 屏幕高度（在应用启动时获取）
     screen_height: f32,
+    // 当前模型要求的最小外圈直径（来自模型 json 的 size）
+    min_outer_diameter: f32,
     
     // 吸附曲线设定
     outer_diameter: f32, // 外圈直径
@@ -274,6 +278,7 @@ impl Default for MyApp {
             aa_activate_mode_selected: String::new(),
             aa_activate_mode_items: vec!["瞄准 & 开火".to_string(), "仅开火".to_string()],
             screen_height,
+            min_outer_diameter: 0.0,
             outer_diameter: 0.0,
             outer_strength: 0.0,
             middle_diameter: 0.0,
@@ -327,6 +332,9 @@ impl Default for MyApp {
             debug_btn_b: String::new(),
         };
         
+        // 根据当前模型加载最小外圈直径（来自模型 json 的 size）
+        app.update_min_outer_from_model();
+
         // 软件打开时创建 vigembus 虚拟手柄
         if let Ok(client) = Client::connect() {
             let client = Arc::new(client);
@@ -350,6 +358,54 @@ impl Default for MyApp {
 }
 
 impl MyApp {
+    /// 根据当前选中的模型，更新最小外圈直径（来自 models/<model>.json 的 size 字段）
+    fn update_min_outer_from_model(&mut self) {
+        // 如果没有选择模型，则不限制最小值
+        if self.model_selected.is_empty() {
+            self.min_outer_diameter = 0.0;
+            return;
+        }
+
+        // 模型文件一般为 models/foo.onnx，对应的 json 为 models/foo.json
+        let models_dir = Path::new("models");
+        let stem = Path::new(&self.model_selected)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if stem.is_empty() {
+            self.min_outer_diameter = 0.0;
+            return;
+        }
+
+        #[derive(Deserialize)]
+        struct ModelJson {
+            size: Option<f32>,
+        }
+
+        let json_path = models_dir.join(format!("{stem}.json"));
+        if let Ok(content) = std::fs::read_to_string(&json_path) {
+            if let Ok(model_cfg) = serde_json::from_str::<ModelJson>(&content) {
+                if let Some(size) = model_cfg.size {
+                    self.min_outer_diameter = size.max(0.0);
+                    // 确保当前外圈及内外圈不小于该最小值
+                    if self.outer_diameter < self.min_outer_diameter {
+                        self.outer_diameter = self.min_outer_diameter;
+                    }
+                    if self.middle_diameter < self.min_outer_diameter {
+                        self.middle_diameter = self.min_outer_diameter;
+                    }
+                    if self.inner_diameter < self.min_outer_diameter {
+                        self.inner_diameter = self.min_outer_diameter;
+                    }
+                    return;
+                }
+            }
+        }
+
+        // 如果读取失败或没有 size 字段，则不强制最小值
+        self.min_outer_diameter = 0.0;
+    }
+
     /// 从 ConfigFile 加载配置到 UI
     fn load_config(&mut self, config: &ConfigFile) {
         self.use_controller = config.use_controller;
@@ -764,6 +820,8 @@ impl eframe::App for MyApp {
                     if let Err(e) = save_current_config(&self.config_selected, &self.model_selected) {
                         eprintln!("保存 .current 文件失败: {}", e);
                     }
+                    // 同时根据新模型更新最小外圈直径
+                    self.update_min_outer_from_model();
                 }
                 
                 // 打开文件夹按钮 - 使用固定宽度
@@ -939,7 +997,7 @@ impl eframe::App for MyApp {
                                         if ui.add_sized(
                                             egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.outer_diameter)
-                                                .clamp_range(0.0..=self.screen_height)
+                                                .clamp_range(self.min_outer_diameter..=self.screen_height)
                                                 .speed(1.0)
                                         ).changed() {
                                             self.mark_config_changed();
@@ -1286,11 +1344,16 @@ impl eframe::App for MyApp {
                 
                 // 输入框
                 ui.add_sized(
-                    egui::Vec2::new(ui.available_width() - CHARACTER_WIDTH * 1.6 - SPACING * 2.0, ROW_HEIGHT),
+                    egui::Vec2::new(ui.available_width(), ROW_HEIGHT),
                     egui::TextEdit::singleline(&mut self.license_key)
                         .hint_text("请输入许可证")
                 );
-                
+            });
+            
+            // 右下角：手柄键位调试 + 问号按钮（智慧核心运行时禁用）
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.set_enabled(!self.core_enabled);
+
                 if ui.add_sized(
                     egui::Vec2::new(CHARACTER_WIDTH * 1.6, ROW_HEIGHT),
                     egui::Button::new("?")
@@ -1300,11 +1363,7 @@ impl eframe::App for MyApp {
                     self.help_window_controller_ready = Some(enumerate_controllers());
                     self.show_help_window = true;
                 }
-            });
 
-            // 右下角调试：按钮打开空窗口（智慧核心运行时禁用）
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.set_enabled(!self.core_enabled);
                 if ui.button("手柄键位调试").clicked() {
                     // 如果没有物理手柄，只弹帮助窗口，不打开调试窗口
                     if !enumerate_controllers() {
@@ -1734,19 +1793,25 @@ impl eframe::App for MyApp {
             let buffer_ref = self.mapping_manager.get_screen_capturer()
                 .as_ref()
                 .map(|c| c.buffer());
+            let capture_latency_ref = self.mapping_manager.get_screen_capturer()
+                .as_ref()
+                .map(|c| c.capture_latency_ms());
             let capture_fps_ref = self.mapping_manager.get_screen_capturer()
                 .as_ref()
                 .map(|c| c.fps());
-            let detection_fps_ref = self.mapping_manager.get_detector()
+            let infer_latency_ref = self.mapping_manager.get_detector()
                 .as_ref()
-                .map(|d| d.fps());
+                .map(|d| d.infer_latency_ms());
+            let preprocess_latency_ref = self.mapping_manager.get_detector()
+                .as_ref()
+                .map(|d| d.preprocess_latency_ms());
             let square_size_clone = square_size;
             
             // 获取屏幕缩放比例，将逻辑像素转换为物理像素
             let pixels_per_point = ctx.pixels_per_point();
             // 窗口大小使用物理像素，需要转换为逻辑像素
             // 为下方的label留出空间（约30逻辑像素）
-            let label_height = ROW_HEIGHT;
+            let label_height = ROW_HEIGHT * 4.0;
             let window_size_logical = (square_size as f32) / pixels_per_point;
             let window_height_logical = window_size_logical + label_height;
             
@@ -1865,28 +1930,41 @@ impl eframe::App for MyApp {
                                 }
                             }
                             
-                            // 在下方显示帧率label
+                            // 在下方显示耗时 label
                             ui.allocate_ui_at_rect(label_rect, |ui| {
                                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                    // 获取帧率数据
-                                    let detection_fps = detection_fps_ref.as_ref()
-                                        .and_then(|fps_ref| fps_ref.lock().ok())
-                                        .map(|fps| *fps)
+                                    // 获取耗时数据（ms）
+                                    let infer_ms = infer_latency_ref.as_ref()
+                                        .and_then(|val_ref| val_ref.lock().ok())
+                                        .map(|v| *v)
                                         .unwrap_or(0.0);
-                                    
+
+                                    let capture_ms = capture_latency_ref.as_ref()
+                                        .and_then(|val_ref| val_ref.lock().ok())
+                                        .map(|v| *v)
+                                        .unwrap_or(0.0);
+
+                                    let preprocess_ms = preprocess_latency_ref.as_ref()
+                                        .and_then(|val_ref| val_ref.lock().ok())
+                                        .map(|v| *v)
+                                        .unwrap_or(0.0);
+
                                     let capture_fps = capture_fps_ref.as_ref()
-                                        .and_then(|fps_ref| fps_ref.lock().ok())
-                                        .map(|fps| *fps)
+                                        .and_then(|val_ref| val_ref.lock().ok())
+                                        .map(|v| *v)
                                         .unwrap_or(0.0);
-                                    
-                                    // 格式化显示文本：推理帧率/屏幕捕获帧率
-                                    let fps_text = if detection_fps > 0.0 || capture_fps > 0.0 {
-                                        format!(" {}/{}", detection_fps, capture_fps)
+
+                                    // 格式化显示文本：垂直排列的四行（截图帧率 + 三项耗时）
+                                    let label_text = if infer_ms > 0.0 || capture_ms > 0.0 || preprocess_ms > 0.0 || capture_fps > 0.0 {
+                                        format!(
+                                            "{:.0} FPS\n{:.1} ms\n{:.1} ms\n{:.1} ms",
+                                            capture_fps, capture_ms, preprocess_ms, infer_ms
+                                        )
                                     } else {
                                         " 等待数据...".to_string()
                                     };
-                                    
-                                    ui.label(fps_text);
+
+                                    ui.label(label_text);
                                 });
                             });
 
