@@ -9,7 +9,7 @@ use std::path::Path;
 mod utils;
 mod modules;
 use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, ConfigFile, ConMapping, check_dir_exist};
-use utils::enum_device_tool::{enumerate_controllers, enumerate_pico};
+use utils::enum_device_tool::enumerate_controllers;
 use modules::mapping_state_machine::MappingManager;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -26,8 +26,8 @@ fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([
-                CHARACTER_WIDTH * 26.0 + SPACING * 9.0, 
-                ROW_HEIGHT * 15.0 + ROW_HEIGHT / 3.0 * 8.0 + SPACING * 24.0
+                CHARACTER_WIDTH * 32.0, 
+                ROW_HEIGHT * 13.0 + ROW_HEIGHT / 3.0 * 7.0 + SPACING * 21.0
             ])
             .with_resizable(false)
             .with_maximize_button(false), // 禁用最大化按钮
@@ -110,6 +110,13 @@ fn setup_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+#[derive(PartialEq, Clone, Copy)]
+enum ParamTab {
+    SnapFeature,
+    InputDevice,
+    Accessibility,
+}
+
 struct MyApp {
     // 配置数据
     config_selected: String,
@@ -155,6 +162,9 @@ struct MyApp {
     // 许可证
     license_key: String,
     
+    // 参数设定 tab
+    param_tab: ParamTab,
+    
     // 预览窗口
     show_preview: bool, // 是否显示预览窗口
     preview_window_created: bool, // 预览窗口是否已创建
@@ -184,7 +194,6 @@ struct MyApp {
     
     // 设备检测状态
     con_exist: bool, // 物理手柄是否存在
-    pico_exist: bool, // Pico设备是否存在
     
     // 推理预览窗口
     show_inference_preview: bool, // 是否显示推理预览窗口
@@ -276,7 +285,7 @@ impl Default for MyApp {
             use_controller: false, // 默认不使用手柄
             rt_rapid_fire,
             aa_activate_mode_selected: String::new(),
-            aa_activate_mode_items: vec!["瞄准 & 开火".to_string(), "仅开火".to_string()],
+            aa_activate_mode_items: vec!["瞄准和开火".to_string(), "仅开火".to_string()],
             screen_height,
             min_outer_diameter: 0.0,
             outer_diameter: 0.0,
@@ -289,6 +298,7 @@ impl Default for MyApp {
             vertical_strength_factor: 0.0,
             aim_height_factor: 0.0,
             license_key: String::new(),
+            param_tab: ParamTab::SnapFeature,
             show_preview: false,
             preview_window_created: false,
             show_help_window: false,
@@ -308,7 +318,6 @@ impl Default for MyApp {
             vertical_str,
             aim_height,
             con_exist: enumerate_controllers(),
-            pico_exist: enumerate_pico(),
             show_inference_preview: false,
             inference_preview_window_created: false,
             preview_allowed: false,
@@ -599,44 +608,37 @@ impl MyApp {
             self.sync_params_to_manager();
             
             // 更新瞄准辅助开关
-            let aim_enable = self.aa_activate_mode_selected == "瞄准 & 开火";
+            let aim_enable = self.aa_activate_mode_selected == "瞄准和开火";
             self.aim_enable.store(aim_enable, Ordering::Relaxed);
             self.mapping_manager.update_aim_enable(aim_enable);
             
             // 更新模型配置
             self.mapping_manager.update_config(self.model_selected.clone());
             
-            // 确定鼠标模式（不使用手柄就是鼠标模式）
-            let mouse_mode = !self.use_controller;
-            
-            // 手柄模式下：任意映射为空则打开调试窗口且不允许启动智慧核心
-            if !mouse_mode {
-                let mapping = self.debug_to_con_mapping();
-                if !mapping.is_complete() {
-                    self.show_debug_window = true;
-                    self.debug_enabled = true;
-                    modules::bg_con_reading::set_debug_print_enabled(true);
-                    self.mapping_manager.start_con_reader_for_debug();
-                    return;
-                }
+            // 任意映射为空则打开调试窗口且不允许启动智慧核心
+            let mapping = self.debug_to_con_mapping();
+            if !mapping.is_complete() {
+                self.show_debug_window = true;
+                self.debug_enabled = true;
+                modules::bg_con_reading::set_debug_print_enabled(true);
+                self.mapping_manager.start_con_reader_for_debug();
+                return;
             }
             
-            // 确保虚拟手柄（如果不是鼠标模式）
-            if !mouse_mode {
-                if self.virtual_gamepad.lock().unwrap().is_none() {
-                    if let Ok(client) = Client::connect() {
-                        let client = Arc::new(client);
-                        let mut target = Xbox360Wired::new(client.clone(), vigem_client::TargetId::XBOX360_WIRED);
-                        if target.plugin().is_ok() {
-                            *self.virtual_gamepad.lock().unwrap() = Some(target);
-                        }
+            // 确保虚拟手柄
+            if self.virtual_gamepad.lock().unwrap().is_none() {
+                if let Ok(client) = Client::connect() {
+                    let client = Arc::new(client);
+                    let mut target = Xbox360Wired::new(client.clone(), vigem_client::TargetId::XBOX360_WIRED);
+                    if target.plugin().is_ok() {
+                        *self.virtual_gamepad.lock().unwrap() = Some(target);
                     }
                 }
             }
             
-            // 使用 MappingManager 启动（手柄模式传入键位映射，鼠标模式传 None）
-            let con_mapping = if mouse_mode { None } else { Some(self.debug_to_con_mapping()) };
-            self.mapping_manager.request_start(mouse_mode, con_mapping);
+            // 使用 MappingManager 启动
+            let con_mapping = Some(self.debug_to_con_mapping());
+            self.mapping_manager.request_start(con_mapping);
             self.core_enabled = true;
             self.preview_allowed = false;
         }
@@ -687,11 +689,9 @@ impl eframe::App for MyApp {
         // 定期更新 MappingManager 状态（每帧更新）
         let vg_clone = self.virtual_gamepad.clone();
         let mut con_exist_local = self.con_exist;
-        let mut pico_exist_local = self.pico_exist;
         let (_resize, _show_config, show_preview_flag, _disable_on_top) =
-            self.mapping_manager.update(&mut con_exist_local, &mut pico_exist_local, vg_clone);
+            self.mapping_manager.update(&mut con_exist_local, vg_clone);
         self.con_exist = con_exist_local;
-        self.pico_exist = pico_exist_local;
         
         // 更新预览允许状态
         // 如果用户请求显示预览，且状态机允许显示，且智慧核心正在运行，则允许显示
@@ -847,11 +847,47 @@ impl eframe::App for MyApp {
 
                 ui.add_sized(
                     egui::Vec2::new(
-                        CHARACTER_WIDTH * 5.0,
+                        CHARACTER_WIDTH * 3.0,
                         ROW_HEIGHT
                     ),
-                    egui::Label::new("参数设定")
+                    egui::Label::new("设定")
                 );
+
+                let snap_color = if self.param_tab == ParamTab::SnapFeature { Some(GREEN) } else { None };
+                let mut snap_btn = egui::Button::new("吸附相关");
+                if let Some(color) = snap_color {
+                    snap_btn = snap_btn.fill(color);
+                }
+                if ui.add_sized(
+                    egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
+                    snap_btn
+                ).clicked() {
+                    self.param_tab = ParamTab::SnapFeature;
+                }
+
+                let other_color = if self.param_tab == ParamTab::InputDevice { Some(GREEN) } else { None };
+                let mut other_btn = egui::Button::new("输入设备");
+                if let Some(color) = other_color {
+                    other_btn = other_btn.fill(color);
+                }
+                if ui.add_sized(
+                    egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
+                    other_btn
+                ).clicked() {
+                    self.param_tab = ParamTab::InputDevice;
+                }
+
+                let aux_color = if self.param_tab == ParamTab::Accessibility { Some(GREEN) } else { None };
+                let mut aux_btn = egui::Button::new("辅助功能");
+                if let Some(color) = aux_color {
+                    aux_btn = aux_btn.fill(color);
+                }
+                if ui.add_sized(
+                    egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
+                    aux_btn
+                ).clicked() {
+                    self.param_tab = ParamTab::Accessibility;
+                }
             });
 
             ui.horizontal(|ui| {
@@ -865,44 +901,8 @@ impl eframe::App for MyApp {
                 ui.vertical(|ui| {
                     ui.separator();
 
-                    ui.horizontal(|ui| {
-                        ui.add_sized(
-                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
-                            egui::Label::new("输入设备")
-                        );
-
-                        // 键鼠 radiobutton（与手柄互斥）
-                        if ui.add_sized(
-                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
-                            egui::RadioButton::new(!self.use_controller, "键鼠")
-                        ).clicked() {
-                            self.use_controller = false;
-                            self.mark_config_changed();
-                            self.save_config();
-                        }
-                    
-                        ui.horizontal(|ui| {
-                            // 手柄 radiobutton
-                            if ui.add_sized(
-                                egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
-                                egui::RadioButton::new(self.use_controller, "手柄")
-                            ).clicked() {
-                                self.use_controller = true;
-                                self.mark_config_changed();
-                                self.save_config();
-                            }
-
-                            // 右扳机连点开关（仅在手柄模式下可用）
-                            let mut rapid_enabled = self.rt_rapid_fire.load(Ordering::Relaxed);
-                            let enabled_before = rapid_enabled;
-                            ui.add_enabled_ui(self.use_controller, |ui| {
-                                ui.checkbox(&mut rapid_enabled, "连点");
-                            });
-                            if rapid_enabled != enabled_before {
-                                self.rt_rapid_fire.store(rapid_enabled, Ordering::Relaxed);
-                            }
-                        });
-                    });
+                    match self.param_tab {
+                    ParamTab::SnapFeature => {
 
                     ui.horizontal(|ui| {
                         ui.add_sized(
@@ -978,7 +978,7 @@ impl eframe::App for MyApp {
 
                                         ui.add_sized(
                                             egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
-                                                egui::Label::new("吸附直径")
+                                                egui::Label::new("吸附范围")
                                         );
 
                                         ui.add_sized(
@@ -1283,12 +1283,106 @@ impl eframe::App for MyApp {
                                     self.save_config();
                                 }
                             });
-
-                            ui.separator();
                         });
                     });
+
+                    } // SnapRelated
+                    ParamTab::InputDevice => {
+
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
+                            egui::Label::new("输入设备")
+                        );
+
+                        // 键鼠 radiobutton（未实现，禁用）
+                        ui.add_enabled_ui(false, |ui| {
+                            ui.add_sized(
+                                egui::Vec2::new(CHARACTER_WIDTH * 9.0, ROW_HEIGHT),
+                                egui::RadioButton::new(!self.use_controller, "键鼠（未实现）")
+                            );
+                        });
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
+                            egui::Label::new("")
+                        );
+
+                        // 手柄 radiobutton
+                        if ui.add_sized(
+                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
+                            egui::RadioButton::new(self.use_controller, "手柄")
+                        ).clicked() {
+                            self.use_controller = true;
+                            self.mark_config_changed();
+                            self.save_config();
+                        }
+                    });
+
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        if ui.button("手柄键位调试").clicked() {
+                            if !enumerate_controllers() {
+                                self.help_window_vigem_ready = Some(check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver"));
+                                self.help_window_controller_ready = Some(false);
+                                self.show_help_window = true;
+                                return;
+                            }
+                            self.show_debug_window = true;
+                            self.debug_enabled = true;
+                            modules::bg_con_reading::set_debug_print_enabled(true);
+                            self.mapping_manager.start_con_reader_for_debug();
+                        }
+                    });
+
+                    // ui.add_sized(
+                    //     egui::Vec2::new(0.0, ROW_HEIGHT * 5.0 + ROW_HEIGHT / 3.0 + SPACING * 6.0),
+                    //     egui::Label::new("")
+                    // );
+
+                    }
+                    ParamTab::Accessibility => {
+
+                    ui.horizontal(|ui| {
+                        // 右扳机连点开关（仅在手柄模式下可用）
+                        let mut rapid_enabled = self.rt_rapid_fire.load(Ordering::Relaxed);
+                        let enabled_before = rapid_enabled;
+                        ui.add_enabled_ui(self.use_controller, |ui| {
+                            ui.checkbox(&mut rapid_enabled, "连点");
+                        });
+                        if rapid_enabled != enabled_before {
+                            self.rt_rapid_fire.store(rapid_enabled, Ordering::Relaxed);
+                        }
+                    });
+
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        if ui.add_sized(
+                            egui::Vec2::new(CHARACTER_WIDTH * 1.6, ROW_HEIGHT),
+                            egui::Button::new("?")
+                        ).clicked() {
+                            self.help_window_vigem_ready = Some(check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver"));
+                            self.help_window_controller_ready = Some(enumerate_controllers());
+                            self.show_help_window = true;
+                        }
+                    });
+
+                    }
+                    }
+
                 });
             });
+
+            let bottom_section_height =
+                ROW_HEIGHT * 2.0 + ROW_HEIGHT / 3.0 * 2.0 + SPACING * 3.0;
+            let remaining = ui.available_height() - bottom_section_height;
+            if remaining > 0.0 {
+                ui.add_space(remaining);
+            }
 
             ui.separator();
 
@@ -1333,7 +1427,7 @@ impl eframe::App for MyApp {
             });
 
             ui.separator();
-
+            
             ui.horizontal(|ui| {
                 ui.set_enabled(!self.core_enabled);
                 
@@ -1348,35 +1442,6 @@ impl eframe::App for MyApp {
                     egui::TextEdit::singleline(&mut self.license_key)
                         .hint_text("请输入许可证")
                 );
-            });
-            
-            // 右下角：手柄键位调试 + 问号按钮（智慧核心运行时禁用）
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.set_enabled(!self.core_enabled);
-
-                if ui.add_sized(
-                    egui::Vec2::new(CHARACTER_WIDTH * 1.6, ROW_HEIGHT),
-                    egui::Button::new("?")
-                ).clicked() {
-                    // 点击时更新检测结果
-                    self.help_window_vigem_ready = Some(check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver"));
-                    self.help_window_controller_ready = Some(enumerate_controllers());
-                    self.show_help_window = true;
-                }
-
-                if ui.button("手柄键位调试").clicked() {
-                    // 如果没有物理手柄，只弹帮助窗口，不打开调试窗口
-                    if !enumerate_controllers() {
-                        self.help_window_vigem_ready = Some(check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver"));
-                        self.help_window_controller_ready = Some(false);
-                        self.show_help_window = true;
-                        return;
-                    }
-                    self.show_debug_window = true;
-                    self.debug_enabled = true;
-                    modules::bg_con_reading::set_debug_print_enabled(true);
-                    self.mapping_manager.start_con_reader_for_debug();
-                }
             });
         });
         

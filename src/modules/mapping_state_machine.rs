@@ -10,10 +10,9 @@ use crate::modules::{
     bg_con_mapping::ConMapper,
     bg_screen_cap::ScreenCapturer,
     bg_onnx_dml_od::DetectorThread,
-    bg_mouse_mapping::MouseMapper,
 };
 use crate::utils::{
-    enum_device_tool::{enumerate_controllers, enumerate_pico},
+    enum_device_tool::enumerate_controllers,
     console_redirect::log_error,
 };
 
@@ -37,14 +36,12 @@ pub enum MappingState {
 
 pub struct MappingManager {
     state: MappingState,
-    mouse_mode: bool,
     
     // 组件实例
     screen_capturer: Option<ScreenCapturer>,
     detector: Option<DetectorThread>,
     con_reader: Option<ConReader>,
     con_mapper: Option<ConMapper>,
-    mouse_mapper: Option<MouseMapper>,
     
     // 配置参数
     current_model: String,
@@ -83,12 +80,10 @@ impl MappingManager {
     ) -> Self {
         Self {
             state: MappingState::Idle,
-            mouse_mode: false,
             screen_capturer: None,
             detector: None,
             con_reader: None,
             con_mapper: None,
-            mouse_mapper: None,
             current_model,
             con_mapping: None,
             aim_enable,
@@ -130,9 +125,8 @@ impl MappingManager {
     }
     
     // 请求启动映射（con_mapping 从当前配置的手柄键位调试内容读取）
-    pub fn request_start(&mut self, mouse_mode: bool, con_mapping: Option<ConMapping>) {
+    pub fn request_start(&mut self, con_mapping: Option<ConMapping>) {
         if matches!(self.state, MappingState::Idle) {
-            self.mouse_mode = mouse_mode;
             self.con_mapping = con_mapping;
             self.state = MappingState::CheckingDevice;
         }
@@ -146,7 +140,7 @@ impl MappingManager {
     }
     
     // 更新状态机
-    pub fn update(&mut self, con_exist: &mut bool, pico_exist: &mut bool, virtual_gamepad: Arc<Mutex<Option<Xbox360Wired<Arc<Client>>>>>) -> (bool, bool, bool, bool) {
+    pub fn update(&mut self, con_exist: &mut bool, virtual_gamepad: Arc<Mutex<Option<Xbox360Wired<Arc<Client>>>>>) -> (bool, bool, bool, bool) {
         let mut do_resize = false;
         let mut show_config = false;
         let mut show_preview = false;
@@ -159,23 +153,14 @@ impl MappingManager {
             }
             
             MappingState::CheckingDevice => {
-                if self.mouse_mode {
-                    *pico_exist = enumerate_pico();
-                    self.device_available = *pico_exist;
-                } else {
-                    *con_exist = enumerate_controllers();
-                    self.device_available = *con_exist;
-                }
+                *con_exist = enumerate_controllers();
+                self.device_available = *con_exist;
                 
                 if self.device_available {
                     self.state = MappingState::StartingCapture;
                 } else {
                     self.state = MappingState::Error {
-                        message: if self.mouse_mode { 
-                            "未检测到Pico设备".to_string() 
-                        } else { 
-                            "未检测到手柄设备".to_string() 
-                        },
+                        message: "未检测到手柄设备".to_string(),
                         from_state: Box::new(MappingState::CheckingDevice),
                         _should_retry: true,
                     };
@@ -200,11 +185,7 @@ impl MappingManager {
             MappingState::StartingDetector => {
                 match self.try_start_detector() {
                     Ok(()) => {
-                        if self.mouse_mode {
-                            self.state = MappingState::StartingMapper;
-                        } else {
-                            self.state = MappingState::StartingReader;
-                        }
+                        self.state = MappingState::StartingReader;
                     }
                     Err(e) => {
                         self.state = MappingState::Error {
@@ -217,12 +198,9 @@ impl MappingManager {
             }
             
             MappingState::StartingReader => {
-                // 仅在手柄模式下
-                if !self.mouse_mode {
-                    if self.con_reader.is_none() {
-                        let mapping = self.con_mapping.clone().unwrap_or_default();
-                        self.con_reader = Some(ConReader::start(mapping));
-                    }
+                if self.con_reader.is_none() {
+                    let mapping = self.con_mapping.clone().unwrap_or_default();
+                    self.con_reader = Some(ConReader::start(mapping));
                 }
                 self.state = MappingState::StartingMapper;
             }
@@ -265,7 +243,7 @@ impl MappingManager {
             }
             
             MappingState::Stopping => {
-                self.cleanup_all_components(con_exist, pico_exist);
+                self.cleanup_all_components(con_exist);
                 // 注意：虚拟手柄已通过 request_stop() 返回，不在这里处理
                 self.state = MappingState::Idle;
                 do_resize = true;
@@ -296,11 +274,11 @@ impl MappingManager {
                     }
                     MappingState::Running => {
                         // 运行时错误，清理所有组件
-                        self.cleanup_all_components(con_exist, pico_exist);
+                        self.cleanup_all_components(con_exist);
                     }
                     _ => {
                         // 其他情况，安全起见清理所有
-                        self.cleanup_all_components(con_exist, pico_exist);
+                        self.cleanup_all_components(con_exist);
                     }
                 }
                 
@@ -368,33 +346,20 @@ impl MappingManager {
     fn try_start_mapper(&mut self, virtual_gamepad_ref: Arc<Mutex<Option<Xbox360Wired<Arc<Client>>>>>) -> Result<(), String> {
         let params = self.extract_mapping_params()?;
         
-        if self.mouse_mode {
-            if self.mouse_mapper.is_none() {
-                let det = self.detector.as_ref()
-                    .ok_or("检测线程未初始化")?;
-                
-                self.mouse_mapper = Some(MouseMapper::start(
-                    Some(det.result()),
-                    params.0, params.1, params.2, params.3, params.4,
-                    params.5, params.6, params.7, params.8, self.aim_enable.clone()
-                ));
-            }
-        } else {
-            if self.con_mapper.is_none() {
-                let reader = self.con_reader.as_ref()
-                    .ok_or("手柄读取器未初始化")?;
-                let det = self.detector.as_ref()
-                    .ok_or("检测线程未初始化")?;
-                
-                let state = reader.state();
-                let ready = reader.ready();
-                
-                self.con_mapper = Some(ConMapper::start(
-                    state, virtual_gamepad_ref, ready, Some(det.result()),
-                    params.0, params.1, params.2, params.3, params.4,
-                    params.5, params.6, params.7, params.8, self.aim_enable.clone(), self.rt_rapid_fire.clone()
-                ));
-            }
+        if self.con_mapper.is_none() {
+            let reader = self.con_reader.as_ref()
+                .ok_or("手柄读取器未初始化")?;
+            let det = self.detector.as_ref()
+                .ok_or("检测线程未初始化")?;
+            
+            let state = reader.state();
+            let ready = reader.ready();
+            
+            self.con_mapper = Some(ConMapper::start(
+                state, virtual_gamepad_ref, ready, Some(det.result()),
+                params.0, params.1, params.2, params.3, params.4,
+                params.5, params.6, params.7, params.8, self.aim_enable.clone(), self.rt_rapid_fire.clone()
+            ));
         }
         
         Ok(())
@@ -419,22 +384,14 @@ impl MappingManager {
         }
         
         // 检查映射器错误
-        if self.mouse_mode {
-            if let Some(ref mapper) = self.mouse_mapper {
-                if mapper.error_flag().load(Ordering::SeqCst) {
-                    error_messages.push("鼠标映射线程发生错误");
-                }
+        if let Some(ref reader) = self.con_reader {
+            if reader.error_flag().load(Ordering::SeqCst) {
+                error_messages.push("手柄读取线程发生错误");
             }
-        } else {
-            if let Some(ref reader) = self.con_reader {
-                if reader.error_flag().load(Ordering::SeqCst) {
-                    error_messages.push("手柄读取线程发生错误");
-                }
-            }
-            if let Some(ref mapper) = self.con_mapper {
-                if mapper.error_flag().load(Ordering::SeqCst) {
-                    error_messages.push("手柄映射线程发生错误");
-                }
+        }
+        if let Some(ref mapper) = self.con_mapper {
+            if mapper.error_flag().load(Ordering::SeqCst) {
+                error_messages.push("手柄映射线程发生错误");
             }
         }
         
@@ -446,22 +403,15 @@ impl MappingManager {
     }
     
     // 清理所有组件
-    fn cleanup_all_components(&mut self, con_exist: &mut bool, pico_exist: &mut bool) {
+    fn cleanup_all_components(&mut self, con_exist: &mut bool) {
         // 按照启动的反序关闭组件
-        if self.mouse_mode {
-            if let Some(mapper) = self.mouse_mapper.take() {
-                mapper.stop();
-            }
-            *pico_exist = enumerate_pico();
-        } else {
-            if let Some(mapper) = self.con_mapper.take() {
-                mapper.stop();
-            }
-            if let Some(reader) = self.con_reader.take() {
-                reader.stop();
-            }
-            *con_exist = enumerate_controllers();
+        if let Some(mapper) = self.con_mapper.take() {
+            mapper.stop();
         }
+        if let Some(reader) = self.con_reader.take() {
+            reader.stop();
+        }
+        *con_exist = enumerate_controllers();
         
         if let Some(det) = self.detector.take() {
             det.stop();
@@ -474,18 +424,11 @@ impl MappingManager {
     
     // 清理部分组件（用于启动失败时的清理）
     fn cleanup_partial_components(&mut self) {
-        if self.mouse_mode {
-            if let Some(mapper) = self.mouse_mapper.take() {
-                mapper.stop();
-            }
-        } else {
-            if let Some(mapper) = self.con_mapper.take() {
-                mapper.stop();
-            }
-            if let Some(reader) = self.con_reader.take() {
-                reader.stop();
-            }
-            // 虚拟手柄由main.rs管理，不在这里释放
+        if let Some(mapper) = self.con_mapper.take() {
+            mapper.stop();
+        }
+        if let Some(reader) = self.con_reader.take() {
+            reader.stop();
         }
         
         if let Some(det) = self.detector.take() {

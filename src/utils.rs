@@ -207,11 +207,6 @@ pub mod console_redirect {
 }
 
 pub mod enum_device_tool {
-    use serialport::SerialPortType;
-
-    const PICO_VID: u16 = 0x239A;
-    const PICO_PID: u16 = 0x80F4;
-
     pub fn enumerate_controllers() -> bool {
         if let Ok(ctx) = sdl2::init() {
             if let Ok(joystick) = ctx.joystick() {
@@ -227,20 +222,6 @@ pub mod enum_device_tool {
             }
         }
         false
-    }
-
-    pub fn enumerate_pico() -> bool {
-        serialport::available_ports()
-            .map(|ports| {
-                ports.iter().any(|port| {
-                    matches!(
-                        &port.port_type,
-                        SerialPortType::UsbPort(info)
-                            if info.vid == PICO_VID && info.pid == PICO_PID
-                    )
-                })
-            })
-            .unwrap_or(false)
     }
 }
 
