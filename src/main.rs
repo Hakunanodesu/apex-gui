@@ -2022,7 +2022,7 @@ impl eframe::App for MyApp {
                                     // 格式化显示文本：垂直排列的四行（截图帧率 + 三项耗时）
                                     let label_text = if infer_ms > 0.0 || capture_ms > 0.0 || preprocess_ms > 0.0 || capture_fps > 0.0 {
                                         format!(
-                                            "{:.0} FPS\n{:.1} ms\n{:.1} ms\n{:.1} ms",
+                                            " {:.0} FPS\n {:.1} ms\n {:.1} ms\n {:.1} ms",
                                             capture_fps, capture_ms, preprocess_ms, infer_ms
                                         )
                                     } else {
