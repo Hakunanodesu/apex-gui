@@ -700,6 +700,7 @@ impl MyApp {
             "始终连点" => 1,
             "半按扳机连点" => 2,
             "完全按下扳机连点" => 3,
+            "根据枪械自动切换" => 4,
             _ => 0,
         }
     }
@@ -1940,15 +1941,20 @@ impl eframe::App for MyApp {
             let preprocess_latency_ref = self.mapping_manager.get_detector()
                 .as_ref()
                 .map(|d| d.preprocess_latency_ms());
+            let weapon_match_latency_ref = self.mapping_manager.get_weapon_rec()
+                .as_ref()
+                .map(|w| w.match_latency_ms());
+            let weapon_result_ref = self.mapping_manager.get_weapon_rec()
+                .as_ref()
+                .map(|w| w.result());
             let square_size_clone = square_size;
             
             // 获取屏幕缩放比例，将逻辑像素转换为物理像素
             let pixels_per_point = ctx.pixels_per_point();
-            // 窗口大小使用物理像素，需要转换为逻辑像素
-            // 为下方的label留出空间（约30逻辑像素）
-            let label_height = ROW_HEIGHT * 4.0;
-            let window_size_logical = (square_size as f32) / pixels_per_point;
-            let window_height_logical = window_size_logical + label_height;
+            // 窗口大小使用物理像素，需要转换为逻辑像素；为下方 label 留出空间（6 行：FPS + 四项耗时 + 当前武器）
+            let label_height = ROW_HEIGHT * 6.0;
+            let window_width_logical = ((square_size as f32) / pixels_per_point).max(CHARACTER_WIDTH * 0.6 * 23.0);
+            let window_height_logical = window_width_logical + label_height;
             
             let viewport_id = egui::ViewportId::from_hash_of("inference_preview_window");
             
@@ -1957,7 +1963,7 @@ impl eframe::App for MyApp {
                 viewport_id,
                 egui::ViewportBuilder::default()
                     .with_title("推理预览")
-                    .with_inner_size([window_size_logical, window_height_logical])
+                    .with_inner_size([window_width_logical, window_height_logical])
                     .with_resizable(false) // 不允许调整大小
                     .with_always_on_top()
                     .with_decorations(false)
@@ -2089,11 +2095,22 @@ impl eframe::App for MyApp {
                                         .map(|v| *v)
                                         .unwrap_or(0.0);
 
-                                    // 格式化显示文本：垂直排列的四行（截图帧率 + 三项耗时）
-                                    let label_text = if infer_ms > 0.0 || capture_ms > 0.0 || preprocess_ms > 0.0 || capture_fps > 0.0 {
+                                    let weapon_match_ms = weapon_match_latency_ref.as_ref()
+                                        .and_then(|val_ref| val_ref.lock().ok())
+                                        .map(|v| *v)
+                                        .unwrap_or(0.0);
+
+                                    let weapon_name = weapon_result_ref.as_ref()
+                                        .and_then(|val_ref| val_ref.lock().ok())
+                                        .map(|s| s.clone())
+                                        .filter(|s| !s.is_empty())
+                                        .unwrap_or_else(|| "未识别".to_string());
+
+                                    // 六行：FPS + 四项耗时 + 当前武器
+                                    let label_text = if infer_ms > 0.0 || capture_ms > 0.0 || preprocess_ms > 0.0 || capture_fps > 0.0 || weapon_match_ms > 0.0 {
                                         format!(
-                                            " {:.0} FPS\n {:.1} ms\n {:.1} ms\n {:.1} ms",
-                                            capture_fps, capture_ms, preprocess_ms, infer_ms
+                                            " {:.0} FPS\n screen capture {:.1} ms\n preprocess     {:.1} ms\n inference      {:.1} ms\n weapon match   {:.1} ms\n 武器: {}",
+                                            capture_fps, capture_ms, preprocess_ms, infer_ms, weapon_match_ms, weapon_name
                                         )
                                     } else {
                                         " 等待数据...".to_string()

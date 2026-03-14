@@ -5,7 +5,7 @@ use std::{
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use windows_capture::{
@@ -20,6 +20,13 @@ use windows_capture::{
 };
 
 use crate::utils::console_redirect::log_error;
+
+const BASE_HEIGHT: f32 = 1080.0;
+const WEAPON_ROI_OFFSET_X: f32 = 377.0;
+const WEAPON_ROI_OFFSET_Y: f32 = 122.0;
+const WEAPON_ROI_CROP_W: f32 = 159.0;
+const WEAPON_ROI_CROP_H: f32 = 38.0;
+const WEAPON_ROI_INTERVAL_MS: u64 = 500;
 
 /// Handler 中持有的状态
 struct CaptureHandler {
@@ -42,14 +49,37 @@ struct CaptureHandler {
     square_size: usize,
     /// 错误标志
     error_flag: Arc<AtomicBool>,
+    /// 右下角武器 ROI：缓冲、版本、是否启用、上次写入时间、裁剪尺寸共享
+    buffer2: Arc<Mutex<Vec<u8>>>,
+    version2: Arc<AtomicU64>,
+    enable_weapon_roi: bool,
+    last_weapon_roi_write: Option<Instant>,
+    crop_size: Arc<Mutex<(usize, usize)>>,
 }
 
 impl GraphicsCaptureApiHandler for CaptureHandler {
-    type Flags = (Arc<AtomicBool>, Arc<Mutex<Vec<u8>>>, Arc<AtomicU64>, Arc<Mutex<f32>>, Arc<Mutex<f32>>, Arc<Mutex<u32>>, Arc<Mutex<Instant>>, usize, Arc<AtomicBool>);
+    type Flags = (
+        Arc<AtomicBool>,
+        Arc<Mutex<Vec<u8>>>,
+        Arc<AtomicU64>,
+        Arc<Mutex<f32>>,
+        Arc<Mutex<f32>>,
+        Arc<Mutex<u32>>,
+        Arc<Mutex<Instant>>,
+        usize,
+        Arc<AtomicBool>,
+        Arc<Mutex<Vec<u8>>>,
+        Arc<AtomicU64>,
+        bool,
+        Arc<Mutex<(usize, usize)>>,
+    );
     type Error = Box<dyn Error + Send + Sync>;
 
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        let (running, buffer, version, capture_latency_ms, fps, capture_count, last_fps_time, square_size, error_flag) = ctx.flags;
+        let (
+            running, buffer, version, capture_latency_ms, fps, capture_count, last_fps_time,
+            square_size, error_flag, buffer2, version2, enable_weapon_roi, crop_size,
+        ) = ctx.flags;
 
         Ok(Self {
             _start: Instant::now(),
@@ -62,6 +92,11 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             last_fps_time,
             square_size,
             error_flag,
+            buffer2,
+            version2,
+            enable_weapon_roi,
+            last_weapon_roi_write: None,
+            crop_size,
         })
     }
 
@@ -141,6 +176,48 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
             Err(e) => {
                 log_error(&format!("屏幕捕获 - 获取缓冲区锁失败: {:?}", e));
                 self.error_flag.store(true, Ordering::SeqCst);
+            }
+        }
+
+        // 7b. 右下角武器 ROI（最多每 0.5s 更新一次）
+        if self.enable_weapon_roi {
+            let should_write = match self.last_weapon_roi_write {
+                None => true,
+                Some(t) => t.elapsed() >= Duration::from_millis(WEAPON_ROI_INTERVAL_MS),
+            };
+            if should_write {
+                let scale = height_full as f32 / BASE_HEIGHT;
+                let x_start = width_full.saturating_sub((WEAPON_ROI_OFFSET_X * scale).round() as usize);
+                let y_start = height_full.saturating_sub((WEAPON_ROI_OFFSET_Y * scale).round() as usize);
+                let crop_w = (WEAPON_ROI_CROP_W * scale).round() as usize;
+                let crop_h = (WEAPON_ROI_CROP_H * scale).round() as usize;
+                let crop_w = crop_w.min(width_full.saturating_sub(x_start));
+                let crop_h = crop_h.min(height_full.saturating_sub(y_start));
+                if crop_w > 0 && crop_h > 0 {
+                    let roi_size = crop_w * crop_h * 3;
+                    let mut temp_roi = vec![0u8; roi_size];
+                    for row in 0..crop_h {
+                        let src_row_start = (y_start + row) * stride + x_start * 4;
+                        let src_row = &src[src_row_start..src_row_start + crop_w * 4];
+                        for col in 0..crop_w {
+                            let dst_idx = (row * crop_w + col) * 3;
+                            temp_roi[dst_idx] = src_row[col * 4];
+                            temp_roi[dst_idx + 1] = src_row[col * 4 + 1];
+                            temp_roi[dst_idx + 2] = src_row[col * 4 + 2];
+                        }
+                    }
+                    if let Ok(mut dst2) = self.buffer2.lock() {
+                        if dst2.len() != roi_size {
+                            dst2.resize(roi_size, 0);
+                        }
+                        dst2.copy_from_slice(&temp_roi);
+                        self.version2.fetch_add(1, Ordering::Relaxed);
+                        if let Ok(mut cs) = self.crop_size.lock() {
+                            *cs = (crop_w, crop_h);
+                        }
+                    }
+                    self.last_weapon_roi_write = Some(Instant::now());
+                }
             }
         }
         
@@ -244,11 +321,15 @@ pub struct ScreenCapturer {
     handle: JoinHandle<()>,
     pub square_size: usize,
     error_flag: Arc<AtomicBool>,
+    buffer2: Arc<Mutex<Vec<u8>>>,
+    version2: Arc<AtomicU64>,
+    crop_size: Arc<Mutex<(usize, usize)>>,
 }
 
 impl ScreenCapturer {
     /// 静态方法：创建并启动后台抓取线程
-    pub fn start(square_size: usize) -> Result<Self, Box<dyn Error>> {
+    /// `enable_weapon_roi`: 为 true 时每 0.5s 写入右下角武器 ROI 到 buffer2
+    pub fn start(square_size: usize, enable_weapon_roi: bool) -> Result<Self, Box<dyn Error>> {
         // 1. 准备共享数据
         let buf = vec![0u8; square_size * square_size * 3];
         let buffer = Arc::new(Mutex::new(buf));
@@ -261,6 +342,10 @@ impl ScreenCapturer {
         let error_flag = Arc::new(AtomicBool::new(false));
         let sq = square_size;
 
+        let buffer2 = Arc::new(Mutex::new(vec![]));
+        let version2 = Arc::new(AtomicU64::new(0));
+        let crop_size = Arc::new(Mutex::new((0usize, 0usize)));
+
         // 2. 构造 capture 设置
         let monitor = Monitor::primary().expect("没有主显示器");
         let settings = Settings::new(
@@ -268,26 +353,48 @@ impl ScreenCapturer {
             CursorCaptureSettings::WithoutCursor,
             DrawBorderSettings::WithoutBorder,
             SecondaryWindowSettings::Default,
-            MinimumUpdateIntervalSettings::Default, // 改为默认设置
-            // MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_millis(5)),
+            MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
             ColorFormat::Rgba8,
-            // 把 running、buffer、version、capture_latency_ms、fps、capture_count、last_fps_time、sq、error_flag 打包传给 handler
-            (running.clone(), buffer.clone(), version.clone(), capture_latency_ms.clone(), fps.clone(), capture_count.clone(), last_fps_time.clone(), sq, error_flag.clone()),
+            (
+                running.clone(),
+                buffer.clone(),
+                version.clone(),
+                capture_latency_ms.clone(),
+                fps.clone(),
+                capture_count.clone(),
+                last_fps_time.clone(),
+                sq,
+                error_flag.clone(),
+                buffer2.clone(),
+                version2.clone(),
+                enable_weapon_roi,
+                crop_size.clone(),
+            ),
         );
 
         // 3. 启动线程
         let error_flag_clone = error_flag.clone();
         let handle = thread::spawn(move || {
-            // CaptureHandler::start 会内部轮询 running flag，并不断写入 buffer
             if let Err(e) = CaptureHandler::start(settings) {
                 log_error(&format!("屏幕捕获线程启动失败: {:?}", e));
                 error_flag_clone.store(true, Ordering::SeqCst);
             }
         });
 
-        // println!("屏幕捕获线程已启动");
-        Ok(ScreenCapturer { buffer, version, capture_latency_ms, fps, running, handle, square_size, error_flag })
+        Ok(ScreenCapturer {
+            buffer,
+            version,
+            capture_latency_ms,
+            fps,
+            running,
+            handle,
+            square_size,
+            error_flag,
+            buffer2,
+            version2,
+            crop_size,
+        })
     }
 
     /// 消费式停止：发出停止信号并等待线程退出
@@ -321,5 +428,20 @@ impl ScreenCapturer {
     /// 获取错误标志
     pub fn error_flag(&self) -> Arc<AtomicBool> {
         self.error_flag.clone()
+    }
+
+    /// 右下角武器 ROI 缓冲（HWC RGB），仅当 enable_weapon_roi 时更新
+    pub fn buffer2(&self) -> Arc<Mutex<Vec<u8>>> {
+        self.buffer2.clone()
+    }
+
+    /// 右下角缓冲版本号
+    pub fn version2(&self) -> Arc<AtomicU64> {
+        self.version2.clone()
+    }
+
+    /// 当前右下角裁剪尺寸 (crop_w, crop_h)
+    pub fn crop_size(&self) -> Arc<Mutex<(usize, usize)>> {
+        self.crop_size.clone()
     }
 }

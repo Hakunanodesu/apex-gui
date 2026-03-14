@@ -8,8 +8,15 @@ use std::{
     time::Duration,
 };
 use vigem_client::{Client, Xbox360Wired, XGamepad};
-use crate::modules::onnx_dml_thread::Detection;
+use crate::modules::enemy_det_thread::Detection;
 use crate::utils::console_redirect::log_error;
+
+/// 连点白名单：当枪械识别结果为列表中的武器时始终连点。
+/// 填写 gun_template 下模板文件名（无后缀），例如：
+/// `&["r99", "re45", "car", "301", "转换者"]`
+pub const RAPID_FIRE_WEAPONS: &[&str] = &[
+    "3030", "獒犬", "单2020", "单莫桑比克", "和平", "赫姆洛克", "大炮", "三重", "哨兵", "小帮手", "长弓", "g7",
+];
 
 // 新增：当右扳机按下时，基于检测结果对右摇杆进行修正
 fn apply_right_trigger_adjustment(
@@ -92,11 +99,13 @@ impl ConMapper {
         outer_str: f32,
         inner_str: f32,
         init_str: f32,
-        vertical_str: f32, // 新增垂直强度参数
-        aim_height: f32,  // 新增瞄准高度参数
+        vertical_str: f32,
+        aim_height: f32,
         hipfire: f32,
-        aim_enable: Arc<AtomicBool>, // 新增瞄准辅助开关
-        rapid_fire_mode: Arc<AtomicU8>, // 连点模式：0=关闭, 1=始终连点, 2=半按扳机连点
+        aim_enable: Arc<AtomicBool>,
+        rapid_fire_mode: Arc<AtomicU8>, // 0=关闭, 1=始终连点, 2=半按, 3=完全按下连点, 4=根据枪械自动切换
+        weapon_rec_result: Option<Arc<Mutex<String>>>, // 枪械识别结果（模板名无后缀）
+        rapid_fire_weapons: Vec<String>,                // 连点白名单
     ) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let error_flag = Arc::new(AtomicBool::new(false));
@@ -106,6 +115,8 @@ impl ConMapper {
         let error_flag_clone = error_flag.clone();
         let vg_clone = virtual_gamepad.clone();
         let rapid_fire_mode_clone = rapid_fire_mode.clone();
+        let weapon_rec_result_clone = weapon_rec_result.clone();
+        let rapid_fire_weapons = rapid_fire_weapons;
 
         let handle = thread::spawn(move || {
             // 等待 SDL 读取线程就绪
@@ -150,6 +161,18 @@ impl ConMapper {
                         1 => true,                             // 始终连点
                         2 => orig_state.right_trigger < 255,   // 半按连点，满值时按住
                         3 => orig_state.right_trigger == 255,  // 完全按下才连点，否则按住
+                        4 => {
+                            // 根据枪械识别结果：在白名单内则连点
+                            if let Some(ref weapon_arc) = weapon_rec_result_clone {
+                                if let Ok(weapon_name) = weapon_arc.lock() {
+                                    rapid_fire_weapons.contains(&*weapon_name)
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        }
                         _ => false,
                     };
                     if should_rapid {

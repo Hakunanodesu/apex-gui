@@ -7,9 +7,10 @@ use vigem_client::{Client, Xbox360Wired};
 use crate::utils::ConMapping;
 use crate::modules::{
     gamepad_reading_thread::ConReader,
-    gamepad_mapping_thread::ConMapper,
+    gamepad_mapping_thread::{ConMapper, RAPID_FIRE_WEAPONS},
     screen_capture_thread::ScreenCapturer,
-    onnx_dml_thread::DetectorThread,
+    enemy_det_thread::DetectorThread,
+    weapon_rec_thread::WeaponRecThread,
 };
 use crate::utils::{
     enum_device_tool::enumerate_controllers,
@@ -23,6 +24,7 @@ pub enum MappingState {
     CheckingDevice,                          // 检查设备可用性
     StartingCapture,                         // 正在启动屏幕捕获
     StartingDetector,                        // 正在启动检测器
+    StartingWeaponRec,                       // 正在启动枪械识别（仅当连点模式=根据枪械自动切换）
     StartingReader,                          // 正在启动读取器（仅手柄模式）
     StartingMapper,                          // 正在启动映射器
     Running,                                 // 正常运行
@@ -40,6 +42,7 @@ pub struct MappingManager {
     // 组件实例
     screen_capturer: Option<ScreenCapturer>,
     detector: Option<DetectorThread>,
+    weapon_rec: Option<WeaponRecThread>,
     con_reader: Option<ConReader>,
     con_mapper: Option<ConMapper>,
     
@@ -82,6 +85,7 @@ impl MappingManager {
             state: MappingState::Idle,
             screen_capturer: None,
             detector: None,
+            weapon_rec: None,
             con_reader: None,
             con_mapper: None,
             current_model,
@@ -116,6 +120,7 @@ impl MappingManager {
             MappingState::CheckingDevice => "检查设备",
             MappingState::StartingCapture => "启动屏幕捕获",
             MappingState::StartingDetector => "启动检测器",
+            MappingState::StartingWeaponRec => "启动枪械识别",
             MappingState::StartingReader => "启动读取器",
             MappingState::StartingMapper => "启动映射器",
             MappingState::Running => "运行中",
@@ -185,12 +190,27 @@ impl MappingManager {
             MappingState::StartingDetector => {
                 match self.try_start_detector() {
                     Ok(()) => {
-                        self.state = MappingState::StartingReader;
+                        self.state = MappingState::StartingWeaponRec;
                     }
                     Err(e) => {
                         self.state = MappingState::Error {
                             message: format!("启动检测器失败: {}", e),
                             from_state: Box::new(MappingState::StartingDetector),
+                            _should_retry: false,
+                        };
+                    }
+                }
+            }
+
+            MappingState::StartingWeaponRec => {
+                match self.try_start_weapon_rec() {
+                    Ok(()) => {
+                        self.state = MappingState::StartingReader;
+                    }
+                    Err(e) => {
+                        self.state = MappingState::Error {
+                            message: format!("启动枪械识别失败: {}", e),
+                            from_state: Box::new(MappingState::StartingWeaponRec),
                             _should_retry: false,
                         };
                     }
@@ -263,9 +283,16 @@ impl MappingManager {
                         // 屏幕捕获启动失败，无需清理（虚拟手柄由main.rs管理）
                     }
                     MappingState::StartingDetector => {
-                        // 检测器启动失败，清理屏幕捕获器
                         if let Some(capt) = self.screen_capturer.take() {
                             capt.stop();
+                        }
+                    }
+                    MappingState::StartingWeaponRec => {
+                        if let Some(capt) = self.screen_capturer.take() {
+                            capt.stop();
+                        }
+                        if let Some(det) = self.detector.take() {
+                            det.stop();
                         }
                     }
                     MappingState::StartingMapper => {
@@ -300,7 +327,8 @@ impl MappingManager {
                 .parse::<f32>().unwrap_or(320.0);
             let outer_usize = outer_val.round() as usize;
             
-            match ScreenCapturer::start(outer_usize) {
+            let enable_weapon_roi = self.rapid_fire_mode.load(Ordering::SeqCst) == 4;
+            match ScreenCapturer::start(outer_usize, enable_weapon_roi) {
                 Ok(capturer) => {
                     self.screen_capturer = Some(capturer);
                     Ok(())
@@ -312,6 +340,30 @@ impl MappingManager {
         }
     }
     
+    // 尝试启动枪械识别（仅当 rapid_fire_mode == 4 时）
+    fn try_start_weapon_rec(&mut self) -> Result<(), String> {
+        if self.weapon_rec.is_some() {
+            return Ok(());
+        }
+        if self.rapid_fire_mode.load(Ordering::SeqCst) != 4 {
+            return Ok(());
+        }
+        let capt = self
+            .screen_capturer
+            .as_ref()
+            .ok_or("屏幕捕获器未初始化")?;
+        let buffer2 = capt.buffer2();
+        let version2 = capt.version2();
+        let crop_size = capt.crop_size();
+        match WeaponRecThread::start(buffer2, version2, crop_size) {
+            Ok(thread) => {
+                self.weapon_rec = Some(thread);
+                Ok(())
+            }
+            Err(e) => Err(format!("{}", e)),
+        }
+    }
+
     // 尝试启动检测器
     fn try_start_detector(&mut self) -> Result<(), String> {
         if self.detector.is_none() {
@@ -354,11 +406,14 @@ impl MappingManager {
             
             let state = reader.state();
             let ready = reader.ready();
+            let weapon_rec_result = self.weapon_rec.as_ref().map(|w| w.result());
+            let rapid_fire_weapons: Vec<String> = RAPID_FIRE_WEAPONS.iter().map(|s| (*s).to_string()).collect();
             
             self.con_mapper = Some(ConMapper::start(
                 state, virtual_gamepad_ref, ready, Some(det.result()),
                 params.0, params.1, params.2, params.3, params.4,
-                params.5, params.6, params.7, params.8, self.aim_enable.clone(), self.rapid_fire_mode.clone()
+                params.5, params.6, params.7, params.8, self.aim_enable.clone(), self.rapid_fire_mode.clone(),
+                weapon_rec_result, rapid_fire_weapons,
             ));
         }
         
@@ -380,6 +435,13 @@ impl MappingManager {
         if let Some(ref det) = self.detector {
             if det.error_flag().load(Ordering::SeqCst) {
                 error_messages.push("推理线程发生错误");
+            }
+        }
+
+        // 检查枪械识别线程错误
+        if let Some(ref wr) = self.weapon_rec {
+            if wr.error_flag().load(Ordering::SeqCst) {
+                error_messages.push("枪械识别线程发生错误");
             }
         }
         
@@ -404,7 +466,6 @@ impl MappingManager {
     
     // 清理所有组件
     fn cleanup_all_components(&mut self, con_exist: &mut bool) {
-        // 按照启动的反序关闭组件
         if let Some(mapper) = self.con_mapper.take() {
             mapper.stop();
         }
@@ -412,6 +473,10 @@ impl MappingManager {
             reader.stop();
         }
         *con_exist = enumerate_controllers();
+
+        if let Some(wr) = self.weapon_rec.take() {
+            wr.stop();
+        }
         
         if let Some(det) = self.detector.take() {
             det.stop();
@@ -429,6 +494,10 @@ impl MappingManager {
         }
         if let Some(reader) = self.con_reader.take() {
             reader.stop();
+        }
+
+        if let Some(wr) = self.weapon_rec.take() {
+            wr.stop();
         }
         
         if let Some(det) = self.detector.take() {
@@ -472,6 +541,10 @@ impl MappingManager {
     
     pub fn get_detector(&self) -> &Option<DetectorThread> {
         &self.detector
+    }
+
+    pub fn get_weapon_rec(&self) -> &Option<WeaponRecThread> {
+        &self.weapon_rec
     }
 
     /// 仅用于调试窗口：若当前未运行智慧核心且尚未启动 ConReader，则启动 ConReader（使用默认键位映射）
