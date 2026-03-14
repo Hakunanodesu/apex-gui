@@ -295,6 +295,7 @@ impl Default for MyApp {
                 "不启用连点".to_string(),
                 "根据枪械自动切换".to_string(),
                 "半按扳机连点".to_string(),
+                "完全按下扳机连点".to_string(),
                 "始终连点".to_string(),
             ],
             aa_activate_mode_selected: String::new(),
@@ -698,6 +699,7 @@ impl MyApp {
         match mode {
             "始终连点" => 1,
             "半按扳机连点" => 2,
+            "完全按下扳机连点" => 3,
             _ => 0,
         }
     }

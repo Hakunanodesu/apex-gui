@@ -149,6 +149,7 @@ impl ConMapper {
                     let should_rapid = match rf_mode {
                         1 => true,                             // 始终连点
                         2 => orig_state.right_trigger < 255,   // 半按连点，满值时按住
+                        3 => orig_state.right_trigger == 255,  // 完全按下才连点，否则按住
                         _ => false,
                     };
                     if should_rapid {
