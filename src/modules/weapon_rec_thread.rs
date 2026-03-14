@@ -108,9 +108,14 @@ fn resize_to_target(rgb: &[u8], src_w: usize, src_h: usize) -> Result<Vec<u8>> {
 }
 
 /// 计算相似度：匹配的边缘像素数 / 模板边缘像素总数
+/// 全黑模板特殊处理：若 live 也无边缘则视为 1.0 匹配（如「空手」），否则 0.0
 fn similarity(live: &GrayImage, template: &GrayImage, template_edge_count: u32) -> f32 {
     if template_edge_count == 0 {
-        return 0.0;
+        return if live.pixels().any(|p| p[0] >= EDGE_THRESHOLD) {
+            0.0
+        } else {
+            1.0
+        };
     }
     let mut match_count = 0u32;
     for y in 0..TARGET_H {
