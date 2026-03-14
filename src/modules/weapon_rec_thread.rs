@@ -1,6 +1,8 @@
 //! 枪械识别线程：从右下角 ROI 做 Canny 后与模板 bitmask 匹配，返回最相似模板名（无后缀）
+//! 模板图片在编译时通过 build.rs 嵌入二进制，无需运行时 gun_template 目录。
 
-use std::path::Path;
+include!(concat!(env!("OUT_DIR"), "/gun_templates.rs"));
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -23,47 +25,29 @@ const CANNY_LOW: f32 = 50.0;
 const CANNY_HIGH: f32 = 150.0;
 const EDGE_THRESHOLD: u8 = 128;
 
-/// 加载 gun_template 目录下所有 .png，转灰度并缩放到 159×38，返回 (文件名无后缀, 灰度图, 边缘像素数)
-fn load_templates(template_dir: &Path) -> Vec<(String, GrayImage, u32)> {
+/// 从编译时嵌入的 TEMPLATE_FILES 解码出 (文件名无后缀, 灰度图, 边缘像素数)
+fn load_embedded_templates() -> Vec<(String, GrayImage, u32)> {
     let mut out = Vec::new();
-    let dir = match std::fs::read_dir(template_dir) {
-        Ok(d) => d,
-        Err(e) => {
-            log_error(&format!("武器模板目录读取失败 {:?}: {}", template_dir, e));
-            return out;
-        }
-    };
-    for entry in dir.flatten() {
-        let path = entry.path();
-        if path.extension().map_or(false, |e| e == "png") {
-            let name = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            if name.is_empty() {
+    for (name, bytes) in TEMPLATE_FILES.iter() {
+        let img = match image::load_from_memory(bytes) {
+            Ok(i) => i,
+            Err(e) => {
+                log_error(&format!("解码嵌入模板 {} 失败: {}", name, e));
                 continue;
             }
-            let img = match image::open(&path) {
-                Ok(i) => i,
-                Err(e) => {
-                    log_error(&format!("加载模板 {:?} 失败: {}", path, e));
-                    continue;
-                }
-            };
-            let luma = img.to_luma8();
-            let (w, h) = (luma.width(), luma.height());
-            let resized = if w == TARGET_W && h == TARGET_H {
-                luma
-            } else {
-                image::imageops::resize(&luma, TARGET_W, TARGET_H, FilterType::Nearest)
-            };
-            let edge_count = resized
-                .pixels()
-                .filter(|p| p[0] >= EDGE_THRESHOLD)
-                .count() as u32;
-            out.push((name, resized, edge_count));
-        }
+        };
+        let luma = img.to_luma8();
+        let (w, h) = (luma.width(), luma.height());
+        let resized = if w == TARGET_W && h == TARGET_H {
+            luma
+        } else {
+            image::imageops::resize(&luma, TARGET_W, TARGET_H, FilterType::Nearest)
+        };
+        let edge_count = resized
+            .pixels()
+            .filter(|p| p[0] >= EDGE_THRESHOLD)
+            .count() as u32;
+        out.push((name.to_string(), resized, edge_count));
     }
     out
 }
@@ -136,18 +120,15 @@ pub struct WeaponRecThread {
 }
 
 impl WeaponRecThread {
-    /// 启动枪械识别线程。模板从 `gun_template/` 加载，常驻内存。
+    /// 启动枪械识别线程。模板在编译时已嵌入二进制，常驻内存。
     pub fn start(
         buffer2: Arc<Mutex<Vec<u8>>>,
         version2: Arc<AtomicU64>,
         crop_size: Arc<Mutex<(usize, usize)>>,
     ) -> Result<Self> {
-        let template_dir = std::env::current_dir()
-            .map_err(|e| anyhow::anyhow!("当前目录: {}", e))?
-            .join("gun_template");
-        let templates = load_templates(&template_dir);
+        let templates = load_embedded_templates();
         if templates.is_empty() {
-            log_error("未加载到任何武器模板，枪械识别将始终返回空");
+            log_error("未嵌入任何武器模板，枪械识别将始终返回空");
         }
 
         let stop_flag = Arc::new(AtomicBool::new(false));

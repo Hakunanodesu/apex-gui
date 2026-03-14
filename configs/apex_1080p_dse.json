@@ -1,0 +1,38 @@
+{
+  "aim_height_coefficient": 0.64,
+  "assist_curve": {
+    "deadzone": 0.0,
+    "hipfire": 0.56,
+    "inner_diameter": 45.0,
+    "inner_strength": 0.72,
+    "middle_diameter": 60.0,
+    "outer_diameter": 320.0,
+    "outer_strength": 0.36
+  },
+  "aa_activate_mode": "仅开火",
+  "use_controller": true,
+  "vertical_strength_coefficient": 0.96,
+  "con_mapping": {
+    "axis": {
+      "lx": 0,
+      "ly": 1,
+      "rx": 2,
+      "ry": 5,
+      "lt": 3,
+      "rt": 4
+    },
+    "button": {
+      "lb": 4,
+      "rb": 5,
+      "ls": 10,
+      "rs": 11,
+      "back": 8,
+      "start": 9,
+      "x": 0,
+      "y": 3,
+      "a": 1,
+      "b": 2
+    }
+  },
+  "rapid_fire_mode": "根据枪械自动切换"
+}

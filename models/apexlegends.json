@@ -1,0 +1,6 @@
+{
+    "size": 320,
+    "conf_thres": 0.4,
+    "iou_thres": 0.9,
+    "classes": "0"
+}
