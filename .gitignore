@@ -1,5 +1,5 @@
 /target
 /plans
-/models/*.onnx
 
+*.onnx
 *.json
