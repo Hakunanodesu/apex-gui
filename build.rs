@@ -9,7 +9,8 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     let template_dir = Path::new(&manifest_dir).join("gun_template");
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR");
-    let out_path = Path::new(&out_dir).join("gun_templates.rs");
+    // 生成的模板表写到源码目录，方便用相对路径 include!，避免依赖编译期的 OUT_DIR 环境变量。
+    let src_out_path = Path::new(&manifest_dir).join("src").join("gun_templates.rs");
 
     let mut entries: Vec<(String, String)> = Vec::new(); // (stem, filename)
 
@@ -61,7 +62,7 @@ fn main() {
 
     code.push_str("];\n");
 
-    fs::write(&out_path, code).expect("写入 gun_templates.rs 失败");
+    fs::write(&src_out_path, code).expect("写入 gun_templates.rs 失败");
     println!("cargo:rerun-if-changed=gun_template");
     println!("cargo:rerun-if-changed=3mz_ds_ver.png");
 

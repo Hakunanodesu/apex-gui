@@ -1,7 +1,7 @@
 //! 枪械识别线程：从右下角 ROI 做 Canny 后与模板 bitmask 匹配，返回最相似模板名（无后缀）
 //! 模板图片在编译时通过 build.rs 嵌入二进制，无需运行时 gun_template 目录。
 
-include!(concat!(env!("OUT_DIR"), "/gun_templates.rs"));
+include!("../gun_templates.rs");
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
