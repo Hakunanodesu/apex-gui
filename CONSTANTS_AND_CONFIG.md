@@ -18,7 +18,7 @@
 | `RED` | `egui::Color32` | `rgb(216, 118, 89)` | 红色（状态指示） |
 | `LICENSE_CODE` | `&str` | `"forthegloriouspurpose"` | 正确的许可证代码，用于校验及是否在输入框中回显 |
 
-**默认配置（`create_default_config`，约 704–730 行）：**
+**默认配置（`create_default_config`，约 741–767 行）：**
 
 - `base_inner_diameter`: `60.0`（1440p 基准）
 - `base_middle_diameter`: `60.0`
@@ -35,7 +35,7 @@
 - `rapid_fire_mode`: `"不启用连点"`
 - `license_code`: `""`（空字符串）
 
-**字体嵌入路径（约 88、95 行，相对 `src/main.rs` 为 `../fonts/`，即项目根下 `fonts/`）：**
+**字体嵌入路径（约 126、133 行，相对 `src/main.rs` 为 `../fonts/`，即项目根下 `fonts/`）：**
 
 - `fonts/JetBrainsMono-Regular.ttf`
 - `fonts/NotoSansCJKsc-Regular.otf`
@@ -62,9 +62,11 @@
 |--------|------|-----|------|
 | `TARGET_W` | `u32` | `159` | 模板匹配目标宽度（与 WEAPON_ROI_CROP_W 一致） |
 | `TARGET_H` | `u32` | `38` | 模板匹配目标高度（与 WEAPON_ROI_CROP_H 一致） |
-| `CANNY_LOW` | `f32` | `50.0` | Canny 边缘检测低阈值 |
-| `CANNY_HIGH` | `f32` | `150.0` | Canny 边缘检测高阈值 |
+| `CANNY_LOW` | `f32` | `20.0` | Canny 边缘检测低阈值 |
+| `CANNY_HIGH` | `f32` | `60.0` | Canny 边缘检测高阈值 |
 | `EDGE_THRESHOLD` | `u8` | `128` | 边缘二值化阈值 |
+| `EMPTY_HAND_SIMILARITY_THRESHOLD` | `f32` | `0.5` | 所有武器模板相似度均低于此值时判定为空手 |
+| `EMPTY_HAND_STR` | `&str` | `"空手"` | 空手时的识别结果字符串 |
 
 ---
 
@@ -75,9 +77,9 @@
 | `RAPID_FIRE_WEAPONS` | `&[&str]` | 见下表 | 连点白名单（枪械识别为列表中武器时始终连点） |
 | `MAX_CONSECUTIVE_ERRORS`（局部） | `u32` | `50` | 最大连续错误次数（约 133 行） |
 
-**RAPID_FIRE_WEAPONS 当前列表（约 17–19 行）：**
+**RAPID_FIRE_WEAPONS 当前列表（约 17–19 行，与 gun_template 文件名无后缀一致）：**
 
-`"3030"`, `"獒犬"`, `"单2020"`, `"和平"`, `"赫姆洛克"`, `"大炮"`, `"三重"`, `"哨兵"`, `"小帮手"`, `"长弓"`, `"g7"`
+`"3030"`, `"mastiff"`, `"singlep2020"`, `"peacekeeper"`, `"hemlok"`, `"kraber"`, `"tripletake"`, `"sentinel"`, `"wingman"`, `"longbow"`, `"g7"`
 
 ---
 
@@ -111,9 +113,10 @@
 
 ### 8. `build.rs`（编译时生成）
 
-- **输出模块**：`$OUT_DIR/gun_templates.rs`
+- **输出模块**：`src/build/gun_templates.rs`（写入源码目录，供 `weapon_rec_thread.rs` 通过 `include!("../build/gun_templates.rs")` 引入）。
 - **常量**：`TEMPLATE_FILES: &[(&str, &[u8])]` — 由 `gun_template/*.png` 扫描生成，嵌入 (名称无后缀, PNG 字节)。
 - **输入目录**：`gun_template/`（仅 `.png` 文件）。
+- **其他**：将 `3mz_ds_ver.png` 转为多尺寸 ICO 并设为 exe 图标；`cargo:rerun-if-changed=gun_template` 与 `3mz_ds_ver.png`。
 
 ---
 
@@ -175,13 +178,13 @@
 |------|----------------|
 | `src/main.rs` | 字号、间距、行高、颜色、许可证常量；默认吸附/连点/手柄/许可证配置；字体路径 |
 | `src/modules/screen_capture_thread.rs` | Apex 窗口标题、基准高度、武器 ROI 坐标与间隔 |
-| `src/modules/weapon_rec_thread.rs` | 目标宽高、Canny 阈值、边缘阈值 |
+| `src/modules/weapon_rec_thread.rs` | 目标宽高、Canny 阈值、边缘阈值、空手判定阈值与字符串 |
 | `src/modules/gamepad_mapping_thread.rs` | 连点白名单武器列表、连续错误上限 |
 | `src/modules/enemy_det_thread.rs` | 检测默认 size/conf/iou/classes、连续错误上限 |
 | `src/modules/gamepad_reading_thread.rs` | 调试开关与调试文本、连续错误上限 |
 | `src/modules/update_check.rs` | GitHub Release URL、请求超时 |
 | `src/utils.rs` | 手柄映射默认值、ConfigFile（含 license_code）、configs 路径与 .current 路径 |
-| `build.rs` | gun_template 目录、生成的 TEMPLATE_FILES 路径 |
+| `build.rs` | gun_template 目录、生成到 src/build/gun_templates.rs、exe 图标 3mz_ds_ver.png |
 | `configs/*.json` | 运行时主配置（吸附曲线、手柄映射、连点模式、license_code 等） |
 | `configs/.current` | 当前使用的配置名与模型名 |
 | `models/*.json` | 检测模型推理参数（size, conf_thres, iou_thres, classes） |

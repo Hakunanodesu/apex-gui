@@ -15,7 +15,7 @@ use crate::utils::console_redirect::log_error;
 /// 填写 gun_template 下模板文件名（无后缀），例如：
 /// `&["r99", "re45", "car", "301", "转换者"]`
 pub const RAPID_FIRE_WEAPONS: &[&str] = &[
-    "3030", "獒犬", "单2020", "和平", "赫姆洛克", "大炮", "三重", "哨兵", "小帮手", "长弓", "g7",
+    "30_30", "mastiff", "single_p2020", "peacekeeper", "hemlok", "kraber", "triple_take", "sentinel", "wingman", "longbow", "g7",
 ];
 
 // 新增：当右扳机按下时，基于检测结果对右摇杆进行修正

@@ -10,7 +10,9 @@ fn main() {
     let template_dir = Path::new(&manifest_dir).join("gun_template");
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR");
     // 生成的模板表写到源码目录，方便用相对路径 include!，避免依赖编译期的 OUT_DIR 环境变量。
-    let src_out_path = Path::new(&manifest_dir).join("src").join("gun_templates.rs");
+    let build_dir = Path::new(&manifest_dir).join("src").join("build");
+    let src_out_path = build_dir.join("gun_templates.rs");
+    fs::create_dir_all(&build_dir).expect("创建 src/build 目录失败");
 
     let mut entries: Vec<(String, String)> = Vec::new(); // (stem, filename)
 

@@ -1,7 +1,7 @@
 //! 枪械识别线程：从右下角 ROI 做 Canny 后与模板 bitmask 匹配，返回最相似模板名（无后缀）
 //! 模板图片在编译时通过 build.rs 嵌入二进制，无需运行时 gun_template 目录。
 
-include!("../gun_templates.rs");
+include!("../build/gun_templates.rs");
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -21,12 +21,12 @@ use crate::utils::console_redirect::log_error;
 
 pub const TARGET_W: u32 = 159;
 pub const TARGET_H: u32 = 38;
-const CANNY_LOW: f32 = 50.0;
-const CANNY_HIGH: f32 = 150.0;
+const CANNY_LOW: f32 = 20.0;
+const CANNY_HIGH: f32 = 60.0;
 const EDGE_THRESHOLD: u8 = 128;
 /// 所有武器模板相似度都低于此阈值时判定为空手
-const EMPTY_HAND_SIMILARITY_THRESHOLD: f32 = 0.4;
-const EMPTY_HAND_STR: &str = "空手";
+const EMPTY_HAND_SIMILARITY_THRESHOLD: f32 = 0.5;
+const EMPTY_HAND_STR: &str = "empty";
 
 /// 从编译时嵌入的 TEMPLATE_FILES 解码出 (文件名无后缀, 灰度图, 边缘像素数)
 fn load_embedded_templates() -> Vec<(String, GrayImage, u32)> {

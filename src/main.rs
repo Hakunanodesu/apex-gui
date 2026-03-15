@@ -4,7 +4,7 @@ use eframe::egui;
 use std::sync::{Arc, Mutex};
 use vigem_client::{Client, Xbox360Wired};
 use serde::Deserialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 mod utils;
 mod modules;
@@ -98,6 +98,25 @@ fn modal_blocker(ctx: &egui::Context) {
             // 核心：吃掉所有鼠标事件
             ui.allocate_rect(rect, egui::Sense::click_and_drag());
         });
+}
+
+/// Debug 模式下，获取 gun_template 目录下已有 *.png 的最大编号 + 1
+#[cfg(debug_assertions)]
+fn next_png_number_in_dir(dir: &Path) -> u32 {
+    let mut max = 0u32;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.extension().map_or(false, |e| e == "png") {
+                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                    if let Ok(n) = stem.parse::<u32>() {
+                        max = max.max(n);
+                    }
+                }
+            }
+        }
+    }
+    max + 1
 }
 
 fn setup_fonts(ctx: &egui::Context) {
@@ -817,7 +836,38 @@ impl eframe::App for MyApp {
             self.core_enabled = false;
             self.preview_allowed = false;
         }
-        
+
+        // Debug：按 Backspace 保存当前帧武器识别 live 图（159×38）到当前工作目录 gun_template/编号.png
+        #[cfg(debug_assertions)]
+        {
+            if ctx.input(|i| i.key_pressed(egui::Key::Backspace)) {
+                if let Some(weapon_rec) = self.mapping_manager.get_weapon_rec() {
+                    let canny = weapon_rec.canny_pixels();
+                    if let Ok(guard) = canny.lock() {
+                        if let Some(ref pixels) = *guard {
+                            let len = (CANNY_W as usize) * (CANNY_H as usize);
+                            if pixels.len() == len {
+                                let dir = std::env::current_dir()
+                                    .unwrap_or_else(|_| PathBuf::from("."))
+                                    .join("gun_template");
+                                if std::fs::create_dir_all(&dir).is_ok() {
+                                    let n = next_png_number_in_dir(&dir);
+                                    let path = dir.join(format!("{}.png", n));
+                                    if let Some(gray) =
+                                        image::GrayImage::from_raw(CANNY_W, CANNY_H, pixels.clone())
+                                    {
+                                        if gray.save(&path).is_ok() {
+                                            eprintln!("已保存武器识别 live 图: {}", path.display());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 设置窗口边框的 margin
         egui::CentralPanel::default().show(ctx, |ui| {
 
@@ -2149,7 +2199,7 @@ impl eframe::App for MyApp {
             let weapon_h_logical = (crop_h as f32) / pixels_per_point;
             let window_width_logical = main_h_logical
                 .max(weapon_w_logical)
-                .max(CHARACTER_WIDTH * 0.6 * 24.0);
+                .max(CHARACTER_WIDTH * 0.6 * 26.0);
             let window_height_logical = main_h_logical + weapon_h_logical + label_height;
             
             let viewport_id = egui::ViewportId::from_hash_of("inference_preview_window");
@@ -2347,7 +2397,7 @@ impl eframe::App for MyApp {
                                     // 六行：FPS+武器、四项耗时、相似度
                                     let label_text = if infer_ms > 0.0 || capture_ms > 0.0 || preprocess_ms > 0.0 || capture_fps > 0.0 || weapon_match_ms > 0.0 {
                                         format!(
-                                            "{:>3.0} FPS {}\n screen capture {:>4.1} ms\n preprocess     {:>4.1} ms\n inference      {:>4.1} ms\n weapon match   {:>4.1} ms\n weapon similarity {:.2}",
+                                            " {:>2.0} FPS {:>17}\n screen capture   {:>4.1} ms\n preprocess       {:>4.1} ms\n inference        {:>4.1} ms\n weapon match     {:>4.1} ms\n weapon similarity   {:.2}",
                                             capture_fps, weapon_name, capture_ms, preprocess_ms, infer_ms, weapon_match_ms, weapon_sim
                                         )
                                     } else {
