@@ -24,6 +24,9 @@ pub const TARGET_H: u32 = 38;
 const CANNY_LOW: f32 = 50.0;
 const CANNY_HIGH: f32 = 150.0;
 const EDGE_THRESHOLD: u8 = 128;
+/// 所有武器模板相似度都低于此阈值时判定为空手
+const EMPTY_HAND_SIMILARITY_THRESHOLD: f32 = 0.4;
+const EMPTY_HAND_STR: &str = "空手";
 
 /// 从编译时嵌入的 TEMPLATE_FILES 解码出 (文件名无后缀, 灰度图, 边缘像素数)
 fn load_embedded_templates() -> Vec<(String, GrayImage, u32)> {
@@ -136,6 +139,8 @@ pub struct WeaponRecThread {
     handle: Option<JoinHandle<()>>,
     result: Arc<Mutex<String>>,
     match_latency_ms: Arc<Mutex<f32>>,
+    /// 最近一帧与最佳模板的相似度 [0, 1]
+    best_similarity: Arc<Mutex<f32>>,
     /// 最近一帧的 live canny 图（右下角 ROI 做 Canny 后的灰度），用于预览。尺寸 TARGET_W×TARGET_H。
     canny_pixels: Arc<Mutex<Option<Vec<u8>>>>,
     error_flag: Arc<AtomicBool>,
@@ -156,12 +161,14 @@ impl WeaponRecThread {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let result = Arc::new(Mutex::new(String::new()));
         let match_latency_ms = Arc::new(Mutex::new(0.0f32));
+        let best_similarity = Arc::new(Mutex::new(0.0f32));
         let canny_pixels = Arc::new(Mutex::new(None));
         let error_flag = Arc::new(AtomicBool::new(false));
 
         let stop_clone = stop_flag.clone();
         let result_clone = result.clone();
         let match_latency_ms_clone = match_latency_ms.clone();
+        let best_similarity_clone = best_similarity.clone();
         let canny_pixels_clone = canny_pixels.clone();
         let _error_flag_clone = error_flag.clone();
 
@@ -214,18 +221,23 @@ impl WeaponRecThread {
                     *guard = Some(live_canny.as_raw().to_vec());
                 }
 
-                let best = templates
+                let (best_name, best_sim) = templates
                     .iter()
-                    .max_by(|a, b| {
-                        let sa = similarity(&live_canny, &a.1, a.2);
-                        let sb = similarity(&live_canny, &b.1, b.2);
-                        sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .map(|t| t.0.clone())
-                    .unwrap_or_default();
+                    .map(|t| (t.0.clone(), similarity(&live_canny, &t.1, t.2)))
+                    .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                    .unwrap_or((String::new(), 0.0));
+
+                let result_str = if best_sim < EMPTY_HAND_SIMILARITY_THRESHOLD {
+                    EMPTY_HAND_STR.to_string()
+                } else {
+                    best_name
+                };
 
                 if let Ok(mut res) = result_clone.lock() {
-                    *res = best;
+                    *res = result_str;
+                }
+                if let Ok(mut guard) = best_similarity_clone.lock() {
+                    *guard = best_sim;
                 }
                 let elapsed_ms = match_start.elapsed().as_secs_f32() * 1000.0;
                 if let Ok(mut guard) = match_latency_ms_clone.lock() {
@@ -239,6 +251,7 @@ impl WeaponRecThread {
             handle: Some(handle),
             result,
             match_latency_ms,
+            best_similarity,
             canny_pixels,
             error_flag,
         })
@@ -256,6 +269,11 @@ impl WeaponRecThread {
     /// 单次武器匹配耗时（ms）
     pub fn match_latency_ms(&self) -> Arc<Mutex<f32>> {
         self.match_latency_ms.clone()
+    }
+
+    /// 最近一帧与最佳模板的相似度 [0, 1]
+    pub fn best_similarity(&self) -> Arc<Mutex<f32>> {
+        self.best_similarity.clone()
     }
 
     pub fn error_flag(&self) -> Arc<AtomicBool> {

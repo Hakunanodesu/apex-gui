@@ -2124,6 +2124,9 @@ impl eframe::App for MyApp {
             let weapon_result_ref = self.mapping_manager.get_weapon_rec()
                 .as_ref()
                 .map(|w| w.result());
+            let weapon_similarity_ref = self.mapping_manager.get_weapon_rec()
+                .as_ref()
+                .map(|w| w.best_similarity());
             let weapon_canny_ref = self.mapping_manager.get_weapon_rec()
                 .as_ref()
                 .map(|w| w.canny_pixels());
@@ -2146,7 +2149,7 @@ impl eframe::App for MyApp {
             let weapon_h_logical = (crop_h as f32) / pixels_per_point;
             let window_width_logical = main_h_logical
                 .max(weapon_w_logical)
-                .max(CHARACTER_WIDTH * 0.6 * 23.0);
+                .max(CHARACTER_WIDTH * 0.6 * 24.0);
             let window_height_logical = main_h_logical + weapon_h_logical + label_height;
             
             let viewport_id = egui::ViewportId::from_hash_of("inference_preview_window");
@@ -2336,11 +2339,16 @@ impl eframe::App for MyApp {
                                         .filter(|s| !s.is_empty())
                                         .unwrap_or_else(|| "未识别".to_string());
 
-                                    // 六行：FPS + 四项耗时 + 当前武器
+                                    let weapon_sim = weapon_similarity_ref.as_ref()
+                                        .and_then(|val_ref| val_ref.lock().ok())
+                                        .map(|v| *v)
+                                        .unwrap_or(0.0);
+
+                                    // 六行：FPS+武器、四项耗时、相似度
                                     let label_text = if infer_ms > 0.0 || capture_ms > 0.0 || preprocess_ms > 0.0 || capture_fps > 0.0 || weapon_match_ms > 0.0 {
                                         format!(
-                                            " {:.0} FPS\n screen capture {:.1} ms\n preprocess     {:.1} ms\n inference      {:.1} ms\n weapon match   {:.1} ms\n 武器: {}",
-                                            capture_fps, capture_ms, preprocess_ms, infer_ms, weapon_match_ms, weapon_name
+                                            "{:>3.0} FPS {}\n screen capture {:>4.1} ms\n preprocess     {:>4.1} ms\n inference      {:>4.1} ms\n weapon match   {:>4.1} ms\n weapon similarity {:.2}",
+                                            capture_fps, weapon_name, capture_ms, preprocess_ms, infer_ms, weapon_match_ms, weapon_sim
                                         )
                                     } else {
                                         " 等待数据...".to_string()
