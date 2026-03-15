@@ -4,7 +4,7 @@ use eframe::egui;
 use std::sync::{Arc, Mutex};
 use vigem_client::{Client, Xbox360Wired};
 use serde::Deserialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 mod utils;
 mod modules;
@@ -848,7 +848,7 @@ impl eframe::App for MyApp {
                             let len = (CANNY_W as usize) * (CANNY_H as usize);
                             if pixels.len() == len {
                                 let dir = std::env::current_dir()
-                                    .unwrap_or_else(|_| PathBuf::from("."))
+                                    .unwrap_or_else(|_| std::path::PathBuf::from("."))
                                     .join("gun_template");
                                 if std::fs::create_dir_all(&dir).is_ok() {
                                     let n = next_png_number_in_dir(&dir);
