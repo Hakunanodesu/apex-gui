@@ -258,72 +258,12 @@ impl GraphicsCaptureApiHandler for CaptureHandler {
     }
 }
 
-/// 单帧捕获 handler，仅获取帧尺寸后立即停止
-struct OneShotHandler {
-    dimensions: Arc<Mutex<(usize, usize)>>,
-}
-
-impl GraphicsCaptureApiHandler for OneShotHandler {
-    type Flags = Arc<Mutex<(usize, usize)>>;
-    type Error = Box<dyn Error + Send + Sync>;
-
-    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        Ok(Self { dimensions: ctx.flags })
-    }
-
-    fn on_frame_arrived(
-        &mut self,
-        frame: &mut Frame,
-        capture_control: InternalCaptureControl,
-    ) -> Result<(), Self::Error> {
-        let fb = frame.buffer()?;
-        if let Ok(mut dims) = self.dimensions.lock() {
-            *dims = (fb.width() as usize, fb.height() as usize);
-        }
-        capture_control.stop();
-        Ok(())
-    }
-
-    fn on_closed(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-
 /// 检查 Apex 游戏窗口是否存在且可捕获（供 UI 显示「游戏窗口 就绪/未就绪」及启动前校验）
 pub fn is_apex_window_ready() -> bool {
     match Window::from_name(APEX_WINDOW_TITLE) {
         Ok(w) => w.is_valid(),
         Err(_) => false,
     }
-}
-
-/// 单帧捕获获取目标窗口分辨率，与持续捕获使用相同的 windows_capture 路径（仅 Apex 窗口）
-pub fn capture_frame_dimensions() -> Result<(usize, usize), Box<dyn Error>> {
-    let window = Window::from_name(APEX_WINDOW_TITLE)
-        .map_err(|_| "未找到 Apex 窗口，请先启动游戏")?;
-    if !window.is_valid() {
-        return Err("Apex 窗口不可捕获".into());
-    }
-    let dimensions = Arc::new(Mutex::new((0usize, 0usize)));
-    let settings = Settings::new(
-        window,
-        CursorCaptureSettings::WithoutCursor,
-        DrawBorderSettings::WithoutBorder,
-        SecondaryWindowSettings::Default,
-        MinimumUpdateIntervalSettings::Default,
-        DirtyRegionSettings::Default,
-        ColorFormat::Rgba8,
-        dimensions.clone(),
-    );
-
-    let dims_clone = dimensions.clone();
-    let handle = thread::spawn(move || {
-        let _ = OneShotHandler::start(settings);
-    });
-    let _ = handle.join();
-
-    let result = dims_clone.lock().map(|d| *d).unwrap_or((0, 0));
-    Ok(result)
 }
 
 /// 对外的封装
