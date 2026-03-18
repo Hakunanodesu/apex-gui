@@ -5,11 +5,12 @@ use std::{
         atomic::{AtomicBool, AtomicU8, Ordering},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use vigem_client::{Client, Xbox360Wired, XGamepad};
 use crate::modules::enemy_det_thread::Detection;
 use crate::shared_constants::error_limits::GAMEPAD_MAPPING_MAX_CONSECUTIVE_ERRORS;
+use crate::shared_constants::trigger_timing::TRIGGER_TIMING_UNIT_MS;
 pub use crate::shared_constants::RAPID_FIRE_WEAPONS;
 use crate::utils::console_redirect::log_error;
 
@@ -129,12 +130,15 @@ impl ConMapper {
             // println!("手柄映射线程已启动，使用0号虚拟手柄");
 
             let mut consecutive_errors = 0;
-            // 连点模式：根据当前输出状态反转扳机状态
+            // 连点模式：按下10ms，松开10ms
+            let rapid_fire_half_period = Duration::from_millis(TRIGGER_TIMING_UNIT_MS);
             let mut rapid_high: bool = false;
+            let mut rapid_last_toggle_at: Instant = Instant::now();
             // 松手开火：记录上一帧右扳机是否按下
             let mut release_prev_pressed: bool = false;
-            // 松手开火：松开后维持扳机脉冲的剩余帧数
-            let mut release_pulse_frames: u8 = 0;
+            // 松手开火：松开后维持“按下”状态的截止时间
+            let release_pulse_duration = Duration::from_millis(TRIGGER_TIMING_UNIT_MS);
+            let mut release_pulse_until: Option<Instant> = None;
 
             while !stop_clone.load(Ordering::SeqCst) {
                 let orig_state = match state_clone.lock() {
@@ -183,25 +187,25 @@ impl ConMapper {
                         // 按住阶段不触发开火：强制为 0，并清空后续脉冲
                         mapped_state.right_trigger = 0;
                         release_prev_pressed = true;
-                        release_pulse_frames = 0;
+                        release_pulse_until = None;
                     } else {
-                        // 从按下到松开的瞬间：启动一个持续若干帧的开火脉冲
+                        // 从按下到松开的瞬间：启动一个持续 50ms 的开火脉冲
                         if release_prev_pressed {
-                            release_pulse_frames = 10;
                             release_prev_pressed = false;
+                            release_pulse_until = Some(Instant::now() + release_pulse_duration);
                         }
 
-                        if release_pulse_frames > 0 {
+                        if release_pulse_until.is_some_and(|until| Instant::now() < until) {
                             mapped_state.right_trigger = 255;
-                            release_pulse_frames -= 1;
                         } else {
                             mapped_state.right_trigger = 0;
+                            release_pulse_until = None;
                         }
                     }
                 } else {
                     // 非松手开火武器时重置状态
                     release_prev_pressed = false;
-                    release_pulse_frames = 0;
+                    release_pulse_until = None;
                 }
 
                 // 控制扳机输出
@@ -227,13 +231,24 @@ impl ConMapper {
                         _ => false,
                     };
                     if should_rapid {
-                        rapid_high = !rapid_high;
+                        let now = Instant::now();
+                        if now.duration_since(rapid_last_toggle_at) >= rapid_fire_half_period {
+                            // 若循环偶尔卡顿，按半周期步进，避免相位漂移
+                            let steps = (now.duration_since(rapid_last_toggle_at).as_millis()
+                                / rapid_fire_half_period.as_millis().max(1)) as u32;
+                            if steps % 2 == 1 {
+                                rapid_high = !rapid_high;
+                            }
+                            rapid_last_toggle_at += rapid_fire_half_period * steps;
+                        }
                         mapped_state.right_trigger = if rapid_high { orig_state.right_trigger } else { 0 };
                     } else {
                         rapid_high = false;
+                        rapid_last_toggle_at = Instant::now();
                     }
                 } else {
                     rapid_high = false;
+                    rapid_last_toggle_at = Instant::now();
                 }
                 
                 // 处理检测结果并计算xy偏移

@@ -31,6 +31,14 @@ pub mod capture {
     pub const WEAPON_ROI_INTERVAL_MS: u64 = 500;
 }
 
+/// 手柄映射/扳机输出相关常量（毫秒）
+pub mod trigger_timing {
+    /// 统一时序单位（毫秒）
+    /// - 连点：按下/松开的半周期（ON/OFF 各 1 个单位）
+    /// - 松手开火：松开后维持“按下”的时长（1 个单位）
+    pub const TRIGGER_TIMING_UNIT_MS: u64 = 10;
+}
+
 /// UI 外观与交互文案相关常量
 pub mod ui {
     pub const CHARACTER_WIDTH: f32 = 12.0;
