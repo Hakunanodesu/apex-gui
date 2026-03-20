@@ -78,12 +78,16 @@ fn debug_print_axes_and_buttons() {
             use std::fmt::Write;
 
             let _ = writeln!(s, "axis_idx:");
-            let _ = writeln!(s, "[0]->{:+06}", axes[0]);
-            let _ = writeln!(s, "[1]->{:+06}", axes[1]);
-            let _ = writeln!(s, "[2]->{:+06}", axes[2]);
-            let _ = writeln!(s, "[3]->{:+06}", axes[3]);
-            let _ = writeln!(s, "[4]->{:+06}", axes[4]);
-            let _ = writeln!(s, "[5]->{:+06}", axes[5]);
+            let _ = writeln!(
+                s,
+                "[0]->{:+06}, [1]->{:+06}, [2]->{:+06}",
+                axes[0], axes[1], axes[2]
+            );
+            let _ = writeln!(
+                s,
+                "[3]->{:+06}, [4]->{:+06}, [5]->{:+06}",
+                axes[3], axes[4], axes[5]
+            );
             let _ = writeln!(s, "button_idx:");
             let _ = writeln!(
                 s,
