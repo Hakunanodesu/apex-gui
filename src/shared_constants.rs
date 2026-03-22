@@ -1,8 +1,6 @@
 // 项目公共常量中心。
 // 约定：跨文件复用、或容易散落成“魔法数”的值，统一放在这里。
 
-use std::sync::OnceLock;
-
 /// 武器识别相关常量
 pub mod weapon_rec {
     /// 武器识别模板统一宽度（像素）
@@ -134,36 +132,6 @@ pub mod build {
     pub const ICON_SIZES: &[u32] = &[16, 32, 48, 256];
 }
 
-static RAPID_FIRE_WEAPONS: OnceLock<Vec<String>> = OnceLock::new();
-/// 连点白名单（自动读取当前工作目录下 gun_templates/*.png 的文件名无后缀）
-pub fn rapid_fire_weapons() -> &'static [String] {
-    RAPID_FIRE_WEAPONS
-        .get_or_init(|| {
-            let template_dir = match std::env::current_dir() {
-                Ok(dir) => dir.join("gun_templates"),
-                Err(_) => return Vec::new(),
-            };
-
-            let mut names = Vec::new();
-            let entries = match std::fs::read_dir(template_dir) {
-                Ok(entries) => entries,
-                Err(_) => return Vec::new(),
-            };
-
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "png")
-                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-                    && !stem.is_empty()
-                {
-                    names.push(stem.to_string());
-                }
-            }
-
-            names.sort_unstable();
-            names.dedup();
-            names
-        })
-        .as_slice()
-}
+// 由 build.rs 扫描 gun_templates 生成，与 weapon_rec 嵌入模板列表一致
+include!("build/rapid_fire_weapon_stems.rs");
 

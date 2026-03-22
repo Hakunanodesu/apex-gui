@@ -11,7 +11,7 @@ mod modules;
 mod shared_constants;
 use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, ConfigFile, ConMapping, check_dir_exist};
 use modules::update_check::{check_github_update, UpdateCheckResult, UpdateInfo};
-use shared_constants::rapid_fire_weapons;
+use shared_constants::RAPID_FIRE_WEAPON_STEMS;
 use shared_constants::auth::LICENSE_CODE;
 use shared_constants::defaults;
 use shared_constants::ui::{
@@ -1564,7 +1564,7 @@ impl eframe::App for MyApp {
                             if self.rapid_fire_mode_selected == "根据枪械自动切换" {
                                 inner.response.on_hover_ui(|ui| {
                                     ui.set_max_width(CHARACTER_WIDTH * 32.0);
-                                    ui.label(rapid_fire_weapons().join(", "));
+                                    ui.label(RAPID_FIRE_WEAPON_STEMS.join(", "));
                                 });
                             }
                         });
@@ -1621,7 +1621,7 @@ impl eframe::App for MyApp {
                                     let width = ui.available_width() / 3.0 - SPACING * 2.0;
 
                                     // 特殊枪械行（与 gun_templates 文件名保持一致）
-                                    for name in rapid_fire_weapons().iter().map(String::as_str) {
+                                    for name in RAPID_FIRE_WEAPON_STEMS.iter().copied() {
                                         ui.horizontal(|ui| {
                                             // 武器名
                                             ui.add_sized(

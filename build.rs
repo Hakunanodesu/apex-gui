@@ -107,6 +107,22 @@ fn main() {
     code.push_str("];\n");
 
     fs::write(&src_out_path, code).expect("写入 gun_templates.rs 失败");
+
+    // 与嵌入模板同源：供 UI「特殊枪械」与连点白名单使用（编译期固定，不依赖运行时目录）
+    let stems_out = build_dir.join("rapid_fire_weapon_stems.rs");
+    let mut stems_code = String::from(
+        "// 由 build.rs 自动生成，请勿手改\n\n\
+         /// 连点 / 特殊枪械 UI：与 `gun_templates` 中已通过尺寸校验并嵌入的模板名（无后缀）一致\n\
+         pub const RAPID_FIRE_WEAPON_STEMS: &[&str] = &[\n",
+    );
+    for (stem, _, _, _) in &entries {
+        stems_code.push_str(&format!(
+            "    r#\"{}\"#,\n",
+            stem.replace('\\', "\\\\").replace('"', "\\\"")
+        ));
+    }
+    stems_code.push_str("];\n");
+    fs::write(&stems_out, stems_code).expect("写入 rapid_fire_weapon_stems.rs 失败");
     println!("cargo:rerun-if-changed=gun_templates");
     println!("cargo:rerun-if-changed=3mz_ds_ver.png");
 

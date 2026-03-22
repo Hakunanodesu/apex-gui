@@ -12,7 +12,7 @@ use crate::modules::{
     enemy_det_thread::DetectorThread,
     weapon_rec_thread::WeaponRecThread,
 };
-use crate::shared_constants::rapid_fire_weapons;
+use crate::shared_constants::RAPID_FIRE_WEAPON_STEMS;
 use crate::utils::{
     enum_device_tool::enumerate_controllers,
     console_redirect::log_error,
@@ -424,7 +424,10 @@ impl MappingManager {
             let state = reader.state();
             let ready = reader.ready();
             let weapon_rec_result = self.weapon_rec.as_ref().map(|w| w.result());
-            let rapid_fire_weapons: Vec<String> = rapid_fire_weapons().to_vec();
+            let rapid_fire_weapons: Vec<String> = RAPID_FIRE_WEAPON_STEMS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
             let special_aim = self.special_weapons_aim_and_fire.clone();
             let special_release = self.special_weapons_release_to_fire.clone();
             
