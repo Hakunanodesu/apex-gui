@@ -231,6 +231,10 @@ impl OnnxDetector {
                 if score < self.conf_thres {
                     return None;
                 }
+                // println!(
+                //     "[enemy_det raw xywh] x={:.2}, y={:.2}, w={:.2}, h={:.2}, score={:.3}",
+                //     row[0], row[1], row[2], row[3], score
+                // );
                 let cls = row[5] as usize;
                 if !self.classes.is_empty() && !self.classes.contains(&cls) {
                     return None;
