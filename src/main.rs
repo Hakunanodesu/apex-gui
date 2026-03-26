@@ -77,7 +77,7 @@ fn main() -> Result<(), eframe::Error> {
 
                 // 设置 tooltip 延迟
                 style.interaction.tooltip_delay = 0.0; // 单位：秒
-                style.interaction.show_tooltips_only_when_still = true;
+                style.interaction.show_tooltips_only_when_still = false;
             });
             
             // 创建应用实例，屏幕高度将在第一次 update 时获取
@@ -1584,119 +1584,124 @@ impl eframe::App for MyApp {
                         ui.add_sized(
                             egui::Vec2::new(CHARACTER_WIDTH * 7.0, ROW_HEIGHT),
                             egui::Label::new("特殊枪械设定")
-                        );
+                        )
+                        .on_hover_text("需在“连点触发方式”中选择“根据枪械自动切换”");
                     });
 
-                    // “特殊枪械设定” 下方的缩进 + 分隔结构（可滚动区域）
-                    ui.horizontal(|ui| {
-                        ui.add_sized(
-                            egui::Vec2::new(CHARACTER_WIDTH, ROW_HEIGHT),
-                            egui::Label::new("")
-                        );
+                    let special_weapon_settings_enabled =
+                        self.rapid_fire_mode_selected == "根据枪械自动切换";
+                    ui.add_enabled_ui(special_weapon_settings_enabled, |ui| {
+                        // “特殊枪械设定” 下方的缩进 + 分隔结构（可滚动区域）
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                egui::Vec2::new(CHARACTER_WIDTH, ROW_HEIGHT),
+                                egui::Label::new("")
+                            );
 
-                        ui.vertical(|ui| {
-                            ui.separator();
+                            ui.vertical(|ui| {
+                                ui.separator();
 
-                            // 表头固定，不随滚动移动
-                            ui.horizontal(|ui| {
-                                let width = ui.available_width() / 3.0 - SPACING * 2.0;
-                                ui.add_sized(
-                                    egui::Vec2::new(width, ROW_HEIGHT),
-                                    egui::Label::new("")
-                                );
-                                ui.add_sized(
-                                    egui::Vec2::new(width, ROW_HEIGHT),
-                                    egui::Label::new("开镜吸附")
-                                );
-                                ui.add_sized(
-                                    egui::Vec2::new(width, ROW_HEIGHT),
-                                    egui::Label::new("松手开火")
-                                );
-                            });
-
-                            egui::ScrollArea::vertical()
-                                .min_scrolled_height(ROW_HEIGHT * 4.0 + SPACING * 3.0)
-                                .show(ui, |ui| {
-                                    // 每行列宽（滚动区域内单独计算一次）
+                                // 表头固定，不随滚动移动
+                                ui.horizontal(|ui| {
                                     let width = ui.available_width() / 3.0 - SPACING * 2.0;
+                                    ui.add_sized(
+                                        egui::Vec2::new(width, ROW_HEIGHT),
+                                        egui::Label::new("")
+                                    );
+                                    ui.add_sized(
+                                        egui::Vec2::new(width, ROW_HEIGHT),
+                                        egui::Label::new("开镜吸附")
+                                    );
+                                    ui.add_sized(
+                                        egui::Vec2::new(width, ROW_HEIGHT),
+                                        egui::Label::new("松手开火")
+                                    );
+                                });
 
-                                    // 特殊枪械行（与 gun_templates 文件名保持一致）
-                                    for name in RAPID_FIRE_WEAPON_STEMS.iter().copied() {
-                                        ui.horizontal(|ui| {
-                                            // 武器名
-                                            ui.add_sized(
-                                                egui::Vec2::new(width, ROW_HEIGHT),
-                                                egui::Label::new(name),
-                                            );
+                                egui::ScrollArea::vertical()
+                                    .min_scrolled_height(ROW_HEIGHT * 4.0 + SPACING * 3.0)
+                                    .show(ui, |ui| {
+                                        // 每行列宽（滚动区域内单独计算一次）
+                                        let width = ui.available_width() / 3.0 - SPACING * 2.0;
 
-                                            // 开镜瞄准
-                                            let mut aim_checked =
-                                                self.special_weapons_aim_and_fire.contains(&name.to_string());
-                                            if ui
-                                                .add_sized(
+                                        // 特殊枪械行（与 gun_templates 文件名保持一致）
+                                        for name in RAPID_FIRE_WEAPON_STEMS.iter().copied() {
+                                            ui.horizontal(|ui| {
+                                                // 武器名
+                                                ui.add_sized(
                                                     egui::Vec2::new(width, ROW_HEIGHT),
-                                                    egui::Checkbox::without_text(&mut aim_checked),
-                                                )
-                                                .changed()
-                                            {
-                                                if aim_checked {
-                                                    let weapon_name = name.to_string();
-                                                    if !self
-                                                        .special_weapons_aim_and_fire
-                                                        .contains(&weapon_name)
-                                                    {
-                                                        self
+                                                    egui::Label::new(name),
+                                                );
+
+                                                // 开镜瞄准
+                                                let mut aim_checked =
+                                                    self.special_weapons_aim_and_fire.contains(&name.to_string());
+                                                if ui
+                                                    .add_sized(
+                                                        egui::Vec2::new(width, ROW_HEIGHT),
+                                                        egui::Checkbox::without_text(&mut aim_checked),
+                                                    )
+                                                    .changed()
+                                                {
+                                                    if aim_checked {
+                                                        let weapon_name = name.to_string();
+                                                        if !self
                                                             .special_weapons_aim_and_fire
-                                                            .push(weapon_name.clone());
-                                                    }
-                                                    // 互斥：勾选“开镜吸附”时，取消“松手开火”
-                                                    self
-                                                        .special_weapons_release_to_fire
-                                                        .retain(|s| s != &weapon_name);
-                                                } else {
-                                                    self
-                                                        .special_weapons_aim_and_fire
-                                                        .retain(|s| s != name);
-                                                }
-                                                self.mark_config_changed();
-                                                self.save_config();
-                                            }
-
-                                            // 松手开火
-                                            let mut release_checked =
-                                                self.special_weapons_release_to_fire.contains(&name.to_string());
-                                            if ui
-                                                .add_sized(
-                                                    egui::Vec2::new(width, ROW_HEIGHT),
-                                                    egui::Checkbox::without_text(&mut release_checked),
-                                                )
-                                                .changed()
-                                            {
-                                                if release_checked {
-                                                    let weapon_name = name.to_string();
-                                                    if !self
-                                                        .special_weapons_release_to_fire
-                                                        .contains(&weapon_name)
-                                                    {
+                                                            .contains(&weapon_name)
+                                                        {
+                                                            self
+                                                                .special_weapons_aim_and_fire
+                                                                .push(weapon_name.clone());
+                                                        }
+                                                        // 互斥：勾选“开镜吸附”时，取消“松手开火”
                                                         self
                                                             .special_weapons_release_to_fire
-                                                            .push(weapon_name.clone());
+                                                            .retain(|s| s != &weapon_name);
+                                                    } else {
+                                                        self
+                                                            .special_weapons_aim_and_fire
+                                                            .retain(|s| s != name);
                                                     }
-                                                    // 互斥：勾选“松手开火”时，取消“开镜吸附”
-                                                    self
-                                                        .special_weapons_aim_and_fire
-                                                        .retain(|s| s != &weapon_name);
-                                                } else {
-                                                    self
-                                                        .special_weapons_release_to_fire
-                                                        .retain(|s| s != name);
+                                                    self.mark_config_changed();
+                                                    self.save_config();
                                                 }
-                                                self.mark_config_changed();
-                                                self.save_config();
-                                            }
-                                        });
-                                    }
-                                });
+
+                                                // 松手开火
+                                                let mut release_checked =
+                                                    self.special_weapons_release_to_fire.contains(&name.to_string());
+                                                if ui
+                                                    .add_sized(
+                                                        egui::Vec2::new(width, ROW_HEIGHT),
+                                                        egui::Checkbox::without_text(&mut release_checked),
+                                                    )
+                                                    .changed()
+                                                {
+                                                    if release_checked {
+                                                        let weapon_name = name.to_string();
+                                                        if !self
+                                                            .special_weapons_release_to_fire
+                                                            .contains(&weapon_name)
+                                                        {
+                                                            self
+                                                                .special_weapons_release_to_fire
+                                                                .push(weapon_name.clone());
+                                                        }
+                                                        // 互斥：勾选“松手开火”时，取消“开镜吸附”
+                                                        self
+                                                            .special_weapons_aim_and_fire
+                                                            .retain(|s| s != &weapon_name);
+                                                    } else {
+                                                        self
+                                                            .special_weapons_release_to_fire
+                                                            .retain(|s| s != name);
+                                                    }
+                                                    self.mark_config_changed();
+                                                    self.save_config();
+                                                }
+                                            });
+                                        }
+                                    });
+                            });
                         });
                     });
 
