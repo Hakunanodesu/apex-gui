@@ -39,6 +39,15 @@ pub mod trigger_timing {
     pub const TRIGGER_TIMING_UNIT_MS: u64 = 10;
 }
 
+/// 吸附强度曲线相关常量
+pub mod aim_assist {
+    /// 递增阶段曲线类型：
+    /// - "linear": 使用 t 做线性插值
+    /// - "square": 使用 t^2 做插值（端点保持原始强度值）
+    /// - "ease-in-out": 使用缓入缓出进度 y=3t^2-2t^3 做插值（端点保持原始强度值）
+    pub const INNER_RAMP_CURVE: &str = "ease-in-out";
+}
+
 /// UI 外观与交互文案相关常量
 pub mod ui {
     pub const CHARACTER_WIDTH: f32 = 12.0;

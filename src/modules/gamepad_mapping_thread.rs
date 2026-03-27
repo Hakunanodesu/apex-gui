@@ -9,6 +9,7 @@ use std::{
 };
 use vigem_client::{Client, Xbox360Wired, XGamepad};
 use crate::modules::enemy_det_thread::Detection;
+use crate::shared_constants::aim_assist::INNER_RAMP_CURVE;
 use crate::shared_constants::error_limits::GAMEPAD_MAPPING_MAX_CONSECUTIVE_ERRORS;
 use crate::shared_constants::trigger_timing::TRIGGER_TIMING_UNIT_MS;
 use crate::utils::console_redirect::log_error;
@@ -35,21 +36,34 @@ fn apply_right_trigger_adjustment(
     let strength = if 
         dx.abs() <= inner_size / 2.0 && dy.abs() <= inner_size / 2.0
     {
-        // inner区间，线性递减
+        // inner区间：递增段曲线可配置（linear/square）
         let t = if inner_size > 0.0 { dist / (inner_size / 2.0) } else { 1.0 };
-        let temp = init_str * (1.0 - t) + inner_str * t;
-        temp * temp
+        if INNER_RAMP_CURVE == "linear" {
+            // linear：原始强度线性插值
+            init_str * (1.0 - t) + inner_str * t
+        } else if INNER_RAMP_CURVE == "square" {
+            // square：使用 t^2 进度做插值（端点仍是原始强度）
+            let t2 = t * t;
+            init_str * (1.0 - t2) + inner_str * t2
+        } else if INNER_RAMP_CURVE == "ease-in-out" {
+            // ease-in-out：使用缓入缓出进度 y=3t^2-2t^3
+            let smooth_t = 3.0 * t * t - 2.0 * t * t * t;
+            init_str * (1.0 - smooth_t) + inner_str * smooth_t
+        } else {
+            // 未知配置回退到 linear
+            init_str * (1.0 - t) + inner_str * t
+        }
     } else if 
         (dx.abs() <= mid_size / 2.0 && dy.abs() <= mid_size / 2.0)
         || (dx.abs() <= d.w / 2.0 && dy.abs() <= d.h / 2.0)
     {
-        // outer区间
-        inner_str * inner_str
+        // mid区间：最强平台（原始值）
+        inner_str
     } else if 
         dx.abs() <= outer_size / 2.0 && dy.abs() <= outer_size / 2.0
     {
-        // outer区间
-        outer_str * outer_str
+        // outer区间：弱平台（原始值）
+        outer_str
     } else {
         // 超出outer区间
         0.0

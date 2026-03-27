@@ -1189,7 +1189,7 @@ impl eframe::App for MyApp {
 
                                         let old_outer = self.outer_diameter;
                                         if ui.add_sized(
-                                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
+                                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.outer_diameter)
                                                 .clamp_range(self.min_outer_diameter..=self.screen_height)
                                                 .speed(1.0)
@@ -1209,7 +1209,7 @@ impl eframe::App for MyApp {
                                         }
 
                                         if ui.add_sized(
-                                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
+                                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.outer_strength)
                                                 .clamp_range(0.0..=1.0)
                                                 .speed(0.01)
@@ -1227,7 +1227,7 @@ impl eframe::App for MyApp {
 
                                         let old_middle = self.middle_diameter;
                                         if ui.add_sized(
-                                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
+                                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.middle_diameter)
                                                 .clamp_range(0.0..=self.outer_diameter)
                                                 .speed(1.0)
@@ -1251,7 +1251,7 @@ impl eframe::App for MyApp {
                                         );
 
                                         if ui.add_sized(
-                                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
+                                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.inner_diameter)
                                                 .clamp_range(0.0..=self.middle_diameter)
                                                 .speed(1.0)
@@ -1261,7 +1261,7 @@ impl eframe::App for MyApp {
                                         }
 
                                         if ui.add_sized(
-                                            egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
+                                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.inner_strength)
                                                 .clamp_range(0.0..=1.0)
                                                 .speed(0.01)

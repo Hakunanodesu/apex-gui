@@ -1,17 +1,17 @@
 {
-  "aim_height_coefficient": 0.6,
+  "aim_height_coefficient": 0.64,
   "assist_curve": {
     "deadzone": 0.0,
-    "hipfire": 0.6,
-    "inner_diameter": 60.0,
+    "hipfire": 0.56,
+    "inner_diameter": 48.0,
     "inner_strength": 0.8,
-    "middle_diameter": 60.0,
+    "middle_diameter": 64.0,
     "outer_diameter": 320.0,
     "outer_strength": 0.4
   },
   "aa_activate_mode": "仅开火",
   "use_controller": true,
-  "vertical_strength_coefficient": 1.0,
+  "vertical_strength_coefficient": 0.96,
   "con_mapping": {
     "axis": {
       "lx": 0,
@@ -38,9 +38,9 @@
   "license_code": "forthegloriouspurpose",
   "special_weapons_aim_and_fire": [],
   "special_weapons_release_to_fire": [
-    "sentinel",
-    "triple_take",
+    "peacekeeper",
     "kraber",
-    "peacekeeper"
+    "triple_take",
+    "sentinel"
   ]
 }
