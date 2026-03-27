@@ -120,7 +120,7 @@
 配置结构由 `src/utils.rs::ConfigFile` 定义，典型字段如下（以 `configs/apex_1080p_dse.json` 为例）：
 
 - **`assist_curve`**
-  - `outer_diameter` / `middle_diameter` / `inner_diameter`：外/中/内圈直径（像素）。
+  - `outer_diameter` / `inner_diameter`：外/内圈直径（像素）。
   - `outer_strength` / `inner_strength`：外圈/内圈强度（0~1）。
   - `deadzone`：起始吸附强度（0~1）。
   - `hipfire`：腰射系数（0~1，用于未按左扳机时的乘数）。

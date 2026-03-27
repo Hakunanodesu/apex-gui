@@ -15,7 +15,6 @@ pub struct AssistCurve {
     pub hipfire: f32,
     pub inner_diameter: f32,
     pub inner_strength: f32,
-    pub middle_diameter: f32,
     pub outer_diameter: f32,
     pub outer_strength: f32,
 }
@@ -95,6 +94,9 @@ pub struct ConfigFile {
     pub con_mapping: Option<ConMapping>,
     #[serde(default)]
     pub rapid_fire_mode: String,
+    /// 内圈递增曲线模式：linear / ease-in / ease-in-out
+    #[serde(default = "default_inner_ramp_curve")]
+    pub inner_ramp_curve: String,
     /// 许可证代码，首次为空字符串，用户填写后保存
     #[serde(default)]
     pub license_code: String,
@@ -104,6 +106,10 @@ pub struct ConfigFile {
     /// 特殊枪械：按下不开火，松手开火一次
     #[serde(default)]
     pub special_weapons_release_to_fire: Vec<String>,
+}
+
+fn default_inner_ramp_curve() -> String {
+    "ease-in-out".to_string()
 }
 
 /// 读取 configs/.current 文件，返回当前配置和模型

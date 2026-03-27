@@ -9,17 +9,25 @@ use std::{
 };
 use vigem_client::{Client, Xbox360Wired, XGamepad};
 use crate::modules::enemy_det_thread::Detection;
-use crate::shared_constants::aim_assist::INNER_RAMP_CURVE;
 use crate::shared_constants::error_limits::GAMEPAD_MAPPING_MAX_CONSECUTIVE_ERRORS;
 use crate::shared_constants::trigger_timing::TRIGGER_TIMING_UNIT_MS;
 use crate::utils::console_redirect::log_error;
+
+fn eval_inner_ramp_progress(t: f32, curve_mode: u8) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    match curve_mode {
+        0 => t,                                       // linear
+        1 => t * t,                                   // ease-in
+        2 => 3.0 * t * t - 2.0 * t * t * t,          // ease-in-out
+        _ => t,
+    }
+}
 
 // 新增：当右扳机按下时，基于检测结果对右摇杆进行修正
 fn apply_right_trigger_adjustment(
     mapped_state: &mut XGamepad,
     d: &Detection,
     outer_size: f32,
-    mid_size: f32,
     inner_size: f32,
     outer_str: f32,
     inner_str: f32,
@@ -28,6 +36,7 @@ fn apply_right_trigger_adjustment(
     vertical_str: f32,
     aim_height: f32,
     left_trigger_pressed: bool,
+    curve_mode: u8,
 ) {
     let center = outer_size / 2.0;
     let dx = d.x - center;
@@ -36,28 +45,12 @@ fn apply_right_trigger_adjustment(
     let strength = if 
         dx.abs() <= inner_size / 2.0 && dy.abs() <= inner_size / 2.0
     {
-        // inner区间：递增段曲线可配置（linear/square）
+        // inner区间：递增段曲线可配置（linear/ease-in）
         let t = if inner_size > 0.0 { dist / (inner_size / 2.0) } else { 1.0 };
-        if INNER_RAMP_CURVE == "linear" {
-            // linear：原始强度线性插值
-            init_str * (1.0 - t) + inner_str * t
-        } else if INNER_RAMP_CURVE == "square" {
-            // square：使用 t^2 进度做插值（端点仍是原始强度）
-            let t2 = t * t;
-            init_str * (1.0 - t2) + inner_str * t2
-        } else if INNER_RAMP_CURVE == "ease-in-out" {
-            // ease-in-out：使用缓入缓出进度 y=3t^2-2t^3
-            let smooth_t = 3.0 * t * t - 2.0 * t * t * t;
-            init_str * (1.0 - smooth_t) + inner_str * smooth_t
-        } else {
-            // 未知配置回退到 linear
-            init_str * (1.0 - t) + inner_str * t
-        }
-    } else if 
-        (dx.abs() <= mid_size / 2.0 && dy.abs() <= mid_size / 2.0)
-        || (dx.abs() <= d.w / 2.0 && dy.abs() <= d.h / 2.0)
-    {
-        // mid区间：最强平台（原始值）
+        let progress = eval_inner_ramp_progress(t, curve_mode);
+        init_str * (1.0 - progress) + inner_str * progress
+    } else if dx.abs() <= d.w / 2.0 && dy.abs() <= d.h / 2.0 {
+        // 目标框区间：最强平台（原始值）
         inner_str
     } else if 
         dx.abs() <= outer_size / 2.0 && dy.abs() <= outer_size / 2.0
@@ -103,7 +96,6 @@ impl ConMapper {
         ready_flag: Arc<AtomicBool>,
         det_result: Option<Arc<Mutex<Option<Vec<Detection>>>>>,
         outer_size: f32,
-        mid_size: f32,
         inner_size: f32,
         outer_str: f32,
         inner_str: f32,
@@ -113,6 +105,7 @@ impl ConMapper {
         hipfire: f32,
         aim_enable: Arc<AtomicBool>,
         rapid_fire_mode: Arc<AtomicU8>, // 0=关闭, 1=始终连点, 2=半按, 3=完全按下连点, 4=根据枪械自动切换
+        inner_ramp_mode: Arc<AtomicU8>, // 0=linear, 1=ease-in, 2=ease-in-out
         weapon_rec_result: Option<Arc<Mutex<String>>>, // 枪械识别结果（模板名无后缀）
         rapid_fire_weapons: Vec<String>,               // 连点白名单
         special_weapons_aim_and_fire: Vec<String>,     // 特殊枪械：强制瞄准和开火
@@ -126,6 +119,7 @@ impl ConMapper {
         let error_flag_clone = error_flag.clone();
         let vg_clone = virtual_gamepad.clone();
         let rapid_fire_mode_clone = rapid_fire_mode.clone();
+        let inner_ramp_mode_clone = inner_ramp_mode.clone();
         let weapon_rec_result_clone = weapon_rec_result.clone();
         let rapid_fire_weapons = rapid_fire_weapons;
         let special_weapons_aim_and_fire = special_weapons_aim_and_fire;
@@ -279,7 +273,6 @@ impl ConMapper {
                                             &mut mapped_state,
                                             d,
                                             outer_size,
-                                            mid_size,
                                             inner_size,
                                             outer_str,
                                             inner_str,
@@ -288,6 +281,7 @@ impl ConMapper {
                                             vertical_str,
                                             aim_height,
                                             left_trigger_pressed,
+                                            inner_ramp_mode_clone.load(Ordering::SeqCst),
                                         );
                                     }
                                 }

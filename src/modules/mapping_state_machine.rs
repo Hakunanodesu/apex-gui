@@ -52,7 +52,6 @@ pub struct MappingManager {
     con_mapping: Option<ConMapping>, // 手柄键位映射（启动智慧核心时从配置读取）
     aim_enable: Arc<AtomicBool>, // 瞄准辅助开关
     outer_size: Arc<Mutex<String>>,
-    mid_size: Arc<Mutex<String>>,
     inner_size: Arc<Mutex<String>>,
     outer_str: Arc<Mutex<String>>,
     inner_str: Arc<Mutex<String>>,
@@ -61,6 +60,7 @@ pub struct MappingManager {
     vertical_str: Arc<Mutex<String>>,
     aim_height: Arc<Mutex<String>>,
     rapid_fire_mode: Arc<AtomicU8>, // 连点模式：0=关闭, 1=始终连点, 2=半按扳机连点
+    inner_ramp_mode: Arc<AtomicU8>, // 内圈递增曲线：0=linear, 1=ease-in, 2=ease-in-out
     // 特殊枪械设定
     special_weapons_aim_and_fire: Vec<String>,
     special_weapons_release_to_fire: Vec<String>,
@@ -75,7 +75,6 @@ impl MappingManager {
         current_model: String,
         aim_enable: Arc<AtomicBool>, // 瞄准辅助开关
         outer_size: Arc<Mutex<String>>,
-        mid_size: Arc<Mutex<String>>,
         inner_size: Arc<Mutex<String>>,
         outer_str: Arc<Mutex<String>>,
         inner_str: Arc<Mutex<String>>,
@@ -84,6 +83,7 @@ impl MappingManager {
         vertical_str: Arc<Mutex<String>>,
         aim_height: Arc<Mutex<String>>,
         rapid_fire_mode: Arc<AtomicU8>,
+        inner_ramp_mode: Arc<AtomicU8>,
     ) -> Self {
         Self {
             state: MappingState::Idle,
@@ -96,7 +96,6 @@ impl MappingManager {
             con_mapping: None,
             aim_enable,
             outer_size,
-            mid_size,
             inner_size,
             outer_str,
             inner_str,
@@ -105,6 +104,7 @@ impl MappingManager {
             vertical_str,
             aim_height,
             rapid_fire_mode,
+            inner_ramp_mode,
             special_weapons_aim_and_fire: Vec::new(),
             special_weapons_release_to_fire: Vec::new(),
             device_available: false,
@@ -434,7 +434,8 @@ impl MappingManager {
             self.con_mapper = Some(ConMapper::start(
                 state, virtual_gamepad_ref, ready, Some(det.result()),
                 params.0, params.1, params.2, params.3, params.4,
-                params.5, params.6, params.7, params.8, self.aim_enable.clone(), self.rapid_fire_mode.clone(),
+                params.5, params.6, params.7, self.aim_enable.clone(), self.rapid_fire_mode.clone(),
+                self.inner_ramp_mode.clone(),
                 weapon_rec_result, rapid_fire_weapons, special_aim, special_release,
             ));
         }
@@ -532,9 +533,8 @@ impl MappingManager {
     }
     
     // 提取映射参数
-    fn extract_mapping_params(&self) -> Result<(f32, f32, f32, f32, f32, f32, f32, f32, f32), String> {
+    fn extract_mapping_params(&self) -> Result<(f32, f32, f32, f32, f32, f32, f32, f32), String> {
         let outer_val = self.outer_size.lock().map_err(|e| format!("获取外圈大小锁失败: {}", e))?.trim().parse::<f32>().unwrap_or(320.0);
-        let mid_val = self.mid_size.lock().map_err(|e| format!("获取中圈大小锁失败: {}", e))?.trim().parse::<f32>().unwrap_or(200.0);
         let inner_val = self.inner_size.lock().map_err(|e| format!("获取内圈大小锁失败: {}", e))?.trim().parse::<f32>().unwrap_or(100.0);
         let outer_str_val = self.outer_str.lock().map_err(|e| format!("获取外圈强度锁失败: {}", e))?.trim().parse::<f32>().unwrap_or(1.0);
         let inner_str_val = self.inner_str.lock().map_err(|e| format!("获取内圈强度锁失败: {}", e))?.trim().parse::<f32>().unwrap_or(1.0);
@@ -543,7 +543,7 @@ impl MappingManager {
         let aim_height_val = self.aim_height.lock().map_err(|e| format!("获取瞄准高度锁失败: {}", e))?.trim().parse::<f32>().unwrap_or(0.5);
         let hipfire_val = self.hipfire.lock().map_err(|e| format!("获取腰射系数锁失败: {}", e))?.trim().parse::<f32>().unwrap_or(0.0);
         
-        Ok((outer_val, mid_val, inner_val, outer_str_val, inner_str_val, init_str_val, vertical_str_val, aim_height_val, hipfire_val))
+        Ok((outer_val, inner_val, outer_str_val, inner_str_val, init_str_val, vertical_str_val, aim_height_val, hipfire_val))
     }
     
     // 更新配置

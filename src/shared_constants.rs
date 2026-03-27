@@ -43,7 +43,7 @@ pub mod trigger_timing {
 pub mod aim_assist {
     /// 递增阶段曲线类型：
     /// - "linear": 使用 t 做线性插值
-    /// - "square": 使用 t^2 做插值（端点保持原始强度值）
+    /// - "ease-in": 使用 t^2 做插值（端点保持原始强度值）
     /// - "ease-in-out": 使用缓入缓出进度 y=3t^2-2t^3 做插值（端点保持原始强度值）
     pub const INNER_RAMP_CURVE: &str = "ease-in-out";
 }
@@ -90,7 +90,6 @@ pub mod defaults {
     /// 创建默认配置时使用的基准分辨率高度
     pub const BASE_SCREEN_HEIGHT: f32 = 1440.0;
     pub const BASE_INNER_DIAMETER: f32 = 60.0;
-    pub const BASE_MIDDLE_DIAMETER: f32 = 60.0;
     pub const BASE_OUTER_DIAMETER: f32 = 320.0;
     pub const AIM_HEIGHT_COEFFICIENT: f32 = 0.6;
     pub const DEADZONE: f32 = 0.0;

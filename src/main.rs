@@ -12,6 +12,7 @@ mod shared_constants;
 use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, ConfigFile, ConMapping, check_dir_exist};
 use modules::update_check::{check_github_update, UpdateCheckResult, UpdateInfo};
 use shared_constants::RAPID_FIRE_WEAPON_STEMS;
+use shared_constants::aim_assist::INNER_RAMP_CURVE;
 use shared_constants::auth::LICENSE_CODE;
 use shared_constants::defaults;
 use shared_constants::ui::{
@@ -28,6 +29,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 const GREEN: egui::Color32 = egui::Color32::from_rgb(GREEN_RGB.0, GREEN_RGB.1, GREEN_RGB.2);
 const YELLOW: egui::Color32 = egui::Color32::from_rgb(YELLOW_RGB.0, YELLOW_RGB.1, YELLOW_RGB.2);
 const RED: egui::Color32 = egui::Color32::from_rgb(RED_RGB.0, RED_RGB.1, RED_RGB.2);
+const CURVE_PREVIEW_SAMPLE_POINTS: usize = 16;
 
 /// 从编译期嵌入的 PNG 生成窗口/标题栏图标（IconData）
 fn load_window_icon() -> Option<egui::viewport::IconData> {
@@ -186,6 +188,8 @@ struct MyApp {
     rapid_fire_mode: Arc<AtomicU8>, // 连点模式（跨线程共享）：0=关闭, 1=始终连点, 2=半按扳机连点
     rapid_fire_mode_selected: String,
     rapid_fire_mode_items: Vec<String>,
+    inner_ramp_mode: Arc<AtomicU8>, // 内圈递增曲线（跨线程共享）：0=linear,1=ease-in,2=ease-in-out
+    inner_ramp_mode_selected: String,
 
     // 吸附方式选择
     aa_activate_mode_selected: String,
@@ -202,7 +206,6 @@ struct MyApp {
     // 吸附曲线设定
     outer_diameter: f32, // 外圈直径
     outer_strength: f32, // 外圈强度
-    middle_diameter: f32, // 中圈直径
     inner_diameter: f32, // 内圈直径
     inner_strength: f32, // 内圈强度
     
@@ -238,7 +241,6 @@ struct MyApp {
     aim_enable: Arc<AtomicBool>, // 瞄准辅助开关
     // 参数共享（字符串格式，供 MappingManager 使用）
     outer_size: Arc<Mutex<String>>,
-    mid_size: Arc<Mutex<String>>,
     inner_size: Arc<Mutex<String>>,
     outer_str: Arc<Mutex<String>>,
     inner_str: Arc<Mutex<String>>,
@@ -285,6 +287,9 @@ struct MyApp {
     debug_btn_y: String,
     debug_btn_a: String,
     debug_btn_b: String,
+    // 第一段曲线预览采样缓存（x, y）
+    curve_preview_points_cache: Vec<(f32, f32)>,
+    curve_preview_cache_key: Option<(f32, f32, f32, u8)>, // (outer_diameter, start_strength, inner_strength, mode)
 }
 
 impl Default for MyApp {
@@ -313,8 +318,8 @@ impl Default for MyApp {
         // 初始化参数共享结构
         let aim_enable = Arc::new(AtomicBool::new(false));
         let rapid_fire_mode = Arc::new(AtomicU8::new(0));
+        let inner_ramp_mode = Arc::new(AtomicU8::new(Self::inner_ramp_mode_to_u8(INNER_RAMP_CURVE)));
         let outer_size = Arc::new(Mutex::new(String::new()));
-        let mid_size = Arc::new(Mutex::new(String::new()));
         let inner_size = Arc::new(Mutex::new(String::new()));
         let outer_str = Arc::new(Mutex::new(String::new()));
         let inner_str = Arc::new(Mutex::new(String::new()));
@@ -328,7 +333,6 @@ impl Default for MyApp {
             model_selected.clone(),
             aim_enable.clone(),
             outer_size.clone(),
-            mid_size.clone(),
             inner_size.clone(),
             outer_str.clone(),
             inner_str.clone(),
@@ -337,6 +341,7 @@ impl Default for MyApp {
             vertical_str.clone(),
             aim_height.clone(),
             rapid_fire_mode.clone(),
+            inner_ramp_mode.clone(),
         );
         
         let mut app = Self {
@@ -351,6 +356,8 @@ impl Default for MyApp {
             rapid_fire_mode,
             rapid_fire_mode_selected: defaults::RAPID_FIRE_MODE.to_string(),
             rapid_fire_mode_items: RAPID_FIRE_MODE_ITEMS.iter().map(|s| (*s).to_string()).collect(),
+            inner_ramp_mode,
+            inner_ramp_mode_selected: INNER_RAMP_CURVE.to_string(),
             aa_activate_mode_selected: String::new(),
             aa_activate_mode_items: AA_ACTIVATE_MODE_ITEMS.iter().map(|s| (*s).to_string()).collect(),
             special_weapons_aim_and_fire: Vec::new(),
@@ -359,7 +366,6 @@ impl Default for MyApp {
             min_outer_diameter: 0.0,
             outer_diameter: 0.0,
             outer_strength: 0.0,
-            middle_diameter: 0.0,
             inner_diameter: 0.0,
             inner_strength: 0.0,
             start_strength: 0.0,
@@ -379,7 +385,6 @@ impl Default for MyApp {
             mapping_manager,
             aim_enable,
             outer_size,
-            mid_size,
             inner_size,
             outer_str,
             inner_str,
@@ -414,6 +419,8 @@ impl Default for MyApp {
             debug_btn_y: String::new(),
             debug_btn_a: String::new(),
             debug_btn_b: String::new(),
+            curve_preview_points_cache: Vec::new(),
+            curve_preview_cache_key: None,
         };
         
         // 根据当前模型加载最小外圈直径（来自模型 json 的 size）
@@ -442,6 +449,50 @@ impl Default for MyApp {
 }
 
 impl MyApp {
+    fn eval_inner_ramp_progress(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        let mode = self.inner_ramp_mode.load(Ordering::Relaxed);
+        if mode == 0 {
+            t
+        } else if mode == 1 {
+            t * t
+        } else if mode == 2 {
+            3.0 * t * t - 2.0 * t * t * t
+        } else {
+            t
+        }
+    }
+
+    fn ensure_curve_preview_points_cache(&mut self) {
+        if self.outer_diameter <= 0.0 {
+            self.curve_preview_points_cache.clear();
+            self.curve_preview_cache_key = None;
+            return;
+        }
+
+        let key = (
+            self.outer_diameter,
+            self.start_strength,
+            self.inner_strength,
+            self.inner_ramp_mode.load(Ordering::Relaxed),
+        );
+        if self.curve_preview_cache_key == Some(key) {
+            return;
+        }
+
+        let x_end = self.outer_diameter / 2.0;
+        let point_count = CURVE_PREVIEW_SAMPLE_POINTS.max(2);
+        let mut points = Vec::with_capacity(point_count);
+        for i in 0..point_count {
+            let t = i as f32 / (point_count as f32 - 1.0);
+            let progress = self.eval_inner_ramp_progress(t);
+            let y = self.start_strength * (1.0 - progress) + self.inner_strength * progress;
+            points.push((x_end * t, y));
+        }
+        self.curve_preview_points_cache = points;
+        self.curve_preview_cache_key = Some(key);
+    }
+
     /// 根据当前选中的模型，更新最小外圈直径（来自 models/<model>.json 的 size 字段）
     fn update_min_outer_from_model(&mut self) {
         // 如果没有选择模型，则不限制最小值
@@ -475,9 +526,6 @@ impl MyApp {
                     if self.outer_diameter < self.min_outer_diameter {
                         self.outer_diameter = self.min_outer_diameter;
                     }
-                    if self.middle_diameter < self.min_outer_diameter {
-                        self.middle_diameter = self.min_outer_diameter;
-                    }
                     if self.inner_diameter < self.min_outer_diameter {
                         self.inner_diameter = self.min_outer_diameter;
                     }
@@ -496,6 +544,14 @@ impl MyApp {
         self.aa_activate_mode_selected = config.aa_activate_mode.clone();
         self.special_weapons_aim_and_fire = config.special_weapons_aim_and_fire.clone();
         self.special_weapons_release_to_fire = config.special_weapons_release_to_fire.clone();
+        self.inner_ramp_mode_selected = if config.inner_ramp_curve.is_empty() {
+            INNER_RAMP_CURVE.to_string()
+        } else {
+            config.inner_ramp_curve.clone()
+        };
+        self.inner_ramp_mode
+            .store(Self::inner_ramp_mode_to_u8(&self.inner_ramp_mode_selected), Ordering::Relaxed);
+        self.curve_preview_cache_key = None;
         self.rapid_fire_mode_selected = if config.rapid_fire_mode.is_empty() {
             "不启用连点".to_string()
         } else {
@@ -504,7 +560,6 @@ impl MyApp {
         self.rapid_fire_mode.store(Self::rapid_fire_mode_to_u8(&self.rapid_fire_mode_selected), Ordering::Relaxed);
         self.outer_diameter = config.assist_curve.outer_diameter;
         self.outer_strength = config.assist_curve.outer_strength;
-        self.middle_diameter = config.assist_curve.middle_diameter;
         self.inner_diameter = config.assist_curve.inner_diameter;
         self.inner_strength = config.assist_curve.inner_strength;
         self.start_strength = config.assist_curve.deadzone;
@@ -595,7 +650,6 @@ impl MyApp {
                 hipfire: self.hipfire_strength_factor,
                 inner_diameter: self.inner_diameter,
                 inner_strength: self.inner_strength,
-                middle_diameter: self.middle_diameter,
                 outer_diameter: self.outer_diameter,
                 outer_strength: self.outer_strength,
             },
@@ -604,6 +658,7 @@ impl MyApp {
             vertical_strength_coefficient: self.vertical_strength_factor,
             con_mapping: Some(self.debug_to_con_mapping()),
             rapid_fire_mode: self.rapid_fire_mode_selected.clone(),
+            inner_ramp_curve: self.inner_ramp_mode_selected.clone(),
             license_code: self.license_key.clone(),
             special_weapons_aim_and_fire: self.special_weapons_aim_and_fire.clone(),
             special_weapons_release_to_fire: self.special_weapons_release_to_fire.clone(),
@@ -636,9 +691,6 @@ impl MyApp {
     fn sync_params_to_manager(&self) {
         if let Ok(mut outer) = self.outer_size.lock() {
             *outer = self.outer_diameter.to_string();
-        }
-        if let Ok(mut mid) = self.mid_size.lock() {
-            *mid = self.middle_diameter.to_string();
         }
         if let Ok(mut inner) = self.inner_size.lock() {
             *inner = self.inner_diameter.to_string();
@@ -759,7 +811,6 @@ impl MyApp {
                 hipfire: defaults::HIPFIRE,
                 inner_diameter: defaults::BASE_INNER_DIAMETER * scale,
                 inner_strength: defaults::INNER_STRENGTH,
-                middle_diameter: defaults::BASE_MIDDLE_DIAMETER * scale,
                 outer_diameter: defaults::BASE_OUTER_DIAMETER * scale,
                 outer_strength: defaults::OUTER_STRENGTH,
             },
@@ -768,6 +819,7 @@ impl MyApp {
             vertical_strength_coefficient: defaults::VERTICAL_STRENGTH_COEFFICIENT,
             con_mapping: Some(ConMapping::default()),
             rapid_fire_mode: defaults::RAPID_FIRE_MODE.to_string(),
+            inner_ramp_curve: INNER_RAMP_CURVE.to_string(),
             license_code: String::new(),
             special_weapons_aim_and_fire: Vec::new(),
             special_weapons_release_to_fire: Vec::new(),
@@ -782,6 +834,27 @@ impl MyApp {
             RAPID_FIRE_MODE_AUTO => 4,
             _ => 0,
         }
+    }
+
+    fn inner_ramp_mode_to_u8(mode: &str) -> u8 {
+        match mode {
+            "linear" => 0,
+            "ease-in" => 1,
+            "ease-in-out" => 2,
+            _ => 2,
+        }
+    }
+
+    fn set_inner_ramp_mode(&mut self, mode: &str) {
+        if self.inner_ramp_mode_selected == mode {
+            return;
+        }
+        self.inner_ramp_mode_selected = mode.to_string();
+        self.inner_ramp_mode
+            .store(Self::inner_ramp_mode_to_u8(mode), Ordering::Relaxed);
+        self.curve_preview_cache_key = None;
+        self.mark_config_changed();
+        self.save_config();
     }
 }
 
@@ -814,15 +887,12 @@ impl eframe::App for MyApp {
             });
         }
 
-        // 确保直径值满足约束关系：内 <= 中 <= 外 <= 屏幕高度
+        // 确保直径值满足约束关系：内 <= 外 <= 屏幕高度
         if self.outer_diameter > self.screen_height {
             self.outer_diameter = self.screen_height;
         }
-        if self.middle_diameter > self.outer_diameter {
-            self.middle_diameter = self.outer_diameter;
-        }
-        if self.inner_diameter > self.middle_diameter {
-            self.inner_diameter = self.middle_diameter;
+        if self.inner_diameter > self.outer_diameter {
+            self.inner_diameter = self.outer_diameter;
         }
         
         // 定期更新 MappingManager 状态（每帧更新）
@@ -1198,13 +1268,10 @@ impl eframe::App for MyApp {
                                             self.save_config();
                                         }
                                         
-                                        // 如果外直径减小，自动调整中直径和内直径
+                                        // 如果外直径减小，自动调整内直径
                                         if self.outer_diameter < old_outer {
-                                            if self.middle_diameter > self.outer_diameter {
-                                                self.middle_diameter = self.outer_diameter;
-                                            }
-                                            if self.inner_diameter > self.middle_diameter {
-                                                self.inner_diameter = self.middle_diameter;
+                                            if self.inner_diameter > self.outer_diameter {
+                                                self.inner_diameter = self.outer_diameter;
                                             }
                                         }
 
@@ -1222,38 +1289,13 @@ impl eframe::App for MyApp {
                                     ui.horizontal(|ui| {
                                         ui.add_sized(
                                             egui::Vec2::new(CHARACTER_WIDTH * 2.0, ROW_HEIGHT),
-                                            egui::Label::new("中")
-                                        );
-
-                                        let old_middle = self.middle_diameter;
-                                        if ui.add_sized(
-                                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
-                                            egui::DragValue::new(&mut self.middle_diameter)
-                                                .clamp_range(0.0..=self.outer_diameter)
-                                                .speed(1.0)
-                                        ).changed() {
-                                            self.mark_config_changed();
-                                            self.save_config();
-                                        }
-                                        
-                                        // 如果中直径减小，自动调整内直径
-                                        if self.middle_diameter < old_middle {
-                                            if self.inner_diameter > self.middle_diameter {
-                                                self.inner_diameter = self.middle_diameter;
-                                            }
-                                        }
-                                    });
-
-                                    ui.horizontal(|ui| {
-                                        ui.add_sized(
-                                            egui::Vec2::new(CHARACTER_WIDTH * 2.0, ROW_HEIGHT),
                                             egui::Label::new("内")
                                         );
 
                                         if ui.add_sized(
                                             egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.inner_diameter)
-                                                .clamp_range(0.0..=self.middle_diameter)
+                                                .clamp_range(0.0..=self.outer_diameter)
                                                 .speed(1.0)
                                         ).changed() {
                                             self.mark_config_changed();
@@ -1348,13 +1390,12 @@ impl eframe::App for MyApp {
                                         tick_stroke,
                                     );
                                     
-                                    // X轴刻度：在 0, inner_diameter/2, middle_diameter/2, outer_diameter/2 的位置
+                                    // X轴刻度：在 0, inner_diameter/2, outer_diameter/2 的位置
                                     // 如果没有选择配置，只显示 0 刻度
                                     let x_ticks = if self.outer_diameter > 0.0 {
                                         vec![
                                             0.0,
                                             self.inner_diameter / 2.0,
-                                            self.middle_diameter / 2.0,
                                             self.outer_diameter / 2.0,
                                         ]
                                     } else {
@@ -1375,41 +1416,61 @@ impl eframe::App for MyApp {
                                     
                                     // 只有在有有效配置数据时才绘制折线和点
                                     if self.outer_diameter > 0.0 {
-                                        // 第一段折线：(0, start_strength) -> (inner_diameter/2, inner_strength) - 红色
+                                        self.ensure_curve_preview_points_cache();
+
+                                        // 第一段曲线：按 INNER_RAMP_CURVE 采样后折线逼近 - 红色
                                         let line1_color = RED;
                                         let line1_stroke = egui::Stroke::new(2.0, line1_color);
-                                        
-                                        let p1 = egui::pos2(to_screen_x(0.0), to_screen_y(self.start_strength));
-                                        let p2 = egui::pos2(to_screen_x(self.inner_diameter / 2.0), to_screen_y(self.inner_strength));
-                                        
-                                        ui.painter().line_segment([p1, p2], line1_stroke);
-                                        
-                                        // 第二段折线：(inner_diameter/2, inner_strength) -> (middle_diameter/2, inner_strength) - 黄色
-                                        let line2_color = YELLOW;
-                                        let line2_stroke = egui::Stroke::new(2.0, line2_color);
-                                        
-                                        let p3 = egui::pos2(to_screen_x(self.middle_diameter / 2.0), to_screen_y(self.inner_strength));
-                                        
-                                        ui.painter().line_segment([p2, p3], line2_stroke);
-                                        
-                                        // 第三段折线：(middle_diameter/2, outer_strength) -> (outer_diameter/2, outer_strength) - 绿色
-                                        let line3_color = GREEN;
-                                        let line3_stroke = egui::Stroke::new(2.0, line3_color);
-                                        
-                                        let p4 = egui::pos2(to_screen_x(self.middle_diameter / 2.0), to_screen_y(self.outer_strength));
-                                        let p5 = egui::pos2(to_screen_x(self.outer_diameter / 2.0), to_screen_y(self.outer_strength));
-                                        
-                                        ui.painter().line_segment([p4, p5], line3_stroke);
-                                        
-                                        // 绘制关键点
-                                        let point_radius = 3.0;
-                                        ui.painter().circle_filled(p1, point_radius, line1_color);
-                                        ui.painter().circle_filled(p2, point_radius, line1_color);
-                                        ui.painter().circle_filled(p3, point_radius, line2_color);
-                                        ui.painter().circle_filled(p4, point_radius, line3_color);
-                                        ui.painter().circle_filled(p5, point_radius, line3_color);
+
+                                        let curve_points_screen: Vec<egui::Pos2> = self
+                                            .curve_preview_points_cache
+                                            .iter()
+                                            .map(|(x, y)| egui::pos2(to_screen_x(*x), to_screen_y(*y)))
+                                            .collect();
+
+                                        for seg in curve_points_screen.windows(2) {
+                                            ui.painter().line_segment([seg[0], seg[1]], line1_stroke);
+                                        }
+
+                                        // 第三个端点：固定在最右侧的 outer_strength（不与第二个端点连接）
+                                        let line2_color = GREEN;
+                                        let p3 = egui::pos2(to_screen_x(self.outer_diameter / 2.0), to_screen_y(self.outer_strength));
+
+                                        // 绘制关键点：第一段两端 + 第三个端点
+                                        if let (Some(&p1), Some(&p2)) = (curve_points_screen.first(), curve_points_screen.last()) {
+                                            let point_radius = 3.0;
+                                            ui.painter().circle_filled(p1, point_radius, line1_color);
+                                            ui.painter().circle_filled(p2, point_radius, line1_color);
+                                            ui.painter().circle_filled(p3, point_radius, line2_color);
+                                        }
                                     }
                                 }
+                            });
+
+                            ui.separator();
+
+                            ui.horizontal(|ui| {
+                                ui.add_sized(
+                                    egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
+                                    egui::Label::new("曲线模式")
+                                );
+
+                                egui::ComboBox::from_id_source("inner_ramp_curve")
+                                    .width(CHARACTER_WIDTH * 10.0)
+                                    .selected_text(&self.inner_ramp_mode_selected)
+                                    .show_ui(ui, |ui| {
+                                        for mode in ["linear", "ease-in", "ease-in-out"] {
+                                            if ui
+                                                .selectable_label(
+                                                    self.inner_ramp_mode_selected == mode,
+                                                    mode,
+                                                )
+                                                .clicked()
+                                            {
+                                                self.set_inner_ramp_mode(mode);
+                                            }
+                                        }
+                                    });
                             });
 
                             ui.separator();
@@ -1972,7 +2033,6 @@ impl eframe::App for MyApp {
                             self.rapid_fire_mode.store(0, Ordering::Relaxed);
                             self.outer_diameter = 0.0;
                             self.outer_strength = 0.0;
-                            self.middle_diameter = 0.0;
                             self.inner_diameter = 0.0;
                             self.inner_strength = 0.0;
                             self.start_strength = 0.0;
@@ -2165,7 +2225,6 @@ impl eframe::App for MyApp {
             
             // 复制需要的数据到闭包中
             let inner_diameter = self.inner_diameter;
-            let middle_diameter = self.middle_diameter;
             let outer_diameter_copy = self.outer_diameter;
             // 将物理像素转换为逻辑像素用于绘制
             let pixels_per_point_clone = pixels_per_point;
@@ -2215,28 +2274,18 @@ impl eframe::App for MyApp {
                                 egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 100, 100)),
                             );
                             
-                            // 绘制三个同心圆（外、中、内）
+                            // 绘制两个同心圆（外、内）
                             // 绘制顺序：从外到内，这样内层会覆盖外层（红色在最上层，绿色在最下层）
                             // 所有直径都是物理像素，需要转换为逻辑像素
                             if outer_diameter_copy > 0.0 {
-                                // 外圈 - 绿色（对应第三段）- 最下层，最先绘制
+                                // 外圈 - 绿色（对应第二段）- 最下层，最先绘制
                                 let outer_radius_logical = (outer_diameter_copy / 2.0) / pixels_per_point_clone;
                                 ui.painter().circle_stroke(
                                     center,
                                     outer_radius_logical,
                                     egui::Stroke::new(1.0, GREEN),
                                 );
-                                
-                                // 中圈 - 黄色（对应第二段）- 中间层
-                                if middle_diameter > 0.0 {
-                                    let middle_radius_logical = (middle_diameter / 2.0) / pixels_per_point_clone;
-                                    ui.painter().circle_stroke(
-                                        center,
-                                        middle_radius_logical,
-                                        egui::Stroke::new(1.0, YELLOW),
-                                    );
-                                }
-                                
+
                                 // 内圈 - 红色（对应第一段）- 最上层，最后绘制
                                 if inner_diameter > 0.0 {
                                     let inner_radius_logical = (inner_diameter / 2.0) / pixels_per_point_clone;
