@@ -42,7 +42,7 @@ pub mod trigger_timing {
 /// 吸附强度曲线相关常量
 pub mod aim_assist {
     /// 右摇杆辅助修正量 EMA 系数 α（`smoothed = α*raw + (1-α)*smoothed_prev`，两轴共用）
-    pub const ASSIST_OUTPUT_EMA_ALPHA: f32 = 1.0;
+    pub const ASSIST_OUTPUT_EMA_ALPHA: f32 = 0.1;
 }
 
 /// UI 外观与交互文案相关常量
