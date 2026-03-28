@@ -688,7 +688,7 @@ impl MyApp {
         }
         if let Ok(mut ema_a) = self.assist_ema_alpha_str.lock() {
             *ema_a = format!(
-                "{:.2}",
+                "{:.3}",
                 self.assist_output_ema_alpha.clamp(0.0, 1.0)
             );
         }
@@ -1425,16 +1425,16 @@ impl eframe::App for MyApp {
                                     egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
                                     egui::DragValue::from_get_set(|opt: Option<f64>| {
                                         if let Some(ui_val) = opt {
-                                            let ui_round = (ui_val * 100.0).round() / 100.0;
+                                            let ui_round = (ui_val * 1000.0).round() / 1000.0;
                                             self.assist_output_ema_alpha =
-                                                ((ui_round / 10.0) as f32).clamp(0.0, 1.0);
+                                                (ui_round as f32).clamp(0.0, 1.0);
                                         }
-                                        let d = self.assist_output_ema_alpha as f64 * 10.0;
-                                        (d * 100.0).round() / 100.0
+                                        let d = self.assist_output_ema_alpha as f64;
+                                        (d * 1000.0).round() / 1000.0
                                     })
-                                    .clamp_range(0.0..=10.0)
-                                    .speed(0.01)
-                                    .fixed_decimals(2),
+                                    .clamp_range(0.0..=1.0)
+                                    .speed(0.001)
+                                    .fixed_decimals(3),
                                 ).changed() {
                                     self.mark_config_changed();
                                     self.save_config();

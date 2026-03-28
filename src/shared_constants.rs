@@ -41,7 +41,7 @@ pub mod trigger_timing {
 
 /// 吸附强度曲线相关常量
 pub mod aim_assist {
-    /// 右摇杆辅助修正量 EMA 系数 α（`smoothed = α*raw + (1-α)*smoothed_prev`，两轴共用）
+    /// 右摇杆辅助修正量 EMA 系数 α（`smoothed = α*raw + (1-α)*smoothed_prev`，两轴共用；配置与 UI 均为 0~1）
     pub const ASSIST_OUTPUT_EMA_ALPHA: f32 = 0.1;
 }
 
@@ -96,7 +96,7 @@ pub mod defaults {
     pub const VERTICAL_STRENGTH_COEFFICIENT: f32 = 0.4;
     pub const AA_ACTIVATE_MODE: &str = "仅开火";
     pub const RAPID_FIRE_MODE: &str = "不启用连点";
-    /// 右摇杆辅助输出 EMA 默认 α（与 `aim_assist::ASSIST_OUTPUT_EMA_ALPHA` 一致）
+    /// 右摇杆辅助输出 EMA 默认 α（0~1，与 `aim_assist::ASSIST_OUTPUT_EMA_ALPHA` 一致）
     pub const ASSIST_OUTPUT_EMA_ALPHA: f32 = super::aim_assist::ASSIST_OUTPUT_EMA_ALPHA;
 }
 
