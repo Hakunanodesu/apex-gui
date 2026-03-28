@@ -9,7 +9,7 @@ use std::path::Path;
 mod utils;
 mod modules;
 mod shared_constants;
-use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, ConfigFile, ConMapping, check_dir_exist};
+use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, normalize_inner_ramp_mode, ConfigFile, ConMapping, check_dir_exist};
 use modules::update_check::{check_github_update, UpdateCheckResult, UpdateInfo};
 use shared_constants::RAPID_FIRE_WEAPON_STEMS;
 use shared_constants::auth::LICENSE_CODE;
@@ -246,6 +246,7 @@ struct MyApp {
     init_str: Arc<Mutex<String>>,
     hipfire: Arc<Mutex<String>>,
     assist_ema_alpha_str: Arc<Mutex<String>>,
+    assist_inner_ramp: Arc<Mutex<String>>,
     vertical_str: Arc<Mutex<String>>,
     aim_height: Arc<Mutex<String>>,
     
@@ -289,7 +290,7 @@ struct MyApp {
     debug_btn_b: String,
     // 第一段曲线预览采样缓存（x, y）
     curve_preview_points_cache: Vec<(f32, f32)>,
-    curve_preview_cache_key: Option<(f32, f32, f32)>, // (outer_diameter, start_strength, inner_strength)
+    curve_preview_cache_key: Option<(f32, f32, f32, String)>, // (outer_diameter, start_strength, inner_strength, inner_ramp)
 }
 
 impl Default for MyApp {
@@ -325,6 +326,7 @@ impl Default for MyApp {
         let init_str = Arc::new(Mutex::new(String::new()));
         let hipfire = Arc::new(Mutex::new(String::new()));
         let assist_ema_alpha_str = Arc::new(Mutex::new(String::new()));
+        let assist_inner_ramp = Arc::new(Mutex::new("linear".to_string()));
         let vertical_str = Arc::new(Mutex::new(String::new()));
         let aim_height = Arc::new(Mutex::new(String::new()));
         
@@ -339,6 +341,7 @@ impl Default for MyApp {
             init_str.clone(),
             hipfire.clone(),
             assist_ema_alpha_str.clone(),
+            assist_inner_ramp.clone(),
             vertical_str.clone(),
             aim_height.clone(),
             rapid_fire_mode.clone(),
@@ -390,6 +393,7 @@ impl Default for MyApp {
             init_str,
             hipfire,
             assist_ema_alpha_str,
+            assist_inner_ramp,
             vertical_str,
             aim_height,
             con_exist: enumerate_controllers(),
@@ -456,12 +460,19 @@ impl MyApp {
             return;
         }
 
+        let ramp_key = self
+            .assist_inner_ramp
+            .lock()
+            .ok()
+            .map(|g| normalize_inner_ramp_mode(&g))
+            .unwrap_or_else(|| "linear".to_string());
         let key = (
             self.outer_diameter,
             self.start_strength,
             self.inner_strength,
+            ramp_key.clone(),
         );
-        if self.curve_preview_cache_key == Some(key) {
+        if self.curve_preview_cache_key == Some(key.clone()) {
             return;
         }
 
@@ -470,7 +481,8 @@ impl MyApp {
         let mut points = Vec::with_capacity(point_count);
         for i in 0..point_count {
             let t = i as f32 / (point_count as f32 - 1.0);
-            let progress = t.clamp(0.0, 1.0);
+            let t = t.clamp(0.0, 1.0);
+            let progress = if ramp_key == "square" { t * t } else { t };
             let y = self.start_strength * (1.0 - progress) + self.inner_strength * progress;
             points.push((x_end * t, y));
         }
@@ -543,6 +555,9 @@ impl MyApp {
         self.start_strength = config.assist_curve.deadzone;
         self.hipfire_strength_factor = config.assist_curve.hipfire;
         self.assist_output_ema_alpha = config.assist_curve.assist_output_ema_alpha;
+        if let Ok(mut g) = self.assist_inner_ramp.lock() {
+            *g = normalize_inner_ramp_mode(&config.assist_curve.inner_ramp_mode);
+        }
         self.vertical_strength_factor = config.vertical_strength_coefficient;
         self.aim_height_factor = config.aim_height_coefficient;
         // 许可证：仅当配置中的许可证正确时才显示在输入框，否则留空
@@ -632,6 +647,12 @@ impl MyApp {
                 outer_diameter: self.outer_diameter,
                 outer_strength: self.outer_strength,
                 assist_output_ema_alpha: self.assist_output_ema_alpha,
+                inner_ramp_mode: self
+                    .assist_inner_ramp
+                    .lock()
+                    .ok()
+                    .map(|g| normalize_inner_ramp_mode(&g))
+                    .unwrap_or_else(|| "linear".to_string()),
             },
             aa_activate_mode: self.aa_activate_mode_selected.clone(),
             use_controller: self.use_controller,
@@ -799,6 +820,7 @@ impl MyApp {
                 outer_diameter: defaults::BASE_OUTER_DIAMETER * scale,
                 outer_strength: defaults::OUTER_STRENGTH,
                 assist_output_ema_alpha: defaults::ASSIST_OUTPUT_EMA_ALPHA,
+                inner_ramp_mode: "linear".to_string(),
             },
             aa_activate_mode: defaults::AA_ACTIVATE_MODE.to_string(),
             use_controller: false,
@@ -1260,7 +1282,7 @@ impl eframe::App for MyApp {
                                         if ui.add_sized(
                                             egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.inner_diameter)
-                                                .clamp_range(0.0..=self.outer_diameter)
+                                                .clamp_range(1.0..=self.outer_diameter)
                                                 .speed(1.0)
                                         ).changed() {
                                             self.mark_config_changed();
@@ -1355,14 +1377,10 @@ impl eframe::App for MyApp {
                                         tick_stroke,
                                     );
                                     
-                                    // X轴刻度：在 0, inner_diameter/2, outer_diameter/2 的位置
+                                    // X轴刻度：0 与外圈半径；内圈边界不画刻度
                                     // 如果没有选择配置，只显示 0 刻度
                                     let x_ticks = if self.outer_diameter > 0.0 {
-                                        vec![
-                                            0.0,
-                                            self.inner_diameter / 2.0,
-                                            self.outer_diameter / 2.0,
-                                        ]
+                                        vec![0.0, self.outer_diameter / 2.0]
                                     } else {
                                         vec![0.0]
                                     };
@@ -1439,6 +1457,42 @@ impl eframe::App for MyApp {
                                     self.mark_config_changed();
                                     self.save_config();
                                     self.sync_params_to_manager();
+                                }
+
+                                ui.add_sized(
+                                    egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
+                                    egui::Label::new("曲线类型"),
+                                );
+
+                                let prev_ramp = self
+                                    .assist_inner_ramp
+                                    .lock()
+                                    .ok()
+                                    .map(|g| normalize_inner_ramp_mode(&g))
+                                    .unwrap_or_else(|| "linear".to_string());
+                                let mut inner_ramp = prev_ramp.clone();
+                                egui::ComboBox::from_id_source("assist_inner_ramp")
+                                    .width(ui.available_width() - SPACING)
+                                    .selected_text(&inner_ramp)
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(
+                                            &mut inner_ramp,
+                                            "linear".to_string(),
+                                            "linear",
+                                        );
+                                        ui.selectable_value(
+                                            &mut inner_ramp,
+                                            "square".to_string(),
+                                            "square",
+                                        );
+                                    });
+                                if inner_ramp != prev_ramp {
+                                    if let Ok(mut g) = self.assist_inner_ramp.lock() {
+                                        *g = inner_ramp.clone();
+                                    }
+                                    self.curve_preview_cache_key = None;
+                                    self.mark_config_changed();
+                                    self.save_config();
                                 }
                             });
 
@@ -2007,6 +2061,9 @@ impl eframe::App for MyApp {
                             self.start_strength = 0.0;
                             self.hipfire_strength_factor = 0.0;
                             self.assist_output_ema_alpha = 0.0;
+                            if let Ok(mut g) = self.assist_inner_ramp.lock() {
+                                *g = "linear".to_string();
+                            }
                             self.vertical_strength_factor = 0.0;
                             self.aim_height_factor = 0.0;
                             self.config_changed = false;

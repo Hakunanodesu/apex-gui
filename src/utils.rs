@@ -1,6 +1,15 @@
 use std::fs;
 use crate::shared_constants::paths::{CONFIGS_DIR, CURRENT_CONFIG_FILE};
 
+/// 内圈插值模式：仅 `"linear"` / `"square"`（其它输入视为 linear）
+pub fn normalize_inner_ramp_mode(s: &str) -> String {
+    if s.trim().eq_ignore_ascii_case("square") {
+        "square".to_string()
+    } else {
+        "linear".to_string()
+    }
+}
+
 /// 当前配置信息
 #[derive(serde::Deserialize, serde::Serialize)]
 struct CurrentConfig {
@@ -19,10 +28,17 @@ pub struct AssistCurve {
     pub outer_strength: f32,
     #[serde(default = "default_assist_output_ema_alpha")]
     pub assist_output_ema_alpha: f32,
+    /// 内圈吸附插值：`"linear"` / `"square"`
+    #[serde(default = "default_inner_ramp_mode_str")]
+    pub inner_ramp_mode: String,
 }
 
 fn default_assist_output_ema_alpha() -> f32 {
     crate::shared_constants::aim_assist::ASSIST_OUTPUT_EMA_ALPHA
+}
+
+fn default_inner_ramp_mode_str() -> String {
+    "linear".to_string()
 }
 
 /// 手柄轴映射（SDL axis index -> 逻辑轴，None 表示未配置）

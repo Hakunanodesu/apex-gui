@@ -58,6 +58,7 @@ pub struct MappingManager {
     init_str: Arc<Mutex<String>>,
     hipfire: Arc<Mutex<String>>,
     assist_ema_alpha: Arc<Mutex<String>>,
+    assist_inner_ramp: Arc<Mutex<String>>,
     vertical_str: Arc<Mutex<String>>,
     aim_height: Arc<Mutex<String>>,
     rapid_fire_mode: Arc<AtomicU8>, // 连点模式：0=关闭, 1=始终连点, 2=半按扳机连点
@@ -81,6 +82,7 @@ impl MappingManager {
         init_str: Arc<Mutex<String>>,
         hipfire: Arc<Mutex<String>>,
         assist_ema_alpha: Arc<Mutex<String>>,
+        assist_inner_ramp: Arc<Mutex<String>>,
         vertical_str: Arc<Mutex<String>>,
         aim_height: Arc<Mutex<String>>,
         rapid_fire_mode: Arc<AtomicU8>,
@@ -102,6 +104,7 @@ impl MappingManager {
             init_str,
             hipfire,
             assist_ema_alpha,
+            assist_inner_ramp,
             vertical_str,
             aim_height,
             rapid_fire_mode,
@@ -435,7 +438,8 @@ impl MappingManager {
                 state, virtual_gamepad_ref, ready, Some(det.result()),
                 params.0, params.1, params.2, params.3, params.4,
                 params.5, params.6, params.7, self.assist_ema_alpha.clone(),
-                self.aim_enable.clone(), self.rapid_fire_mode.clone(),
+                self.aim_enable.clone(), self.assist_inner_ramp.clone(),
+                self.rapid_fire_mode.clone(),
                 weapon_rec_result, rapid_fire_weapons, special_aim, special_release,
             ));
         }

@@ -47,9 +47,9 @@ pub mod aim_assist {
 
 /// UI 外观与交互文案相关常量
 pub mod ui {
-    pub const CHARACTER_WIDTH: f32 = 12.0;
+    pub const CHARACTER_WIDTH: f32 = 12.0; // 英文 * 0.6
     pub const SPACING: f32 = 8.0;
-    pub const ROW_HEIGHT: f32 = 18.0;
+    pub const ROW_HEIGHT: f32 = 18.0; // 分割线 / 3
 
     /// 状态色：绿色
     pub const GREEN_RGB: (u8, u8, u8) = (41, 157, 143);

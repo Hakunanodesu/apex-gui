@@ -30,23 +30,28 @@ fn apply_right_trigger_adjustment(
     left_trigger_pressed: bool,
     ema_alpha: f32,
     ema_xy: &mut [f32; 2],
+    inner_ramp_mode: &str,
 ) -> bool {
     let center = outer_size / 2.0;
     let dx = d.x - center;
     let dy = (d.y + (0.5 - aim_height) * d.h) - center;
     let dist = ((dx * dx + dy * dy).sqrt()).min(center);
     let strength = if 
-        dx.abs() <= inner_size / 2.0 && dy.abs() <= inner_size / 2.0
+        dist <= inner_size / 2.0
     {
-        // inner 区间：线性递增（t 为到内圈边界的归一化距离）
-        let t = if inner_size > 0.0 { dist / (inner_size / 2.0) } else { 1.0 };
-        let progress = t.clamp(0.0, 1.0);
+        // inner 区间：t 为到内圈边界的归一化距离；linear / square
+        let t = dist / (inner_size / 2.0);
+        let progress = if inner_ramp_mode.trim().eq_ignore_ascii_case("square") {
+            t * t
+        } else {
+            t
+        };
         init_str * (1.0 - progress) + inner_str * progress
-    } else if dx.abs() <= d.w / 2.0 && dy.abs() <= d.h / 2.0 {
+    } else if dist <= d.w / 2.0 {
         // 目标框区间：最强平台（原始值）
         inner_str
     } else if 
-        dx.abs() <= outer_size / 2.0 && dy.abs() <= outer_size / 2.0
+        dist <= outer_size / 2.0
     {
         // outer区间：弱平台（原始值）
         outer_str
@@ -107,6 +112,7 @@ impl ConMapper {
         hipfire: f32,
         assist_ema_alpha_str: Arc<Mutex<String>>,
         aim_enable: Arc<AtomicBool>,
+        assist_inner_ramp: Arc<Mutex<String>>, // "linear" / "square"
         rapid_fire_mode: Arc<AtomicU8>, // 0=关闭, 1=始终连点, 2=半按, 3=完全按下连点, 4=根据枪械自动切换
         weapon_rec_result: Option<Arc<Mutex<String>>>, // 枪械识别结果（模板名无后缀）
         rapid_fire_weapons: Vec<String>,               // 连点白名单
@@ -123,6 +129,7 @@ impl ConMapper {
         let rapid_fire_mode_clone = rapid_fire_mode.clone();
         let weapon_rec_result_clone = weapon_rec_result.clone();
         let assist_ema_alpha_str_clone = assist_ema_alpha_str.clone();
+        let assist_inner_ramp_clone = assist_inner_ramp.clone();
         let rapid_fire_weapons = rapid_fire_weapons;
         let special_weapons_aim_and_fire = special_weapons_aim_and_fire;
         let special_weapons_release_to_fire = special_weapons_release_to_fire;
@@ -260,6 +267,11 @@ impl ConMapper {
                                             .and_then(|g| g.trim().parse::<f32>().ok())
                                             .map(|a| a.clamp(0.0, 1.0))
                                             .unwrap_or(ASSIST_OUTPUT_EMA_ALPHA);
+                                        let ramp_owned = assist_inner_ramp_clone
+                                            .lock()
+                                            .ok()
+                                            .map(|g| g.clone())
+                                            .unwrap_or_else(|| "linear".to_string());
                                         assist_applied = apply_right_trigger_adjustment(
                                             &mut mapped_state,
                                             d,
@@ -274,6 +286,7 @@ impl ConMapper {
                                             left_trigger_pressed,
                                             ema_alpha,
                                             &mut assist_ema_xy,
+                                            ramp_owned.as_str(),
                                         );
                                     }
                                 }
