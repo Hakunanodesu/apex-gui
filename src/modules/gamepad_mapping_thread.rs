@@ -14,7 +14,8 @@ use crate::shared_constants::error_limits::GAMEPAD_MAPPING_MAX_CONSECUTIVE_ERROR
 use crate::shared_constants::trigger_timing::TRIGGER_TIMING_UNIT_MS;
 use crate::utils::console_redirect::log_error;
 
-// 当右扳机按下时，基于检测结果对右摇杆进行修正
+// 当右扳机按下时，基于检测结果对右摇杆进行修正。
+// 返回 true 表示本帧在识别区内施加了辅助；false 表示无目标（含检测列表无框、或相对 outer 已超出识别区，强度为 0）。
 fn apply_right_trigger_adjustment(
     mapped_state: &mut XGamepad,
     d: &Detection,
@@ -28,9 +29,8 @@ fn apply_right_trigger_adjustment(
     aim_height: f32,
     left_trigger_pressed: bool,
     ema_alpha: f32,
-    // ema_xy: [x, y] 归一化辅助量 EMA 状态，两轴同一 α
     ema_xy: &mut [f32; 2],
-) {
+) -> bool {
     let center = outer_size / 2.0;
     let dx = d.x - center;
     let dy = (d.y + (0.5 - aim_height) * d.h) - center;
@@ -51,9 +51,12 @@ fn apply_right_trigger_adjustment(
         // outer区间：弱平台（原始值）
         outer_str
     } else {
-        // 超出outer区间
+        // 超出 outer：已超出识别区域，等价于无目标，强度为 0
         0.0
     };
+    if strength <= 0.0 {
+        return false;
+    }
     let (x, y) = if dist > 0.0 {
         (strength * dx / dist, -vertical_str * strength * dy / dist)
     } else {
@@ -78,7 +81,7 @@ fn apply_right_trigger_adjustment(
 
     mapped_state.thumb_rx = mapped_state.thumb_rx.saturating_add(rx);
     mapped_state.thumb_ry = mapped_state.thumb_ry.saturating_add(ry);
-    // println!("rx: {}, ry: {}", rx, ry);
+    true
 }
 
 pub struct ConMapper {
@@ -163,26 +166,16 @@ impl ConMapper {
                 }; // 每次都用原始state
                 let mut mapped_state = orig_state.clone();
                 
-                // 根据当前识别到的武器，判断是否属于特殊枪械
-                let is_release_weapon = if let Some(ref weapon_arc) = weapon_rec_result_clone {
-                    if let Ok(weapon_name) = weapon_arc.lock() {
-                        special_weapons_release_to_fire.contains(&*weapon_name)
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-
-                let is_aim_override_weapon = if let Some(ref weapon_arc) = weapon_rec_result_clone {
-                    if let Ok(weapon_name) = weapon_arc.lock() {
-                        special_weapons_aim_and_fire.contains(&*weapon_name)
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
+                // 本帧武器名只读一次，避免对 weapon_rec_result 重复加锁、重复白名单判断
+                let weapon_name_opt: Option<String> = weapon_rec_result_clone
+                    .as_ref()
+                    .and_then(|arc| arc.lock().ok().map(|g| g.clone()));
+                let is_release_weapon = weapon_name_opt
+                    .as_ref()
+                    .is_some_and(|n| special_weapons_release_to_fire.contains(n));
+                let is_aim_override_weapon = weapon_name_opt
+                    .as_ref()
+                    .is_some_and(|n| special_weapons_aim_and_fire.contains(n));
 
                 // 预先检查左右扳机是否按下
                 let right_trigger_pressed = orig_state.right_trigger > 0;
@@ -222,19 +215,9 @@ impl ConMapper {
                         1 => true,                             // 始终连点
                         2 => orig_state.right_trigger < 255,   // 半按连点，满值时按住
                         3 => orig_state.right_trigger == 255,  // 完全按下才连点，否则按住
-                        4 => {
-                            // 根据枪械识别结果：在白名单内则连点；被标记为“松手开火”的武器在这里被排除
-                            if let Some(ref weapon_arc) = weapon_rec_result_clone {
-                                if let Ok(weapon_name) = weapon_arc.lock() {
-                                    rapid_fire_weapons.contains(&*weapon_name)
-                                        && !special_weapons_release_to_fire.contains(&*weapon_name)
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        }
+                        4 => weapon_name_opt.as_ref().is_some_and(|n| {
+                            rapid_fire_weapons.contains(n) && !is_release_weapon
+                        }),
                         _ => false,
                     };
                     if should_rapid {
@@ -258,6 +241,11 @@ impl ConMapper {
                     rapid_last_toggle_at = Instant::now();
                 }
                 
+                // 当右扳机按下时总是可参与辅助；aim_enable 或特殊枪械时左扳机按下也可参与
+                let aim_enabled = aim_enable.load(Ordering::SeqCst) || is_aim_override_weapon;
+                let assist_eligible =
+                    right_trigger_pressed || (aim_enabled && left_trigger_pressed);
+
                 // 处理检测结果并计算xy偏移
                 let mut assist_applied = false;
                 if let Some(ref det_arc) = det_result_clone {
@@ -265,18 +253,14 @@ impl ConMapper {
                         Ok(det_guard) => {
                             if let Some(detections) = &*det_guard {
                                 if let Some(d) = detections.first() {
-                                    // 当右扳机按下时总是计算并应用结果
-                                    // 当aim_enable为true且左扳机按下时也计算并应用结果
-                                    // 特殊枪械可强制启用“瞄准和开火”模式
-                                    let aim_enabled = aim_enable.load(Ordering::SeqCst) || is_aim_override_weapon;
-                                    if right_trigger_pressed || (aim_enabled && left_trigger_pressed) {
+                                    if assist_eligible {
                                         let ema_alpha = assist_ema_alpha_str_clone
                                             .lock()
                                             .ok()
                                             .and_then(|g| g.trim().parse::<f32>().ok())
                                             .map(|a| a.clamp(0.0, 1.0))
                                             .unwrap_or(ASSIST_OUTPUT_EMA_ALPHA);
-                                        apply_right_trigger_adjustment(
+                                        assist_applied = apply_right_trigger_adjustment(
                                             &mut mapped_state,
                                             d,
                                             outer_size,
@@ -291,7 +275,6 @@ impl ConMapper {
                                             ema_alpha,
                                             &mut assist_ema_xy,
                                         );
-                                        assist_applied = true;
                                     }
                                 }
                             }
@@ -306,7 +289,7 @@ impl ConMapper {
                         }
                     }
                 }
-                // 未施加辅助（松手或不满足条件）时 EMA 直接清零，不做逐渐泄压
+                // 无目标（无检测框 / 超出 outer）、松手或不满足辅助条件时清零 EMA 与等效强度状态
                 if !assist_applied {
                     assist_ema_xy = [0.0; 2];
                 }
