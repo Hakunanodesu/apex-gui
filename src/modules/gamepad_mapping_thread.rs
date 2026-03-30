@@ -10,7 +10,9 @@ use std::{
 use vigem_client::{Client, Xbox360Wired, XGamepad};
 use crate::modules::enemy_det_thread::Detection;
 use crate::shared_constants::aim_assist::ASSIST_OUTPUT_EMA_ALPHA;
+use crate::shared_constants::assist_curve::{INNER_RAMP_LINEAR, INNER_RAMP_SQUARE};
 use crate::shared_constants::error_limits::GAMEPAD_MAPPING_MAX_CONSECUTIVE_ERRORS;
+use crate::shared_constants::rapid_fire_mode;
 use crate::shared_constants::trigger_timing::TRIGGER_TIMING_UNIT_MS;
 use crate::utils::console_redirect::log_error;
 
@@ -41,7 +43,10 @@ fn apply_right_trigger_adjustment(
     {
         // inner 区间：t 为到内圈边界的归一化距离；linear / square
         let t = dist / (inner_size / 2.0);
-        let progress = if inner_ramp_mode.trim().eq_ignore_ascii_case("square") {
+        let progress = if inner_ramp_mode
+            .trim()
+            .eq_ignore_ascii_case(INNER_RAMP_SQUARE)
+        {
             t * t
         } else {
             t
@@ -217,12 +222,12 @@ impl ConMapper {
 
                 // 控制扳机输出
                 let rf_mode = rapid_fire_mode_clone.load(Ordering::SeqCst);
-                if rf_mode > 0 && right_trigger_pressed && !is_release_weapon {
+                if rf_mode > rapid_fire_mode::DISABLED && right_trigger_pressed && !is_release_weapon {
                     let should_rapid = match rf_mode {
-                        1 => true,                             // 始终连点
-                        2 => orig_state.right_trigger < 255,   // 半按连点，满值时按住
-                        3 => orig_state.right_trigger == 255,  // 完全按下才连点，否则按住
-                        4 => weapon_name_opt.as_ref().is_some_and(|n| {
+                        rapid_fire_mode::ALWAYS => true, // 始终连点
+                        rapid_fire_mode::HALF_TRIGGER => orig_state.right_trigger < 255, // 半按连点，满值时按住
+                        rapid_fire_mode::FULL_TRIGGER => orig_state.right_trigger == 255, // 完全按下才连点，否则按住
+                        rapid_fire_mode::AUTO_BY_WEAPON => weapon_name_opt.as_ref().is_some_and(|n| {
                             rapid_fire_weapons.contains(n) && !is_release_weapon
                         }),
                         _ => false,
@@ -271,7 +276,7 @@ impl ConMapper {
                                             .lock()
                                             .ok()
                                             .map(|g| g.clone())
-                                            .unwrap_or_else(|| "linear".to_string());
+                                            .unwrap_or_else(|| INNER_RAMP_LINEAR.to_string());
                                         assist_applied = apply_right_trigger_adjustment(
                                             &mut mapped_state,
                                             d,

@@ -124,6 +124,8 @@
   - `outer_strength` / `inner_strength`：外圈/内圈强度（0~1）。
   - `deadzone`：起始吸附强度（0~1）。
   - `hipfire`：腰射系数（0~1，用于未按左扳机时的乘数）。
+  - `assist_output_ema_alpha`：右摇杆辅助输出的 EMA 平滑系数（0~1，越低越平滑）。
+  - `inner_ramp_mode`：内圈插值曲线类型，支持 `"linear"` / `"square"`。
 - **`aa_activate_mode`**
   - `仅开火` 或 `瞄准和开火`。
 - **`vertical_strength_coefficient`**：垂直方向系数（0~1）。

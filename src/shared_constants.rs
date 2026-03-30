@@ -45,6 +45,22 @@ pub mod aim_assist {
     pub const ASSIST_OUTPUT_EMA_ALPHA: f32 = 0.1;
 }
 
+/// 吸附曲线插值模式相关常量
+pub mod assist_curve {
+    pub const INNER_RAMP_LINEAR: &str = "linear";
+    pub const INNER_RAMP_SQUARE: &str = "square";
+    pub const INNER_RAMP_MODE_ITEMS: &[&str] = &[INNER_RAMP_LINEAR, INNER_RAMP_SQUARE];
+}
+
+/// 连点模式枚举值（跨线程共享的 u8）
+pub mod rapid_fire_mode {
+    pub const DISABLED: u8 = 0;
+    pub const ALWAYS: u8 = 1;
+    pub const HALF_TRIGGER: u8 = 2;
+    pub const FULL_TRIGGER: u8 = 3;
+    pub const AUTO_BY_WEAPON: u8 = 4;
+}
+
 /// UI 外观与交互文案相关常量
 pub mod ui {
     pub const CHARACTER_WIDTH: f32 = 12.0; // 英文 * 0.6
@@ -66,6 +82,7 @@ pub mod ui {
 
     pub const AA_ACTIVATE_MODE_AIM_AND_FIRE: &str = "瞄准和开火";
     pub const AA_ACTIVATE_MODE_FIRE_ONLY: &str = "仅开火";
+    pub const HELP_VIGEMBUS_DOWNLOAD_URL: &str = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe";
 
     /// 连点模式下拉项（显示顺序）
     pub const RAPID_FIRE_MODE_ITEMS: &[&str] = &[
@@ -80,6 +97,9 @@ pub mod ui {
         AA_ACTIVATE_MODE_AIM_AND_FIRE,
         AA_ACTIVATE_MODE_FIRE_ONLY,
     ];
+
+    /// 预览窗口重绘间隔（毫秒）
+    pub const PREVIEW_REPAINT_INTERVAL_MS: u64 = 20;
 }
 
 /// 默认配置相关常量
@@ -129,6 +149,7 @@ pub mod detection_defaults {
 /// 配置文件路径
 pub mod paths {
     pub const CONFIGS_DIR: &str = "configs";
+    pub const MODELS_DIR: &str = "models";
     pub const CURRENT_CONFIG_FILE: &str = "configs/.current";
 }
 

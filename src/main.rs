@@ -14,10 +14,14 @@ use modules::update_check::{check_github_update, UpdateCheckResult, UpdateInfo};
 use shared_constants::RAPID_FIRE_WEAPON_STEMS;
 use shared_constants::auth::LICENSE_CODE;
 use shared_constants::defaults;
+use shared_constants::assist_curve::{INNER_RAMP_LINEAR, INNER_RAMP_MODE_ITEMS, INNER_RAMP_SQUARE};
+use shared_constants::paths::{CONFIGS_DIR, MODELS_DIR};
+use shared_constants::rapid_fire_mode;
 use shared_constants::ui::{
-    AA_ACTIVATE_MODE_ITEMS, CHARACTER_WIDTH, GREEN_RGB, RAPID_FIRE_MODE_ALWAYS,
+    AA_ACTIVATE_MODE_AIM_AND_FIRE, AA_ACTIVATE_MODE_ITEMS, CHARACTER_WIDTH, GREEN_RGB,
+    HELP_VIGEMBUS_DOWNLOAD_URL, PREVIEW_REPAINT_INTERVAL_MS, RAPID_FIRE_MODE_ALWAYS,
     RAPID_FIRE_MODE_AUTO, RAPID_FIRE_MODE_FULL_TRIGGER, RAPID_FIRE_MODE_HALF_TRIGGER,
-    RAPID_FIRE_MODE_ITEMS, RED_RGB, ROW_HEIGHT, SPACING, YELLOW_RGB,
+    RAPID_FIRE_MODE_DISABLED, RAPID_FIRE_MODE_ITEMS, RED_RGB, ROW_HEIGHT, SPACING, YELLOW_RGB,
 };
 use utils::enum_device_tool::enumerate_controllers;
 use modules::mapping_state_machine::MappingManager;
@@ -296,8 +300,8 @@ struct MyApp {
 impl Default for MyApp {
     fn default() -> Self {
         // 先加载文件列表
-        let config_items = find_json_files("configs");
-        let model_items = find_onnx_files("models");
+        let config_items = find_json_files(CONFIGS_DIR);
+        let model_items = find_onnx_files(MODELS_DIR);
         
         let mut config_selected = String::new();
         let mut model_selected = String::new();
@@ -318,7 +322,7 @@ impl Default for MyApp {
         
         // 初始化参数共享结构
         let aim_enable = Arc::new(AtomicBool::new(false));
-        let rapid_fire_mode = Arc::new(AtomicU8::new(0));
+        let rapid_fire_mode = Arc::new(AtomicU8::new(rapid_fire_mode::DISABLED));
         let outer_size = Arc::new(Mutex::new(String::new()));
         let inner_size = Arc::new(Mutex::new(String::new()));
         let outer_str = Arc::new(Mutex::new(String::new()));
@@ -326,7 +330,7 @@ impl Default for MyApp {
         let init_str = Arc::new(Mutex::new(String::new()));
         let hipfire = Arc::new(Mutex::new(String::new()));
         let assist_ema_alpha_str = Arc::new(Mutex::new(String::new()));
-        let assist_inner_ramp = Arc::new(Mutex::new("linear".to_string()));
+        let assist_inner_ramp = Arc::new(Mutex::new(INNER_RAMP_LINEAR.to_string()));
         let vertical_str = Arc::new(Mutex::new(String::new()));
         let aim_height = Arc::new(Mutex::new(String::new()));
         
@@ -465,7 +469,7 @@ impl MyApp {
             .lock()
             .ok()
             .map(|g| normalize_inner_ramp_mode(&g))
-            .unwrap_or_else(|| "linear".to_string());
+            .unwrap_or_else(|| INNER_RAMP_LINEAR.to_string());
         let key = (
             self.outer_diameter,
             self.start_strength,
@@ -482,7 +486,7 @@ impl MyApp {
         for i in 0..point_count {
             let t = i as f32 / (point_count as f32 - 1.0);
             let t = t.clamp(0.0, 1.0);
-            let progress = if ramp_key == "square" { t * t } else { t };
+            let progress = if ramp_key == INNER_RAMP_SQUARE { t * t } else { t };
             let y = self.start_strength * (1.0 - progress) + self.inner_strength * progress;
             points.push((x_end * t, y));
         }
@@ -499,7 +503,7 @@ impl MyApp {
         }
 
         // 模型文件一般为 models/foo.onnx，对应的 json 为 models/foo.json
-        let models_dir = Path::new("models");
+        let models_dir = Path::new(MODELS_DIR);
         let stem = Path::new(&self.model_selected)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -543,7 +547,7 @@ impl MyApp {
         self.special_weapons_release_to_fire = config.special_weapons_release_to_fire.clone();
         self.curve_preview_cache_key = None;
         self.rapid_fire_mode_selected = if config.rapid_fire_mode.is_empty() {
-            "不启用连点".to_string()
+            RAPID_FIRE_MODE_DISABLED.to_string()
         } else {
             config.rapid_fire_mode.clone()
         };
@@ -652,7 +656,7 @@ impl MyApp {
                     .lock()
                     .ok()
                     .map(|g| normalize_inner_ramp_mode(&g))
-                    .unwrap_or_else(|| "linear".to_string()),
+                    .unwrap_or_else(|| INNER_RAMP_LINEAR.to_string()),
             },
             aa_activate_mode: self.aa_activate_mode_selected.clone(),
             use_controller: self.use_controller,
@@ -766,7 +770,7 @@ impl MyApp {
             self.sync_params_to_manager();
             
             // 更新瞄准辅助开关
-            let aim_enable = self.aa_activate_mode_selected == "瞄准和开火";
+            let aim_enable = self.aa_activate_mode_selected == AA_ACTIVATE_MODE_AIM_AND_FIRE;
             self.aim_enable.store(aim_enable, Ordering::Relaxed);
             self.mapping_manager.update_aim_enable(aim_enable);
             
@@ -820,7 +824,7 @@ impl MyApp {
                 outer_diameter: defaults::BASE_OUTER_DIAMETER * scale,
                 outer_strength: defaults::OUTER_STRENGTH,
                 assist_output_ema_alpha: defaults::ASSIST_OUTPUT_EMA_ALPHA,
-                inner_ramp_mode: "linear".to_string(),
+                inner_ramp_mode: INNER_RAMP_LINEAR.to_string(),
             },
             aa_activate_mode: defaults::AA_ACTIVATE_MODE.to_string(),
             use_controller: false,
@@ -835,11 +839,11 @@ impl MyApp {
 
     fn rapid_fire_mode_to_u8(mode: &str) -> u8 {
         match mode {
-            RAPID_FIRE_MODE_ALWAYS => 1,
-            RAPID_FIRE_MODE_HALF_TRIGGER => 2,
-            RAPID_FIRE_MODE_FULL_TRIGGER => 3,
-            RAPID_FIRE_MODE_AUTO => 4,
-            _ => 0,
+            RAPID_FIRE_MODE_ALWAYS => rapid_fire_mode::ALWAYS,
+            RAPID_FIRE_MODE_HALF_TRIGGER => rapid_fire_mode::HALF_TRIGGER,
+            RAPID_FIRE_MODE_FULL_TRIGGER => rapid_fire_mode::FULL_TRIGGER,
+            RAPID_FIRE_MODE_AUTO => rapid_fire_mode::AUTO_BY_WEAPON,
+            _ => rapid_fire_mode::DISABLED,
         }
     }
 
@@ -1019,7 +1023,7 @@ impl eframe::App for MyApp {
                 ).clicked() {
                     if !self.config_selected.is_empty() {
                         // 显示确认对话框
-                        self.delete_config_confirm = Some((self.config_selected.clone(), "configs".to_string()));
+                        self.delete_config_confirm = Some((self.config_selected.clone(), CONFIGS_DIR.to_string()));
                     }
                 }
             });
@@ -1070,7 +1074,7 @@ impl eframe::App for MyApp {
                     // 打开文件夹逻辑
                     {
                         std::process::Command::new("explorer")
-                            .arg("models")
+                            .arg(MODELS_DIR)
                             .spawn()
                             .ok();
                     }
@@ -1469,22 +1473,19 @@ impl eframe::App for MyApp {
                                     .lock()
                                     .ok()
                                     .map(|g| normalize_inner_ramp_mode(&g))
-                                    .unwrap_or_else(|| "linear".to_string());
+                                    .unwrap_or_else(|| INNER_RAMP_LINEAR.to_string());
                                 let mut inner_ramp = prev_ramp.clone();
                                 egui::ComboBox::from_id_source("assist_inner_ramp")
                                     .width(ui.available_width() - SPACING)
                                     .selected_text(&inner_ramp)
                                     .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut inner_ramp,
-                                            "linear".to_string(),
-                                            "linear",
-                                        );
-                                        ui.selectable_value(
-                                            &mut inner_ramp,
-                                            "square".to_string(),
-                                            "square",
-                                        );
+                                        for item in INNER_RAMP_MODE_ITEMS {
+                                            ui.selectable_value(
+                                                &mut inner_ramp,
+                                                (*item).to_string(),
+                                                *item,
+                                            );
+                                        }
                                     });
                                 if inner_ramp != prev_ramp {
                                     if let Ok(mut g) = self.assist_inner_ramp.lock() {
@@ -1645,7 +1646,7 @@ impl eframe::App for MyApp {
                                     }
                                 });
 
-                            if self.rapid_fire_mode_selected == "根据枪械自动切换" {
+                            if self.rapid_fire_mode_selected == RAPID_FIRE_MODE_AUTO {
                                 inner.response.on_hover_ui(|ui| {
                                     ui.set_max_width(CHARACTER_WIDTH * 32.0);
                                     ui.label(RAPID_FIRE_WEAPON_STEMS.join(", "));
@@ -1673,7 +1674,7 @@ impl eframe::App for MyApp {
                     });
 
                     let special_weapon_settings_enabled =
-                        self.rapid_fire_mode_selected == "根据枪械自动切换";
+                        self.rapid_fire_mode_selected == RAPID_FIRE_MODE_AUTO;
                     ui.add_enabled_ui(special_weapon_settings_enabled, |ui| {
                         // “特殊枪械设定” 下方的缩进 + 分隔结构（可滚动区域）
                         ui.horizontal(|ui| {
@@ -2044,16 +2045,17 @@ impl eframe::App for MyApp {
                 let file_path = format!("{}/{}.json", folder, file_name);
                 if std::fs::remove_file(&file_path).is_ok() {
                     // 更新文件列表
-                    if folder == "configs" {
-                        self.config_items = find_json_files("configs");
+                    if folder == CONFIGS_DIR {
+                        self.config_items = find_json_files(CONFIGS_DIR);
                         if self.config_selected == file_name {
                             // 清空配置选择
                             self.config_selected.clear();
                             // 重置所有配置数据到默认值
                             self.use_controller = false;
                             self.aa_activate_mode_selected = String::new();
-                            self.rapid_fire_mode_selected = "不启用连点".to_string();
-                            self.rapid_fire_mode.store(0, Ordering::Relaxed);
+                            self.rapid_fire_mode_selected = RAPID_FIRE_MODE_DISABLED.to_string();
+                            self.rapid_fire_mode
+                                .store(rapid_fire_mode::DISABLED, Ordering::Relaxed);
                             self.outer_diameter = 0.0;
                             self.outer_strength = 0.0;
                             self.inner_diameter = 0.0;
@@ -2062,7 +2064,7 @@ impl eframe::App for MyApp {
                             self.hipfire_strength_factor = 0.0;
                             self.assist_output_ema_alpha = 0.0;
                             if let Ok(mut g) = self.assist_inner_ramp.lock() {
-                                *g = "linear".to_string();
+                                *g = INNER_RAMP_LINEAR.to_string();
                             }
                             self.vertical_strength_factor = 0.0;
                             self.aim_height_factor = 0.0;
@@ -2072,8 +2074,8 @@ impl eframe::App for MyApp {
                                 eprintln!("保存 .current 文件失败: {}", e);
                             }
                         }
-                    } else if folder == "models" {
-                        self.model_items = find_onnx_files("models");
+                    } else if folder == MODELS_DIR {
+                        self.model_items = find_onnx_files(MODELS_DIR);
                         if self.model_selected == file_name {
                             self.model_selected.clear();
                             // 更新 .current 文件
@@ -2177,7 +2179,7 @@ impl eframe::App for MyApp {
                             eprintln!("创建配置文件失败: {}", e);
                         } else {
                             // 更新文件列表
-                            self.config_items = find_json_files("configs");
+                            self.config_items = find_json_files(CONFIGS_DIR);
                             // 选择新创建的配置
                             self.config_selected = config_name.to_string();
                             // 加载新配置到UI
@@ -2342,7 +2344,9 @@ impl eframe::App for MyApp {
                         });
                     
                     // 请求延迟刷新（约60fps），避免阻塞主窗口
-                    ctx.request_repaint_after(std::time::Duration::from_millis(20));
+                    ctx.request_repaint_after(std::time::Duration::from_millis(
+                        PREVIEW_REPAINT_INTERVAL_MS,
+                    ));
                 },
             );
             
@@ -2646,7 +2650,9 @@ impl eframe::App for MyApp {
                         });
                     
                     // 请求延迟刷新（约60fps），避免阻塞主窗口
-                    ctx.request_repaint_after(std::time::Duration::from_millis(20));
+                    ctx.request_repaint_after(std::time::Duration::from_millis(
+                        PREVIEW_REPAINT_INTERVAL_MS,
+                    ));
                 },
             );
             
@@ -2815,8 +2821,7 @@ impl eframe::App for MyApp {
                                     egui::Button::new("下载")
                                 ).clicked() {
                                     // 打开下载网页
-                                    let url = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe";
-                                    if let Err(e) = open::that(url) {
+                                    if let Err(e) = open::that(HELP_VIGEMBUS_DOWNLOAD_URL) {
                                         eprintln!("无法打开网页: {}", e);
                                     }
                                 }

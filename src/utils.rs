@@ -1,12 +1,13 @@
 use std::fs;
+use crate::shared_constants::assist_curve::{INNER_RAMP_LINEAR, INNER_RAMP_SQUARE};
 use crate::shared_constants::paths::{CONFIGS_DIR, CURRENT_CONFIG_FILE};
 
 /// 内圈插值模式：仅 `"linear"` / `"square"`（其它输入视为 linear）
 pub fn normalize_inner_ramp_mode(s: &str) -> String {
-    if s.trim().eq_ignore_ascii_case("square") {
-        "square".to_string()
+    if s.trim().eq_ignore_ascii_case(INNER_RAMP_SQUARE) {
+        INNER_RAMP_SQUARE.to_string()
     } else {
-        "linear".to_string()
+        INNER_RAMP_LINEAR.to_string()
     }
 }
 
@@ -38,7 +39,7 @@ fn default_assist_output_ema_alpha() -> f32 {
 }
 
 fn default_inner_ramp_mode_str() -> String {
-    "linear".to_string()
+    INNER_RAMP_LINEAR.to_string()
 }
 
 /// 手柄轴映射（SDL axis index -> 逻辑轴，None 表示未配置）

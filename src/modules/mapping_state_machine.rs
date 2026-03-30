@@ -13,6 +13,7 @@ use crate::modules::{
     weapon_rec_thread::WeaponRecThread,
 };
 use crate::shared_constants::RAPID_FIRE_WEAPON_STEMS;
+use crate::shared_constants::{defaults, paths::MODELS_DIR, rapid_fire_mode};
 use crate::utils::{
     enum_device_tool::enumerate_controllers,
     console_redirect::log_error,
@@ -344,10 +345,12 @@ impl MappingManager {
             let outer_val = self.outer_size
                 .lock().map_err(|e| format!("获取外圈大小锁失败: {}", e))?
                 .trim()
-                .parse::<f32>().unwrap_or(320.0);
+                .parse::<f32>()
+                .unwrap_or(defaults::BASE_OUTER_DIAMETER);
             let outer_usize = outer_val.round() as usize;
             
-            let enable_weapon_roi = self.rapid_fire_mode.load(Ordering::SeqCst) == 4;
+            let enable_weapon_roi =
+                self.rapid_fire_mode.load(Ordering::SeqCst) == rapid_fire_mode::AUTO_BY_WEAPON;
             match ScreenCapturer::start(outer_usize, enable_weapon_roi) {
                 Ok(capturer) => {
                     self.screen_capturer = Some(capturer);
@@ -360,12 +363,12 @@ impl MappingManager {
         }
     }
     
-    // 尝试启动枪械识别（仅当 rapid_fire_mode == 4 时）
+    // 尝试启动枪械识别（仅当 rapid_fire_mode == AUTO_BY_WEAPON 时）
     fn try_start_weapon_rec(&mut self) -> Result<(), String> {
         if self.weapon_rec.is_some() {
             return Ok(());
         }
-        if self.rapid_fire_mode.load(Ordering::SeqCst) != 4 {
+        if self.rapid_fire_mode.load(Ordering::SeqCst) != rapid_fire_mode::AUTO_BY_WEAPON {
             return Ok(());
         }
         let capt = self
@@ -399,7 +402,7 @@ impl MappingManager {
             };
             let model_path = std::env::current_dir()
                 .map_err(|e| format!("获取当前目录失败: {}", e))?
-                .join("models")
+                .join(MODELS_DIR)
                 .join(&model_name);
             
             match DetectorThread::start(buffer_arc, version_arc, &model_path) {
