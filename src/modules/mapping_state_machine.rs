@@ -4,7 +4,6 @@ use std::{
 };
 use vigem_client::{Client, Xbox360Wired};
 
-use crate::utils::ConMapping;
 use crate::modules::{
     gamepad_reading_thread::ConReader,
     gamepad_mapping_thread::ConMapper,
@@ -50,7 +49,7 @@ pub struct MappingManager {
     
     // 配置参数
     current_model: String,
-    con_mapping: Option<ConMapping>, // 手柄键位映射（启动智慧核心时从配置读取）
+    preferred_controller_index: Option<u32>, // 期望读取的 SDL 手柄设备索引
     aim_enable: Arc<AtomicBool>, // 瞄准辅助开关
     outer_size: Arc<Mutex<String>>,
     inner_size: Arc<Mutex<String>>,
@@ -96,7 +95,7 @@ impl MappingManager {
             con_reader: None,
             con_mapper: None,
             current_model,
-            con_mapping: None,
+            preferred_controller_index: None,
             aim_enable,
             outer_size,
             inner_size,
@@ -139,15 +138,13 @@ impl MappingManager {
         }
     }
     
-    // 请求启动映射（con_mapping 从当前配置的手柄键位调试内容读取）
+    // 请求启动映射
     pub fn request_start(
         &mut self,
-        con_mapping: Option<ConMapping>,
         special_weapons_aim_and_fire: Vec<String>,
         special_weapons_release_to_fire: Vec<String>,
     ) {
         if matches!(self.state, MappingState::Idle) {
-            self.con_mapping = con_mapping;
             self.special_weapons_aim_and_fire = special_weapons_aim_and_fire;
             self.special_weapons_release_to_fire = special_weapons_release_to_fire;
             self.state = MappingState::CheckingDevice;
@@ -238,8 +235,7 @@ impl MappingManager {
             
             MappingState::StartingReader => {
                 if self.con_reader.is_none() {
-                    let mapping = self.con_mapping.clone().unwrap_or_default();
-                    self.con_reader = Some(ConReader::start(mapping));
+                    self.con_reader = Some(ConReader::start(self.preferred_controller_index));
                 }
                 self.state = MappingState::StartingMapper;
             }
@@ -576,10 +572,10 @@ impl MappingManager {
         &self.weapon_rec
     }
 
-    /// 仅用于调试窗口：若当前未运行智慧核心且尚未启动 ConReader，则启动 ConReader（使用默认键位映射）
+    /// 仅用于调试窗口：若当前未运行智慧核心且尚未启动 ConReader，则启动 ConReader
     pub fn start_con_reader_for_debug(&mut self) {
         if matches!(self.state, MappingState::Idle) && self.con_reader.is_none() {
-            self.con_reader = Some(ConReader::start(ConMapping::default()));
+            self.con_reader = Some(ConReader::start(self.preferred_controller_index));
         }
     }
 
@@ -590,5 +586,9 @@ impl MappingManager {
                 reader.stop();
             }
         }
+    }
+
+    pub fn set_preferred_controller_index(&mut self, preferred_index: Option<u32>) {
+        self.preferred_controller_index = preferred_index;
     }
 } 

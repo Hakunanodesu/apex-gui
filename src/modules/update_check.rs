@@ -62,11 +62,16 @@ struct GhRelease {
 }
 
 fn request_releases() -> Result<String, String> {
-    let resp = ureq::get(RELEASES_URL)
-        .set("Accept", "application/vnd.github.v3+json")
-        .timeout(std::time::Duration::from_millis(REQUEST_TIMEOUT_MS))
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_millis(REQUEST_TIMEOUT_MS)))
+        .build();
+    let agent: ureq::Agent = config.into();
+
+    let mut resp = agent
+        .get(RELEASES_URL)
+        .header("Accept", "application/vnd.github.v3+json")
         .call()
-        .map_err(|e| {
+        .map_err(|e: ureq::Error| {
             let msg = e.to_string();
             if msg.contains("Connection refused") || msg.contains("failed to connect") {
                 "网络连接失败".to_string()
@@ -79,7 +84,8 @@ fn request_releases() -> Result<String, String> {
     if resp.status() != 200 {
         return Err(format!("HTTP {}", resp.status()));
     }
-    resp.into_string()
+    resp.body_mut()
+        .read_to_string()
         .map_err(|e| format!("读取响应失败: {}", e))
 }
 

@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     sync::{
         Arc,
         Mutex,
@@ -9,14 +8,13 @@ use std::{
     time::Duration,
 };
 use sdl2::{
+    controller::{Axis as ControllerAxis, Button as ControllerButton},
     event::{Event, EventType},
-    joystick::HatState,
 };
 use vigem_client::{XGamepad, XButtons};
 
 use crate::shared_constants::error_limits::GAMEPAD_READING_MAX_CONSECUTIVE_ERRORS;
 use crate::utils::console_redirect::log_error;
-use crate::utils::ConMapping;
 
 static DEBUG_PRINT_ENABLED: AtomicBool = AtomicBool::new(false);
 static DEBUG_TEXT: Mutex<String> = Mutex::new(String::new());
@@ -33,151 +31,199 @@ fn scale_to_u8(v: i16) -> u8 {
     (((v as i32 + 32768) * 255 / 65535) as u8).clamp(0, 255)
 }
 
-fn map_button(idx: u8, m: &ConMapping) -> Option<u16> {
-    let b = &m.button;
-    if b.a == Some(idx) { return Some(XButtons::A); }
-    if b.b == Some(idx) { return Some(XButtons::B); }
-    if b.x == Some(idx) { return Some(XButtons::X); }
-    if b.y == Some(idx) { return Some(XButtons::Y); }
-    if b.lb == Some(idx) { return Some(XButtons::LB); }
-    if b.rb == Some(idx) { return Some(XButtons::RB); }
-    if b.back == Some(idx) { return Some(XButtons::BACK); }
-    if b.start == Some(idx) { return Some(XButtons::START); }
-    if b.ls == Some(idx) { return Some(XButtons::LTHUMB); }
-    if b.rs == Some(idx) { return Some(XButtons::RTHUMB); }
-    None
+fn scale_trigger_to_u8(v: i16) -> u8 {
+    if v >= 0 {
+        ((v as i32) * 255 / 32767).clamp(0, 255) as u8
+    } else {
+        scale_to_u8(v)
+    }
 }
 
-fn map_axis(state: &mut XGamepad, axis_idx: u8, value: i16, m: &ConMapping) {
-    let a = &m.axis;
-    if a.lx == Some(axis_idx) { state.thumb_lx = value; }
-    if a.ly == Some(axis_idx) { state.thumb_ly = value.saturating_neg(); }
-    if a.rx == Some(axis_idx) { state.thumb_rx = value; }
-    if a.ry == Some(axis_idx) { state.thumb_ry = value.saturating_neg(); }
-    if a.lt == Some(axis_idx) { state.left_trigger = scale_to_u8(value); }
-    if a.rt == Some(axis_idx) { state.right_trigger = scale_to_u8(value); }
+fn controller_button_bit(button: ControllerButton) -> Option<u16> {
+    match button {
+        ControllerButton::A => Some(XButtons::A),
+        ControllerButton::B => Some(XButtons::B),
+        ControllerButton::X => Some(XButtons::X),
+        ControllerButton::Y => Some(XButtons::Y),
+        ControllerButton::Back => Some(XButtons::BACK),
+        ControllerButton::Start => Some(XButtons::START),
+        ControllerButton::LeftStick => Some(XButtons::LTHUMB),
+        ControllerButton::RightStick => Some(XButtons::RTHUMB),
+        ControllerButton::LeftShoulder => Some(XButtons::LB),
+        ControllerButton::RightShoulder => Some(XButtons::RB),
+        ControllerButton::DPadUp => Some(XButtons::UP),
+        ControllerButton::DPadDown => Some(XButtons::DOWN),
+        ControllerButton::DPadLeft => Some(XButtons::LEFT),
+        ControllerButton::DPadRight => Some(XButtons::RIGHT),
+        _ => None,
+    }
 }
 
-// 仅用于调试打印，记录 0~5 号轴的最近一次值（线程本地，无需互斥）
+#[derive(Default, Clone, Copy)]
+struct DebugState {
+    lx: i16,
+    ly: i16,
+    rx: i16,
+    ry: i16,
+    lt: u8,
+    rt: u8,
+    a: bool,
+    b: bool,
+    x: bool,
+    y: bool,
+    back: bool,
+    guide: bool,
+    start: bool,
+    ls: bool,
+    rs: bool,
+    lb: bool,
+    rb: bool,
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    misc1: bool,
+}
+
 thread_local! {
-    static AXIS_VALUES: RefCell<[i16; 6]> = RefCell::new([0; 6]);
-    // 记录 0~12 号按钮的最近一次状态（0/1）
-    static BUTTON_VALUES: RefCell<[u8; 13]> = RefCell::new([0; 13]);
+    static DEBUG_STATE: std::cell::RefCell<DebugState> = std::cell::RefCell::new(DebugState::default());
 }
 
-fn debug_print_axes_and_buttons() {
+fn set_debug_button(state: &mut DebugState, button: ControllerButton, pressed: bool) {
+    match button {
+        ControllerButton::A => state.a = pressed,
+        ControllerButton::B => state.b = pressed,
+        ControllerButton::X => state.x = pressed,
+        ControllerButton::Y => state.y = pressed,
+        ControllerButton::Back => state.back = pressed,
+        ControllerButton::Guide => state.guide = pressed,
+        ControllerButton::Start => state.start = pressed,
+        ControllerButton::LeftStick => state.ls = pressed,
+        ControllerButton::RightStick => state.rs = pressed,
+        ControllerButton::LeftShoulder => state.lb = pressed,
+        ControllerButton::RightShoulder => state.rb = pressed,
+        ControllerButton::DPadUp => state.up = pressed,
+        ControllerButton::DPadDown => state.down = pressed,
+        ControllerButton::DPadLeft => state.left = pressed,
+        ControllerButton::DPadRight => state.right = pressed,
+        ControllerButton::Misc1 => state.misc1 = pressed,
+        _ => {}
+    }
+}
+
+fn debug_pressed_buttons_list(state: &DebugState) -> String {
+    let mut names = Vec::new();
+    if state.a { names.push("A"); }
+    if state.b { names.push("B"); }
+    if state.x { names.push("X"); }
+    if state.y { names.push("Y"); }
+    if state.lb { names.push("LB"); }
+    if state.rb { names.push("RB"); }
+    if state.ls { names.push("LS"); }
+    if state.rs { names.push("RS"); }
+    if state.back { names.push("Back"); }
+    if state.guide { names.push("Guide"); }
+    if state.start { names.push("Start"); }
+    if state.up { names.push("Up"); }
+    if state.down { names.push("Down"); }
+    if state.left { names.push("Left"); }
+    if state.right { names.push("Right"); }
+    if state.misc1 { names.push("Misc1"); }
+    if names.is_empty() {
+        "(none)".to_string()
+    } else {
+        names.join(", ")
+    }
+}
+
+fn debug_print_state() {
     if !DEBUG_PRINT_ENABLED.load(Ordering::Relaxed) {
         return;
     }
-    AXIS_VALUES.with(|axis_cell| {
-        BUTTON_VALUES.with(|btn_cell| {
-            let axes = axis_cell.borrow();
-            let btns = btn_cell.borrow();
-
+    DEBUG_STATE.with(|state_cell| {
+            let state = state_cell.borrow();
             let mut s = String::new();
             use std::fmt::Write;
 
-            let _ = writeln!(s, "axis_idx:");
-            let _ = writeln!(
-                s,
-                "[0]->{:+06}, [1]->{:+06}, [2]->{:+06}",
-                axes[0], axes[1], axes[2]
-            );
-            let _ = writeln!(
-                s,
-                "[3]->{:+06}, [4]->{:+06}, [5]->{:+06}",
-                axes[3], axes[4], axes[5]
-            );
-            let _ = writeln!(s, "button_idx:");
-            let _ = writeln!(
-                s,
-                "[0]->{}, [1]->{}, [2]->{}, [3]->{}, [4]->{}, [5]->{}",
-                btns[0], btns[1], btns[2], btns[3], btns[4], btns[5]
-            );
-            let _ = writeln!(
-                s,
-                "[6]->{}, [7]->{}, [8]->{}, [9]->{}, [10]->{}, [11]->{}",
-                btns[6], btns[7], btns[8], btns[9], btns[10], btns[11]
-            );
+            let _ = writeln!(s, "LX:{:+06}  LY:{:+06}", state.lx, state.ly);
+            let _ = writeln!(s, "RX:{:+06}  RY:{:+06}", state.rx, state.ry);
+            let _ = writeln!(s, "LT:{:>3}   RT:{:>3}", state.lt, state.rt);
+            let _ = writeln!(s, "Pressed: {}", debug_pressed_buttons_list(&state));
 
             if let Ok(mut lock) = DEBUG_TEXT.lock() {
                 *lock = s;
             }
-        });
     });
 }
 
-fn apply_event(state: &mut XGamepad, evt: &JoystickEvent, mapping: &ConMapping) {
+fn apply_event(state: &mut XGamepad, evt: &ControllerEvent) {
     let debug_only = DEBUG_PRINT_ENABLED.load(Ordering::Relaxed);
 
     match evt {
-        JoystickEvent::Axis { axis_idx, value } => {
+        ControllerEvent::Axis { axis, value } => {
             if debug_only {
-                AXIS_VALUES.with(|cell| {
-                    let mut arr = cell.borrow_mut();
-                    if (*axis_idx as usize) < 6 {
-                        arr[*axis_idx as usize] = *value;
+                DEBUG_STATE.with(|cell| {
+                    let mut dbg = cell.borrow_mut();
+                    match axis {
+                        ControllerAxis::LeftX => dbg.lx = *value,
+                        ControllerAxis::LeftY => dbg.ly = value.saturating_neg(),
+                        ControllerAxis::RightX => dbg.rx = *value,
+                        ControllerAxis::RightY => dbg.ry = value.saturating_neg(),
+                        ControllerAxis::TriggerLeft => dbg.lt = scale_trigger_to_u8(*value),
+                        ControllerAxis::TriggerRight => dbg.rt = scale_trigger_to_u8(*value),
                     }
                 });
                 return;
             }
-            map_axis(state, *axis_idx, *value, mapping);
+            match axis {
+                ControllerAxis::LeftX => state.thumb_lx = *value,
+                ControllerAxis::LeftY => state.thumb_ly = value.saturating_neg(),
+                ControllerAxis::RightX => state.thumb_rx = *value,
+                ControllerAxis::RightY => state.thumb_ry = value.saturating_neg(),
+                ControllerAxis::TriggerLeft => state.left_trigger = scale_trigger_to_u8(*value),
+                ControllerAxis::TriggerRight => state.right_trigger = scale_trigger_to_u8(*value),
+            }
         }
-        JoystickEvent::ButtonDown { button_idx } => {
+        ControllerEvent::ButtonDown { button } => {
             if debug_only {
-                BUTTON_VALUES.with(|cell| {
-                    let mut arr = cell.borrow_mut();
-                    if (*button_idx as usize) < 13 {
-                        arr[*button_idx as usize] = 1;
-                    }
+                DEBUG_STATE.with(|cell| {
+                    set_debug_button(&mut cell.borrow_mut(), *button, true);
                 });
                 return;
             }
-            if let Some(bit) = map_button(*button_idx, mapping) {
+            if let Some(bit) = controller_button_bit(*button) {
                 *state.buttons.as_mut() |= bit;
             }
         }
-        JoystickEvent::ButtonUp { button_idx } => {
+        ControllerEvent::ButtonUp { button } => {
             if debug_only {
-                BUTTON_VALUES.with(|cell| {
-                    let mut arr = cell.borrow_mut();
-                    if (*button_idx as usize) < 13 {
-                        arr[*button_idx as usize] = 0;
-                    }
+                DEBUG_STATE.with(|cell| {
+                    set_debug_button(&mut cell.borrow_mut(), *button, false);
                 });
                 return;
             }
-            if let Some(bit) = map_button(*button_idx, mapping) {
+            if let Some(bit) = controller_button_bit(*button) {
                 *state.buttons.as_mut() &= !bit;
             }
         }
-        JoystickEvent::HatMotion { state: hat } => {
-            if debug_only {
-                return;
-            }
-            let dpad_mask = XButtons::UP | XButtons::DOWN | XButtons::LEFT | XButtons::RIGHT;
-            *state.buttons.as_mut() &= !dpad_mask;
-            match hat {
-                HatState::Centered => {}
-                HatState::Up => *state.buttons.as_mut() |= XButtons::UP,
-                HatState::RightUp => { *state.buttons.as_mut() |= XButtons::UP; *state.buttons.as_mut() |= XButtons::RIGHT; }
-                HatState::Right => *state.buttons.as_mut() |= XButtons::RIGHT,
-                HatState::RightDown => { *state.buttons.as_mut() |= XButtons::RIGHT; *state.buttons.as_mut() |= XButtons::DOWN; }
-                HatState::Down => *state.buttons.as_mut() |= XButtons::DOWN,
-                HatState::LeftDown => { *state.buttons.as_mut() |= XButtons::DOWN; *state.buttons.as_mut() |= XButtons::LEFT; }
-                HatState::Left => *state.buttons.as_mut() |= XButtons::LEFT,
-                HatState::LeftUp => { *state.buttons.as_mut() |= XButtons::LEFT; *state.buttons.as_mut() |= XButtons::UP; }
-            }
+    }
+}
+
+fn matches_or_bind_active_device(active_which: &mut Option<u32>, which: u32) -> bool {
+    match *active_which {
+        Some(active) => which == active,
+        None => {
+            *active_which = Some(which);
+            true
         }
     }
 }
 
 #[derive(Debug)]
-pub enum JoystickEvent {
-    Axis { axis_idx: u8, value: i16 },
-    ButtonDown { button_idx: u8 },
-    ButtonUp { button_idx: u8 },
-    HatMotion { state: HatState },
+pub enum ControllerEvent {
+    Axis { axis: ControllerAxis, value: i16 },
+    ButtonDown { button: ControllerButton },
+    ButtonUp { button: ControllerButton },
 }
 
 pub struct ConReader {
@@ -190,8 +236,7 @@ pub struct ConReader {
 
 impl ConReader {
     /// 启动线程，返回一个实例
-    /// mapping 为手柄键位映射（从配置文件读取，智慧核心启动时传入）
-    pub fn start(mapping: ConMapping) -> Self {
+    pub fn start(preferred_device_index: Option<u32>) -> Self {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(XGamepad::default()));
         let ready_flag = Arc::new(AtomicBool::new(false));
@@ -200,7 +245,6 @@ impl ConReader {
         let state_clone = state.clone();
         let ready_clone = ready_flag.clone();
         let error_flag_clone = error_flag.clone();
-        let mapping_clone = mapping.clone();
 
         let handle = thread::spawn(move || {
             let sdl_ctx = match sdl2::init() {
@@ -212,10 +256,10 @@ impl ConReader {
                 }
             };
             
-            let js_sub = match sdl_ctx.joystick() {
+            let gc_sub = match sdl_ctx.game_controller() {
                 Ok(sub) => sub,
                 Err(e) => {
-                    log_error(&format!("手柄读取 - SDL手柄子系统初始化失败: {}", e));
+                    log_error(&format!("手柄读取 - SDL GameController 子系统初始化失败: {}", e));
                     error_flag_clone.store(true, Ordering::SeqCst);
                     return;
                 }
@@ -230,8 +274,8 @@ impl ConReader {
                 }
             };
 
-            // 获取手柄数量
-            let js_count = match js_sub.num_joysticks() {
+            // 获取设备数量（按 SDL joystick 索引遍历 game controller）
+            let js_count = match gc_sub.num_joysticks() {
                 Ok(count) => count,
                 Err(e) => {
                     log_error(&format!("手柄读取 - 获取手柄数量失败: {}", e));
@@ -240,23 +284,57 @@ impl ConReader {
                 }
             };
             
-            // 打开除0号外的所有手柄
-            let mut joysticks = Vec::new();
-            for dev_idx in 1..js_count {  // 从1开始，跳过0号虚拟手柄
-                match js_sub.open(dev_idx) {
-                    Ok(joy) => {
-                        // println!("成功打开物理手柄索引{}: {}", dev_idx, joy.name());
-                        joysticks.push(joy);
+            // 打开 GameController 设备。
+            // 若提供了首选设备索引，则仅打开该设备；否则打开全部并在运行时自动锁定首个产生输入的设备。
+            let mut controllers = Vec::new();
+            let mut active_which: Option<u32> = None;
+            if let Some(preferred_idx) = preferred_device_index {
+                if preferred_idx >= js_count {
+                    log_error(&format!(
+                        "手柄读取 - 首选手柄索引{}超出范围(当前设备数={})",
+                        preferred_idx, js_count
+                    ));
+                    error_flag_clone.store(true, Ordering::SeqCst);
+                    return;
+                }
+                if !gc_sub.is_game_controller(preferred_idx) {
+                    log_error(&format!(
+                        "手柄读取 - 首选设备索引{}不是 SDL GameController 设备",
+                        preferred_idx
+                    ));
+                    error_flag_clone.store(true, Ordering::SeqCst);
+                    return;
+                }
+                match gc_sub.open(preferred_idx) {
+                    Ok(controller) => {
+                        active_which = Some(controller.instance_id());
+                        controllers.push(controller);
                     }
                     Err(e) => {
-                        log_error(&format!("手柄读取 - 打开手柄索引{}失败: {}", dev_idx, e));
-                        // 单个手柄打开失败不影响其他手柄
+                        log_error(&format!("手柄读取 - 打开首选手柄索引{}失败: {}", preferred_idx, e));
+                        error_flag_clone.store(true, Ordering::SeqCst);
+                        return;
+                    }
+                }
+            } else {
+                for dev_idx in 0..js_count {
+                    if !gc_sub.is_game_controller(dev_idx) {
+                        continue;
+                    }
+                    match gc_sub.open(dev_idx) {
+                        Ok(controller) => {
+                            controllers.push(controller);
+                        }
+                        Err(e) => {
+                            log_error(&format!("手柄读取 - 打开手柄索引{}失败: {}", dev_idx, e));
+                            // 单个手柄打开失败不影响其他手柄
+                        }
                     }
                 }
             }
             
-            if joysticks.is_empty() {
-                log_error("手柄读取 - 没有可用的物理手柄（0号已被虚拟手柄占用）");
+            if controllers.is_empty() {
+                log_error("手柄读取 - 没有可用的 GameController 设备");
                 error_flag_clone.store(true, Ordering::SeqCst);
                 return;
             }
@@ -267,26 +345,23 @@ impl ConReader {
 
             // 启用事件
             for ev in &[
-                EventType::JoyAxisMotion,
-                EventType::JoyButtonDown,
-                EventType::JoyButtonUp,
-                EventType::JoyHatMotion,
+                EventType::ControllerAxisMotion,
+                EventType::ControllerButtonDown,
+                EventType::ControllerButtonUp,
             ] {
                 let _ = pump.enable_event(*ev);
             }
 
             let mut consecutive_errors = 0;
-            
             // 循环处理
             while !stop_clone.load(Ordering::SeqCst) {
-                let mut had_joy_event = false;
+                let mut had_controller_event = false;
                 for evt in pump.poll_iter() {
                     // 过滤手柄事件
                     match evt {
-                        Event::JoyAxisMotion { .. }
-                        | Event::JoyButtonDown { .. }
-                        | Event::JoyButtonUp { .. }
-                        | Event::JoyHatMotion { .. } => {},
+                        Event::ControllerAxisMotion { .. }
+                        | Event::ControllerButtonDown { .. }
+                        | Event::ControllerButtonUp { .. } => {},
                         _ => continue,
                     };
 
@@ -294,21 +369,26 @@ impl ConReader {
                     match state_clone.lock() {
                         Ok(mut lock) => {
                             match evt {
-                                Event::JoyAxisMotion { axis_idx, value, .. } => {
-                                    apply_event(&mut *lock, &JoystickEvent::Axis { axis_idx, value }, &mapping_clone);
-                                    had_joy_event = true;
+                                Event::ControllerAxisMotion { which, axis, value, .. } => {
+                                    if !matches_or_bind_active_device(&mut active_which, which) {
+                                        continue;
+                                    }
+                                    apply_event(&mut *lock, &ControllerEvent::Axis { axis, value });
+                                    had_controller_event = true;
                                 }
-                                Event::JoyButtonDown { button_idx, .. } => {
-                                    apply_event(&mut *lock, &JoystickEvent::ButtonDown { button_idx }, &mapping_clone);
-                                    had_joy_event = true;
+                                Event::ControllerButtonDown { which, button, .. } => {
+                                    if !matches_or_bind_active_device(&mut active_which, which) {
+                                        continue;
+                                    }
+                                    apply_event(&mut *lock, &ControllerEvent::ButtonDown { button });
+                                    had_controller_event = true;
                                 }
-                                Event::JoyButtonUp { button_idx, .. } => {
-                                    apply_event(&mut *lock, &JoystickEvent::ButtonUp { button_idx }, &mapping_clone);
-                                    had_joy_event = true;
-                                }
-                                Event::JoyHatMotion { state, .. } => {
-                                    apply_event(&mut *lock, &JoystickEvent::HatMotion { state }, &mapping_clone);
-                                    had_joy_event = true;
+                                Event::ControllerButtonUp { which, button, .. } => {
+                                    if !matches_or_bind_active_device(&mut active_which, which) {
+                                        continue;
+                                    }
+                                    apply_event(&mut *lock, &ControllerEvent::ButtonUp { button });
+                                    had_controller_event = true;
                                 }
                                 _ => {}
                             }
@@ -328,8 +408,8 @@ impl ConReader {
                         }
                     }
                 }
-                if had_joy_event {
-                    debug_print_axes_and_buttons();
+                if had_controller_event {
+                    debug_print_state();
                 }
                 thread::sleep(Duration::from_millis(1));
             }

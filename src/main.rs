@@ -9,7 +9,7 @@ use std::path::Path;
 mod utils;
 mod modules;
 mod shared_constants;
-use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, normalize_inner_ramp_mode, ConfigFile, ConMapping, check_dir_exist};
+use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, normalize_inner_ramp_mode, ConfigFile, check_dir_exist};
 use modules::update_check::{check_github_update, UpdateCheckResult, UpdateInfo};
 use shared_constants::RAPID_FIRE_WEAPON_STEMS;
 use shared_constants::auth::LICENSE_CODE;
@@ -23,7 +23,7 @@ use shared_constants::ui::{
     RAPID_FIRE_MODE_AUTO, RAPID_FIRE_MODE_FULL_TRIGGER, RAPID_FIRE_MODE_HALF_TRIGGER,
     RAPID_FIRE_MODE_DISABLED, RAPID_FIRE_MODE_ITEMS, RED_RGB, ROW_HEIGHT, SPACING, YELLOW_RGB,
 };
-use utils::enum_device_tool::enumerate_controllers;
+use utils::enum_device_tool::{enumerate_controller_devices, enumerate_controllers};
 use modules::mapping_state_machine::MappingManager;
 use shared_constants::weapon_rec::{TEMPLATE_H as CANNY_H, TEMPLATE_W as CANNY_W};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -70,7 +70,7 @@ fn main() -> Result<(), eframe::Error> {
             // 加载字体
             setup_fonts(&cc.egui_ctx);
             
-            cc.egui_ctx.style_mut(|style| {
+            cc.egui_ctx.global_style_mut(|style| {
                 // 设置全局字体大小
                 for (_text_style, font_id) in style.text_styles.iter_mut() {
                     font_id.size = CHARACTER_WIDTH; // 全局字号
@@ -86,13 +86,13 @@ fn main() -> Result<(), eframe::Error> {
             });
             
             // 创建应用实例，屏幕高度将在第一次 update 时获取
-            Box::new(MyApp::default())
+            Ok(Box::new(MyApp::default()))
         }),
     )
 }
 
 fn modal_blocker(ctx: &egui::Context) {
-    let screen_rect = ctx.screen_rect();
+    let screen_rect = ctx.content_rect();
     egui::Area::new(egui::Id::new("modal_blocker"))
         .order(egui::Order::Middle) // 使用 Middle 层，Window 会在 Foreground 层之上
         .fixed_pos(screen_rect.min)
@@ -136,14 +136,14 @@ fn setup_fonts(ctx: &egui::Context) {
     let jetbrains_font_data = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");
     fonts.font_data.insert(
         "jetbrains_mono".to_owned(),
-        egui::FontData::from_owned(jetbrains_font_data.to_vec()),
+        egui::FontData::from_owned(jetbrains_font_data.to_vec()).into(),
     );
 
     // 使用 include_bytes! 编译时嵌入中文字体文件
     let noto_font_data = include_bytes!("../fonts/NotoSansCJKsc-Regular.otf");
     fonts.font_data.insert(
         "noto_cjk".to_owned(),
-        egui::FontData::from_owned(noto_font_data.to_vec()),
+        egui::FontData::from_owned(noto_font_data.to_vec()).into(),
     );
     
     // 设置字体族顺序：英文字体优先，中文字体作为回退
@@ -188,6 +188,8 @@ struct MyApp {
     
     // 输入设备选择
     use_controller: bool, // 是否使用手柄
+    controller_devices: Vec<(u32, String)>, // 可选手柄设备（SDL索引, 显示名）
+    selected_controller_index: Option<u32>, // 当前选中的 SDL 手柄设备索引
     rapid_fire_mode: Arc<AtomicU8>, // 连点模式（跨线程共享）：0=关闭, 1=始终连点, 2=半按扳机连点
     rapid_fire_mode_selected: String,
     rapid_fire_mode_items: Vec<String>,
@@ -233,7 +235,6 @@ struct MyApp {
     // 问号按钮窗口
     show_help_window: bool, // 是否显示帮助窗口
     help_window_vigem_ready: Option<bool>, // ViGEm Bus Driver 检测结果
-    help_window_controller_ready: Option<bool>, // 物理手柄检测结果
     
     // 虚拟手柄
     virtual_gamepad: Arc<Mutex<Option<Xbox360Wired<Arc<Client>>>>>, // ViGEmBus 虚拟手柄
@@ -275,23 +276,6 @@ struct MyApp {
     // 调试输出
     debug_enabled: bool,
     show_debug_window: bool, // 手柄键位调试窗口
-    // 手柄键位调试窗口输入框
-    debug_axis_lx: String,
-    debug_axis_ly: String,
-    debug_axis_rx: String,
-    debug_axis_ry: String,
-    debug_axis_lt: String,
-    debug_axis_rt: String,
-    debug_btn_lb: String,
-    debug_btn_rb: String,
-    debug_btn_ls: String,
-    debug_btn_rs: String,
-    debug_btn_back: String,
-    debug_btn_start: String,
-    debug_btn_x: String,
-    debug_btn_y: String,
-    debug_btn_a: String,
-    debug_btn_b: String,
     // 第一段曲线预览采样缓存（x, y）
     curve_preview_points_cache: Vec<(f32, f32)>,
     curve_preview_cache_key: Option<(f32, f32, f32, String)>, // (outer_diameter, start_strength, inner_strength, inner_ramp)
@@ -360,6 +344,8 @@ impl Default for MyApp {
             delete_config_confirm: None,
             add_config_dialog: None,
             use_controller: false, // 默认不使用手柄
+            controller_devices: Vec::new(),
+            selected_controller_index: None,
             rapid_fire_mode,
             rapid_fire_mode_selected: defaults::RAPID_FIRE_MODE.to_string(),
             rapid_fire_mode_items: RAPID_FIRE_MODE_ITEMS.iter().map(|s| (*s).to_string()).collect(),
@@ -385,7 +371,6 @@ impl Default for MyApp {
             preview_window_created: false,
             show_help_window: false,
             help_window_vigem_ready: None,
-            help_window_controller_ready: None,
             virtual_gamepad: Arc::new(Mutex::new(None)),
             core_enabled: false,
             mapping_manager,
@@ -411,22 +396,6 @@ impl Default for MyApp {
             update_is_latest: Arc::new(AtomicBool::new(false)),
             debug_enabled: false,
             show_debug_window: false,
-            debug_axis_lx: String::new(),
-            debug_axis_ly: String::new(),
-            debug_axis_rx: String::new(),
-            debug_axis_ry: String::new(),
-            debug_axis_lt: String::new(),
-            debug_axis_rt: String::new(),
-            debug_btn_lb: String::new(),
-            debug_btn_rb: String::new(),
-            debug_btn_ls: String::new(),
-            debug_btn_rs: String::new(),
-            debug_btn_back: String::new(),
-            debug_btn_start: String::new(),
-            debug_btn_x: String::new(),
-            debug_btn_y: String::new(),
-            debug_btn_a: String::new(),
-            debug_btn_b: String::new(),
             curve_preview_points_cache: Vec::new(),
             curve_preview_cache_key: None,
         };
@@ -457,6 +426,34 @@ impl Default for MyApp {
 }
 
 impl MyApp {
+    fn refresh_controller_devices(&mut self) {
+        self.controller_devices = enumerate_controller_devices();
+        if let Some(selected) = self.selected_controller_index {
+            if !self
+                .controller_devices
+                .iter()
+                .any(|(idx, _)| *idx == selected)
+            {
+                self.selected_controller_index = self.controller_devices.first().map(|(idx, _)| *idx);
+            }
+        } else {
+            self.selected_controller_index = self.controller_devices.first().map(|(idx, _)| *idx);
+        }
+    }
+
+    fn selected_controller_text(&self) -> String {
+        if let Some(selected) = self.selected_controller_index {
+            if let Some((_, name)) = self
+                .controller_devices
+                .iter()
+                .find(|(idx, _)| *idx == selected)
+            {
+                return name.clone();
+            }
+        }
+        "请选择手柄".to_string()
+    }
+
     fn ensure_curve_preview_points_cache(&mut self) {
         if self.outer_diameter <= 0.0 {
             self.curve_preview_points_cache.clear();
@@ -570,73 +567,7 @@ impl MyApp {
         } else {
             String::new()
         };
-        if let Some(ref m) = config.con_mapping {
-            self.debug_axis_lx = m.axis.lx.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_axis_ly = m.axis.ly.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_axis_rx = m.axis.rx.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_axis_ry = m.axis.ry.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_axis_lt = m.axis.lt.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_axis_rt = m.axis.rt.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_lb = m.button.lb.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_rb = m.button.rb.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_ls = m.button.ls.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_rs = m.button.rs.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_back = m.button.back.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_start = m.button.start.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_x = m.button.x.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_y = m.button.y.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_a = m.button.a.map(|n| n.to_string()).unwrap_or_default();
-            self.debug_btn_b = m.button.b.map(|n| n.to_string()).unwrap_or_default();
-        } else {
-            self.debug_axis_lx.clear();
-            self.debug_axis_ly.clear();
-            self.debug_axis_rx.clear();
-            self.debug_axis_ry.clear();
-            self.debug_axis_lt.clear();
-            self.debug_axis_rt.clear();
-            self.debug_btn_lb.clear();
-            self.debug_btn_rb.clear();
-            self.debug_btn_ls.clear();
-            self.debug_btn_rs.clear();
-            self.debug_btn_back.clear();
-            self.debug_btn_start.clear();
-            self.debug_btn_x.clear();
-            self.debug_btn_y.clear();
-            self.debug_btn_a.clear();
-            self.debug_btn_b.clear();
-        }
         self.config_changed = false;
-    }
-    
-    /// 将调试窗口输入框解析为 ConMapping（空字符串为 None，非空解析为 u8）
-    fn debug_to_con_mapping(&self) -> ConMapping {
-        use utils::{ConMappingAxis, ConMappingButton};
-        let parse_u8 = |s: &str| {
-            let s = s.trim();
-            if s.is_empty() { None } else { s.parse().ok() }
-        };
-        ConMapping {
-            axis: ConMappingAxis {
-                lx: parse_u8(&self.debug_axis_lx),
-                ly: parse_u8(&self.debug_axis_ly),
-                rx: parse_u8(&self.debug_axis_rx),
-                ry: parse_u8(&self.debug_axis_ry),
-                lt: parse_u8(&self.debug_axis_lt),
-                rt: parse_u8(&self.debug_axis_rt),
-            },
-            button: ConMappingButton {
-                lb: parse_u8(&self.debug_btn_lb),
-                rb: parse_u8(&self.debug_btn_rb),
-                ls: parse_u8(&self.debug_btn_ls),
-                rs: parse_u8(&self.debug_btn_rs),
-                back: parse_u8(&self.debug_btn_back),
-                start: parse_u8(&self.debug_btn_start),
-                x: parse_u8(&self.debug_btn_x),
-                y: parse_u8(&self.debug_btn_y),
-                a: parse_u8(&self.debug_btn_a),
-                b: parse_u8(&self.debug_btn_b),
-            },
-        }
     }
 
     /// 将当前 UI 状态保存为 ConfigFile
@@ -661,7 +592,6 @@ impl MyApp {
             aa_activate_mode: self.aa_activate_mode_selected.clone(),
             use_controller: self.use_controller,
             vertical_strength_coefficient: self.vertical_strength_factor,
-            con_mapping: Some(self.debug_to_con_mapping()),
             rapid_fire_mode: self.rapid_fire_mode_selected.clone(),
             license_code: self.license_key.clone(),
             special_weapons_aim_and_fire: self.special_weapons_aim_and_fire.clone(),
@@ -747,21 +677,18 @@ impl MyApp {
                 return;
             }
             
-            // 检测 ViGemBus 和物理手柄是否就绪
+            // 检测 ViGemBus 是否就绪
             let vigem_ready = check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver");
-            let controller_ready = enumerate_controllers();
             
-            // 如果有任意项未就绪，打开帮助面板并返回
-            if !vigem_ready || !controller_ready {
+            // ViGemBus 未就绪，打开帮助面板并返回
+            if !vigem_ready {
                 self.help_window_vigem_ready = Some(vigem_ready);
-                self.help_window_controller_ready = Some(controller_ready);
                 self.show_help_window = true;
                 return;
             }
             // 游戏窗口未就绪时不允许启动，弹出「？」窗口
             if !modules::screen_capture_thread::is_apex_window_ready() {
                 self.help_window_vigem_ready = Some(vigem_ready);
-                self.help_window_controller_ready = Some(controller_ready);
                 self.show_help_window = true;
                 return;
             }
@@ -777,16 +704,6 @@ impl MyApp {
             // 更新模型配置
             self.mapping_manager.update_config(self.model_selected.clone());
             
-            // 任意映射为空则打开调试窗口且不允许启动智慧核心
-            let mapping = self.debug_to_con_mapping();
-            if !mapping.is_complete() {
-                self.show_debug_window = true;
-                self.debug_enabled = true;
-                modules::gamepad_reading_thread::set_debug_print_enabled(true);
-                self.mapping_manager.start_con_reader_for_debug();
-                return;
-            }
-            
             // 确保虚拟手柄
             if self.virtual_gamepad.lock().unwrap().is_none() {
                 if let Ok(client) = Client::connect() {
@@ -799,11 +716,12 @@ impl MyApp {
             }
             
             // 使用 MappingManager 启动
-            let con_mapping = Some(self.debug_to_con_mapping());
             let special_aim = self.special_weapons_aim_and_fire.clone();
             let special_release = self.special_weapons_release_to_fire.clone();
             self.mapping_manager
-                .request_start(con_mapping, special_aim, special_release);
+                .set_preferred_controller_index(self.selected_controller_index);
+            self.mapping_manager
+                .request_start(special_aim, special_release);
             self.core_enabled = true;
             self.preview_allowed = false;
         }
@@ -829,7 +747,6 @@ impl MyApp {
             aa_activate_mode: defaults::AA_ACTIVATE_MODE.to_string(),
             use_controller: false,
             vertical_strength_coefficient: defaults::VERTICAL_STRENGTH_COEFFICIENT,
-            con_mapping: Some(ConMapping::default()),
             rapid_fire_mode: defaults::RAPID_FIRE_MODE.to_string(),
             license_code: String::new(),
             special_weapons_aim_and_fire: Vec::new(),
@@ -850,6 +767,8 @@ impl MyApp {
 }
 
 impl eframe::App for MyApp {
+    fn ui(&mut self, _ui: &mut egui::Ui, _frame: &mut eframe::Frame) {}
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // 启动时在后台检查一次 GitHub 是否有新版本（不阻塞 UI）
         if !self.update_check_started {
@@ -949,12 +868,15 @@ impl eframe::App for MyApp {
         }
 
         // 设置窗口边框的 margin
+        #[allow(deprecated)]
         egui::CentralPanel::default().show(ctx, |ui| {
 
             // 第一部分
             // 第一行：label | 下拉框 | 添加按钮 | 删除按钮
             ui.horizontal(|ui| {
-                ui.set_enabled(!self.core_enabled);
+                if self.core_enabled {
+                    ui.disable();
+                }
 
                 // Label - 使用固定宽度区域确保对齐
                 ui.add_sized(
@@ -966,7 +888,7 @@ impl eframe::App for MyApp {
                 // 使用保存的初始宽度计算，确保两行一致
                 let combo_width = ui.available_width() - (CHARACTER_WIDTH * 6.0 + SPACING * 3.0);
                 let old_config = self.config_selected.clone();
-                egui::ComboBox::from_id_source("config_combo")
+                egui::ComboBox::from_id_salt("config_combo")
                     .width(combo_width)
                     .selected_text(
                         if self.config_selected.is_empty() {
@@ -1030,7 +952,9 @@ impl eframe::App for MyApp {
                         
             // 第二行：label | 下拉框 | 添加按钮 | 删除按钮
             ui.horizontal(|ui| {
-                ui.set_enabled(!self.core_enabled);
+                if self.core_enabled {
+                    ui.disable();
+                }
 
                 // Label - 使用固定宽度区域确保对齐
                 ui.add_sized(
@@ -1042,7 +966,7 @@ impl eframe::App for MyApp {
                 // 使用保存的初始宽度计算，确保与第一行一致
                 let combo_width = ui.available_width() - (CHARACTER_WIDTH * 6.0 + SPACING * 3.0);
                 let old_model = self.model_selected.clone();
-                egui::ComboBox::from_id_source("model_combo")
+                egui::ComboBox::from_id_salt("model_combo")
                     .width(combo_width)
                     .selected_text(
                         if self.model_selected.is_empty() {
@@ -1115,6 +1039,9 @@ impl eframe::App for MyApp {
                     other_btn
                 ).clicked() {
                     self.param_tab = ParamTab::InputDevice;
+                    if self.use_controller {
+                        self.refresh_controller_devices();
+                    }
                 }
 
                 let aux_color = if self.param_tab == ParamTab::Accessibility { Some(GREEN) } else { None };
@@ -1146,7 +1073,9 @@ impl eframe::App for MyApp {
             });
 
             ui.horizontal(|ui| {
-                ui.set_enabled(!self.core_enabled);
+                if self.core_enabled {
+                    ui.disable();
+                }
 
                 ui.add_sized(
                     egui::Vec2::new(CHARACTER_WIDTH * 1.0, ROW_HEIGHT),
@@ -1167,7 +1096,7 @@ impl eframe::App for MyApp {
 
                         let combo_width = ui.available_width() - SPACING;
                         let old_aa_mode = self.aa_activate_mode_selected.clone();
-                        egui::ComboBox::from_id_source("aa_combo")
+                        egui::ComboBox::from_id_salt("aa_combo")
                             .width(combo_width)
                             .selected_text(
                                 if self.aa_activate_mode_selected.is_empty() {
@@ -1252,7 +1181,7 @@ impl eframe::App for MyApp {
                                         if ui.add_sized(
                                             egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.outer_diameter)
-                                                .clamp_range(self.min_outer_diameter..=self.screen_height)
+                                                .range(self.min_outer_diameter..=self.screen_height)
                                                 .speed(1.0)
                                         ).changed() {
                                             self.mark_config_changed();
@@ -1269,7 +1198,7 @@ impl eframe::App for MyApp {
                                         if ui.add_sized(
                                             egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.outer_strength)
-                                                .clamp_range(0.0..=1.0)
+                                                .range(0.0..=1.0)
                                                 .speed(0.01)
                                         ).changed() {
                                             self.mark_config_changed();
@@ -1286,7 +1215,7 @@ impl eframe::App for MyApp {
                                         if ui.add_sized(
                                             egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.inner_diameter)
-                                                .clamp_range(1.0..=self.outer_diameter)
+                                                .range(1.0..=self.outer_diameter)
                                                 .speed(1.0)
                                         ).changed() {
                                             self.mark_config_changed();
@@ -1296,7 +1225,7 @@ impl eframe::App for MyApp {
                                         if ui.add_sized(
                                             egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                             egui::DragValue::new(&mut self.inner_strength)
-                                                .clamp_range(0.0..=1.0)
+                                                .range(0.0..=1.0)
                                                 .speed(0.01)
                                         ).changed() {
                                             self.mark_config_changed();
@@ -1454,7 +1383,7 @@ impl eframe::App for MyApp {
                                         let d = self.assist_output_ema_alpha as f64;
                                         (d * 1000.0).round() / 1000.0
                                     })
-                                    .clamp_range(0.0..=1.0)
+                                    .range(0.0..=1.0)
                                     .speed(0.001)
                                     .fixed_decimals(3),
                                 ).changed() {
@@ -1475,7 +1404,7 @@ impl eframe::App for MyApp {
                                     .map(|g| normalize_inner_ramp_mode(&g))
                                     .unwrap_or_else(|| INNER_RAMP_LINEAR.to_string());
                                 let mut inner_ramp = prev_ramp.clone();
-                                egui::ComboBox::from_id_source("assist_inner_ramp")
+                                egui::ComboBox::from_id_salt("assist_inner_ramp")
                                     .width(ui.available_width() - SPACING)
                                     .selected_text(&inner_ramp)
                                     .show_ui(ui, |ui| {
@@ -1508,7 +1437,7 @@ impl eframe::App for MyApp {
                                 if ui.add_sized(
                                     egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
                                     egui::DragValue::new(&mut self.start_strength)
-                                        .clamp_range(0.0..=1.0)
+                                        .range(0.0..=1.0)
                                         .speed(0.01)
                                 ).changed() {
                                     self.mark_config_changed();
@@ -1523,7 +1452,7 @@ impl eframe::App for MyApp {
                                 if ui.add_sized(
                                     egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
                                     egui::DragValue::new(&mut self.hipfire_strength_factor)
-                                        .clamp_range(0.0..=1.0)
+                                        .range(0.0..=1.0)
                                         .speed(0.01)
                                 ).changed() {
                                     self.mark_config_changed();
@@ -1540,7 +1469,7 @@ impl eframe::App for MyApp {
                                 if ui.add_sized(
                                     egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
                                     egui::DragValue::new(&mut self.vertical_strength_factor)
-                                        .clamp_range(0.0..=1.0)
+                                        .range(0.0..=1.0)
                                         .speed(0.01)
                                 ).changed() {
                                     self.mark_config_changed();
@@ -1555,7 +1484,7 @@ impl eframe::App for MyApp {
                                 if ui.add_sized(
                                     egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
                                     egui::DragValue::new(&mut self.aim_height_factor)
-                                        .clamp_range(0.0..=1.0)
+                                        .range(0.0..=1.0)
                                         .speed(0.01)
                                 ).changed() {
                                     self.mark_config_changed();
@@ -1595,9 +1524,35 @@ impl eframe::App for MyApp {
                             egui::RadioButton::new(self.use_controller, "手柄")
                         ).clicked() {
                             self.use_controller = true;
+                            self.refresh_controller_devices();
                             self.mark_config_changed();
                             self.save_config();
                         }
+                    });
+
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
+                            egui::Label::new("设备选择")
+                        );
+
+                        let combo_width = ui.available_width() - SPACING;
+                        ui.add_enabled_ui(self.use_controller, |ui| {
+                            egui::ComboBox::from_id_salt("controller_device_combo")
+                                .width(combo_width)
+                                .selected_text(self.selected_controller_text())
+                                .show_ui(ui, |ui| {
+                                    for (idx, name) in &self.controller_devices {
+                                        ui.selectable_value(
+                                            &mut self.selected_controller_index,
+                                            Some(*idx),
+                                            name,
+                                        );
+                                    }
+                                });
+                        });
                     });
 
                     ui.separator();
@@ -1607,12 +1562,8 @@ impl eframe::App for MyApp {
                             egui::Vec2::new(CHARACTER_WIDTH * 7.0, ROW_HEIGHT),
                             egui::Button::new("手柄键位调试")
                         ).clicked() {
-                            if !enumerate_controllers() {
-                                self.help_window_vigem_ready = Some(check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver"));
-                                self.help_window_controller_ready = Some(false);
-                                self.show_help_window = true;
-                                return;
-                            }
+                            self.mapping_manager
+                                .set_preferred_controller_index(self.selected_controller_index);
                             self.show_debug_window = true;
                             self.debug_enabled = true;
                             modules::gamepad_reading_thread::set_debug_print_enabled(true);
@@ -1637,7 +1588,7 @@ impl eframe::App for MyApp {
                         let combo_width = ui.available_width() - SPACING;
                         let old_mode = self.rapid_fire_mode_selected.clone();
                         ui.add_enabled_ui(self.use_controller, |ui| {
-                            let inner = egui::ComboBox::from_id_source("rapid_fire_combo")
+                            let inner = egui::ComboBox::from_id_salt("rapid_fire_combo")
                                 .width(combo_width)
                                 .selected_text(&self.rapid_fire_mode_selected)
                                 .show_ui(ui, |ui| {
@@ -1852,7 +1803,7 @@ impl eframe::App for MyApp {
                             );
                             r.on_hover_ui(move |ui| {
                                 ui.set_max_width(CHARACTER_WIDTH * 32.0);
-                                ui.add(egui::Label::new(&reason).wrap(true));
+                                ui.add(egui::Label::new(&reason).wrap());
                             });
                         } else if is_latest {
                             ui.add_sized(
@@ -1869,7 +1820,6 @@ impl eframe::App for MyApp {
                             egui::Button::new("?")
                         ).clicked() {
                             self.help_window_vigem_ready = Some(check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver"));
-                            self.help_window_controller_ready = Some(enumerate_controllers());
                             self.show_help_window = true;
                         }
                     });
@@ -1937,20 +1887,22 @@ impl eframe::App for MyApp {
                 if let Some(color) = inference_preview_button_color {
                     inference_preview_button = inference_preview_button.fill(color);
                 }
-                ui.set_enabled(self.core_enabled);
-                if ui.add_sized(
-                    egui::Vec2::new(CHARACTER_WIDTH * 3.0, ROW_HEIGHT),
-                    inference_preview_button
-                ).clicked() {
-                    self.show_inference_preview = true;
-                }
-                ui.set_enabled(true); // 恢复启用状态
+                ui.add_enabled_ui(self.core_enabled, |ui| {
+                    if ui.add_sized(
+                        egui::Vec2::new(CHARACTER_WIDTH * 3.0, ROW_HEIGHT),
+                        inference_preview_button
+                    ).clicked() {
+                        self.show_inference_preview = true;
+                    }
+                });
             });
 
             ui.separator();
             
             ui.horizontal(|ui| {
-                ui.set_enabled(!self.core_enabled);
+                if self.core_enabled {
+                    ui.disable();
+                }
                 
                 ui.add_sized(
                     egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
@@ -1979,8 +1931,8 @@ impl eframe::App for MyApp {
             let dialog_width = text_width + SPACING * 2.5;
             let dialog_height = ROW_HEIGHT * 2.0 + SPACING * 3.0;
             let dialog_pos = egui::pos2(
-                ctx.screen_rect().center().x - dialog_width / 2.0,
-                ctx.screen_rect().center().y - dialog_height / 2.0,
+                ctx.content_rect().center().x - dialog_width / 2.0,
+                ctx.content_rect().center().y - dialog_height / 2.0,
             );
             
             // 使用 Area 创建确认对话框
@@ -1990,7 +1942,7 @@ impl eframe::App for MyApp {
                 .show(ctx, |ui| {
                     // 使用 Frame 绘制窗口样式
                     egui::Frame::popup(ui.style())
-                        .fill(ctx.style().visuals.window_fill())
+                        .fill(ctx.global_style().visuals.window_fill())
                         .show(ui, |ui| {
                             
                             ui.horizontal(|ui| {
@@ -2101,8 +2053,8 @@ impl eframe::App for MyApp {
             let dialog_width = CHARACTER_WIDTH * 16.0 + SPACING * 1.5;
             let dialog_height = ROW_HEIGHT * 3.0 + SPACING * 4.0;
             let dialog_pos = egui::pos2(
-                ctx.screen_rect().center().x - dialog_width / 2.0,
-                ctx.screen_rect().center().y - dialog_height / 2.0,
+                ctx.content_rect().center().x - dialog_width / 2.0,
+                ctx.content_rect().center().y - dialog_height / 2.0,
             );
             
             // 使用 Area 创建添加配置对话框
@@ -2112,7 +2064,7 @@ impl eframe::App for MyApp {
                 .show(ctx, |ui| {
                     // 使用 Frame 绘制窗口样式
                     egui::Frame::popup(ui.style())
-                        .fill(ctx.style().visuals.window_fill())
+                        .fill(ctx.global_style().visuals.window_fill())
                         .show(ui, |ui| {
                             
                             ui.horizontal(|ui| {
@@ -2273,8 +2225,9 @@ impl eframe::App for MyApp {
                     .with_decorations(false) // 有标准窗口装饰（最小化、最大化、关闭按钮）
                     .with_maximize_button(false), // 禁用最大化按钮
                 move |ctx, _class| {
+                    #[allow(deprecated)]
                     egui::CentralPanel::default()
-                        .frame(egui::Frame::none())
+                        .frame(egui::Frame::NONE)
                         .show(ctx, |ui| {
                             let rect = ui.max_rect();
                             let center = rect.center();
@@ -2287,6 +2240,7 @@ impl eframe::App for MyApp {
                                 rect,
                                 0.0,
                                 egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 100, 100)),
+                                egui::StrokeKind::Middle,
                             );
                             
                             // 绘制圆形背景
@@ -2435,8 +2389,9 @@ impl eframe::App for MyApp {
                     .with_decorations(false)
                     .with_maximize_button(false),
                 move |ctx, _class| {
+                    #[allow(deprecated)]
                     egui::CentralPanel::default()
-                        .frame(egui::Frame::none())
+                        .frame(egui::Frame::NONE)
                         .show(ctx, |ui| {
                             let rect = ui.max_rect();
                             
@@ -2493,10 +2448,10 @@ impl eframe::App for MyApp {
                                         main_img_left = img_rect.min.x;
                                         
                                         // 将图像转换为 egui 纹理
-                                        let color_image = egui::ColorImage {
-                                            size: [square_size_clone, square_size_clone],
+                                        let color_image = egui::ColorImage::new(
+                                            [square_size_clone, square_size_clone],
                                             pixels,
-                                        };
+                                        );
                                         
                                         let texture = ctx.load_texture("inference_preview", color_image, Default::default());
                                         ui.put(img_rect, egui::Image::new(&texture).fit_to_exact_size(scaled_size));
@@ -2535,6 +2490,7 @@ impl eframe::App for MyApp {
                                                             bbox_rect,
                                                             0.0,
                                                             egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 0, 0)),
+                                                            egui::StrokeKind::Middle,
                                                         );
                                                     }
                                                 }
@@ -2563,10 +2519,10 @@ impl eframe::App for MyApp {
                                             for &g in pixels.iter() {
                                                 canny_rgb.push(egui::Color32::from_rgb(g, g, g));
                                             }
-                                            let canny_image = egui::ColorImage {
-                                                size: [CANNY_W as usize, CANNY_H as usize],
-                                                pixels: canny_rgb,
-                                            };
+                                            let canny_image = egui::ColorImage::new(
+                                                [CANNY_W as usize, CANNY_H as usize],
+                                                canny_rgb,
+                                            );
                                             let canny_texture = ctx.load_texture("inference_preview_canny", canny_image, Default::default());
                                             ui.put(weapon_rect, egui::Image::new(&canny_texture).fit_to_exact_size(weapon_rect.size()));
                                         }
@@ -2575,7 +2531,11 @@ impl eframe::App for MyApp {
                             }
                             
                             // 在下方显示耗时 label
-                            ui.allocate_ui_at_rect(label_rect, |ui| {
+                            ui.allocate_new_ui(
+                                egui::UiBuilder::new()
+                                    .max_rect(label_rect)
+                                    .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                                |ui| {
                                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                     // 获取耗时数据（ms）
                                     let infer_ms = infer_latency_ref.as_ref()
@@ -2633,6 +2593,7 @@ impl eframe::App for MyApp {
                                 rect,
                                 0.0,
                                 egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 100, 100)),
+                                egui::StrokeKind::Middle,
                             );
                             
                             // 处理窗口拖动：检测鼠标拖拽，允许通过点击窗口内部拖动窗口
@@ -2666,77 +2627,21 @@ impl eframe::App for MyApp {
             // 强制连续刷新，保证调试输出实时更新
             ctx.request_repaint();
 
-            let screen_rect = ctx.screen_rect();
+            let screen_rect = ctx.content_rect();
             let dialog_width = screen_rect.width();
             let dialog_height = screen_rect.height();
             let dialog_pos = screen_rect.min;
-            
-            let input_w = CHARACTER_WIDTH * 2.6;
-            let label_w = CHARACTER_WIDTH * 4.0;
             
             egui::Area::new(egui::Id::new("debug_dialog"))
                 .order(egui::Order::Foreground)
                 .fixed_pos(dialog_pos)
                 .show(ctx, |ui| {
                     egui::Frame::popup(ui.style())
-                        .fill(ctx.style().visuals.window_fill())
+                        .fill(ctx.global_style().visuals.window_fill())
                         .show(ui, |ui| {
                             ui.set_min_size(egui::Vec2::new(dialog_width, dialog_height));
 
-                            // 上半部分：映射输入
-                            ui.add_sized(egui::Vec2::new(CHARACTER_WIDTH * 3.4, ROW_HEIGHT), egui::Label::new("axis"));
-                            ui.horizontal(|ui| {
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("lx"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_lx).hint_text(""));
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("ly"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_ly).hint_text(""));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("rx"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_rx).hint_text(""));
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("ry"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_ry).hint_text(""));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("lt"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_lt).hint_text(""));
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("rt"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_axis_rt).hint_text(""));
-                            });
-                            
-                            ui.add_sized(egui::Vec2::new(CHARACTER_WIDTH * 4.6, ROW_HEIGHT), egui::Label::new("button"));
-                            ui.horizontal(|ui| {
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("lb"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_lb).hint_text(""));
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("rb"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_rb).hint_text(""));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("ls"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_ls).hint_text(""));
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("rs"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_rs).hint_text(""));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("back"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_back).hint_text(""));
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("start"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_start).hint_text(""));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("X"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_x).hint_text(""));
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("Y"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_y).hint_text(""));
-                            });
-                            ui.horizontal(|ui| {
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("A"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_a).hint_text(""));
-                                ui.add_sized(egui::Vec2::new(label_w, ROW_HEIGHT), egui::Label::new("B"));
-                                ui.add_sized(egui::Vec2::new(input_w, ROW_HEIGHT), egui::TextEdit::singleline(&mut self.debug_btn_b).hint_text(""));
-                            });
-
-                            // 中间：调试输出（固定区域，无滚动条）
+                            // 调试输出（固定区域，无滚动条）
                             ui.add_sized(
                                 egui::Vec2::new(CHARACTER_WIDTH * 5.0, ROW_HEIGHT),
                                 egui::Label::new("调试输出"),
@@ -2767,8 +2672,6 @@ impl eframe::App for MyApp {
                                     self.debug_enabled = false;
                                     modules::gamepad_reading_thread::set_debug_print_enabled(false);
                                     self.mapping_manager.stop_con_reader_for_debug();
-                                    self.mark_config_changed();
-                                    self.save_config();
                                 }
                             });
                         });
@@ -2782,14 +2685,13 @@ impl eframe::App for MyApp {
             
             // 使用缓存的检测结果
             let vigem_ready = self.help_window_vigem_ready.unwrap_or(false);
-            let controller_ready = self.help_window_controller_ready.unwrap_or(false);
             
             // 计算对话框大小和位置（居中显示）
             let dialog_width = CHARACTER_WIDTH * 12.8 + SPACING * 3.5;
             let dialog_height = ROW_HEIGHT * 4.0 + SPACING * 5.0;
             let dialog_pos = egui::pos2(
-                ctx.screen_rect().center().x - dialog_width / 2.0,
-                ctx.screen_rect().center().y - dialog_height / 2.0,
+                ctx.content_rect().center().x - dialog_width / 2.0,
+                ctx.content_rect().center().y - dialog_height / 2.0,
             );
             
             // 使用 Area 创建帮助对话框
@@ -2799,7 +2701,7 @@ impl eframe::App for MyApp {
                 .show(ctx, |ui| {
                     // 使用 Frame 绘制窗口样式（无标题）
                     egui::Frame::popup(ui.style())
-                        .fill(ctx.style().visuals.window_fill())
+                        .fill(ctx.global_style().visuals.window_fill())
                         .show(ui, |ui| {
                             // 第一行：ViGemBus | 就绪/未就绪 | 下载按钮
                             ui.horizontal(|ui| {
@@ -2827,29 +2729,7 @@ impl eframe::App for MyApp {
                                 }
                             });
                             
-                            // 第二行：物理手柄 | 就绪/未就绪 | （留空）
-                            ui.horizontal(|ui| {
-                                ui.add_sized(
-                                    egui::Vec2::new(CHARACTER_WIDTH * 5.8, ROW_HEIGHT),
-                                    egui::Label::new("物理手柄")
-                                );
-                                
-                                ui.add_sized(
-                                    egui::Vec2::new(CHARACTER_WIDTH * 4.0, ROW_HEIGHT),
-                                    egui::Label::new(
-                                        egui::RichText::new(if controller_ready { "就绪" } else { "未就绪" })
-                                            .color(if controller_ready { GREEN } else { RED })
-                                    )
-                                );
-                                
-                                // 留空
-                                ui.add_sized(
-                                    egui::Vec2::new(CHARACTER_WIDTH * 3.0, ROW_HEIGHT),
-                                    egui::Label::new("")
-                                );
-                            });
-                            
-                            // 第三行：游戏窗口 | 就绪/未就绪
+                            // 第二行：游戏窗口 | 就绪/未就绪
                             let game_window_ready = modules::screen_capture_thread::is_apex_window_ready();
                             ui.horizontal(|ui| {
                                 ui.add_sized(
@@ -2888,7 +2768,6 @@ impl eframe::App for MyApp {
                                     self.show_help_window = false;
                                     // 关闭时清空检测结果，下次打开时重新检测
                                     self.help_window_vigem_ready = None;
-                                    self.help_window_controller_ready = None;
                                 }
                             });
                         });

@@ -42,69 +42,6 @@ fn default_inner_ramp_mode_str() -> String {
     INNER_RAMP_LINEAR.to_string()
 }
 
-/// 手柄轴映射（SDL axis index -> 逻辑轴，None 表示未配置）
-#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
-pub struct ConMappingAxis {
-    pub lx: Option<u8>,
-    pub ly: Option<u8>,
-    pub rx: Option<u8>,
-    pub ry: Option<u8>,
-    pub lt: Option<u8>,
-    pub rt: Option<u8>,
-}
-
-impl Default for ConMappingAxis {
-    fn default() -> Self {
-        Self { lx: None, ly: None, rx: None, ry: None, lt: None, rt: None }
-    }
-}
-
-/// 手柄按键映射（SDL button index -> 逻辑键，None 表示未配置）
-#[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
-pub struct ConMappingButton {
-    pub lb: Option<u8>,
-    pub rb: Option<u8>,
-    pub ls: Option<u8>,
-    pub rs: Option<u8>,
-    pub back: Option<u8>,
-    pub start: Option<u8>,
-    pub x: Option<u8>,
-    pub y: Option<u8>,
-    pub a: Option<u8>,
-    pub b: Option<u8>,
-}
-
-impl Default for ConMappingButton {
-    fn default() -> Self {
-        Self {
-            lb: None, rb: None, ls: None, rs: None,
-            back: None, start: None, x: None, y: None, a: None, b: None,
-        }
-    }
-}
-
-/// 手柄键位映射（调试窗口内容，保存到配置；任意为空则不允许启动智慧核心）
-#[derive(serde::Deserialize, serde::Serialize, Clone, Debug, Default)]
-pub struct ConMapping {
-    #[serde(default)]
-    pub axis: ConMappingAxis,
-    #[serde(default)]
-    pub button: ConMappingButton,
-}
-
-impl ConMapping {
-    /// 是否全部已配置（无空值）才允许启动智慧核心
-    pub fn is_complete(&self) -> bool {
-        let a = &self.axis;
-        let b = &self.button;
-        a.lx.is_some() && a.ly.is_some() && a.rx.is_some() && a.ry.is_some()
-            && a.lt.is_some() && a.rt.is_some()
-            && b.lb.is_some() && b.rb.is_some() && b.ls.is_some() && b.rs.is_some()
-            && b.back.is_some() && b.start.is_some()
-            && b.x.is_some() && b.y.is_some() && b.a.is_some() && b.b.is_some()
-    }
-}
-
 /// 配置文件结构
 #[derive(serde::Deserialize, serde::Serialize, Clone, Debug)]
 pub struct ConfigFile {
@@ -113,8 +50,6 @@ pub struct ConfigFile {
     pub aa_activate_mode: String,
     pub use_controller: bool,
     pub vertical_strength_coefficient: f32,
-    #[serde(default)]
-    pub con_mapping: Option<ConMapping>,
     #[serde(default)]
     pub rapid_fire_mode: String,
     /// 许可证代码，首次为空字符串，用户填写后保存
@@ -241,21 +176,35 @@ pub mod console_redirect {
 }
 
 pub mod enum_device_tool {
-    pub fn enumerate_controllers() -> bool {
+    fn is_virtual_controller_name(name: &str) -> bool {
+        let lower = name.to_ascii_lowercase();
+        lower.contains("vigem")
+            || lower.contains("virtual")
+            || lower.contains("vgamepad")
+            || lower.contains("xbox 360 controller for windows")
+    }
+
+    /// 枚举可用于输入的物理手柄设备（返回 SDL 设备索引 与 显示名）
+    pub fn enumerate_controller_devices() -> Vec<(u32, String)> {
+        let mut devices = Vec::new();
         if let Ok(ctx) = sdl2::init() {
             if let Ok(joystick) = ctx.joystick() {
                 let count = joystick.num_joysticks().unwrap_or(0);
-                if count <= 1 {
-                    return false;
-                }
-                for index in 1..count {
-                    if joystick.name_for_index(index as u32).is_ok() {
-                        return true;
+                for index in 0..count {
+                    let index_u32 = index as u32;
+                    if let Ok(name) = joystick.name_for_index(index_u32) {
+                        if !is_virtual_controller_name(&name) {
+                            devices.push((index_u32, name));
+                        }
                     }
                 }
             }
         }
-        false
+        devices
+    }
+
+    pub fn enumerate_controllers() -> bool {
+        !enumerate_controller_devices().is_empty()
     }
 }
 

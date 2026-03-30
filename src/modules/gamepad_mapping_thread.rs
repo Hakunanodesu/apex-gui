@@ -16,6 +16,10 @@ use crate::shared_constants::rapid_fire_mode;
 use crate::shared_constants::trigger_timing::TRIGGER_TIMING_UNIT_MS;
 use crate::utils::console_redirect::log_error;
 
+// ConReader 已将 SDL GameController 触发器值标准化到 0..=255。
+// 这里使用阈值判断“半按/全按”，避免依赖必须等于 255 的精确值。
+const FULL_TRIGGER_THRESHOLD: u8 = 250;
+
 // 当右扳机按下时，基于检测结果对右摇杆进行修正。
 // 返回 true 表示本帧在识别区内施加了辅助；false 表示无目标（含检测列表无框、或相对 outer 已超出识别区，强度为 0）。
 fn apply_right_trigger_adjustment(
@@ -102,6 +106,7 @@ pub struct ConMapper {
 
 impl ConMapper {
     /// 启动映射线程，使用已创建的虚拟手柄（通过引用）
+    /// 输入 `state` 来自 ConReader 的 SDL GameController 统一语义状态（非配置文件轴/键号映射）。
     pub fn start(
         state: Arc<Mutex<XGamepad>>,
         virtual_gamepad: Arc<Mutex<Option<Xbox360Wired<Arc<Client>>>>>,
@@ -225,8 +230,8 @@ impl ConMapper {
                 if rf_mode > rapid_fire_mode::DISABLED && right_trigger_pressed && !is_release_weapon {
                     let should_rapid = match rf_mode {
                         rapid_fire_mode::ALWAYS => true, // 始终连点
-                        rapid_fire_mode::HALF_TRIGGER => orig_state.right_trigger < 255, // 半按连点，满值时按住
-                        rapid_fire_mode::FULL_TRIGGER => orig_state.right_trigger == 255, // 完全按下才连点，否则按住
+                        rapid_fire_mode::HALF_TRIGGER => orig_state.right_trigger < FULL_TRIGGER_THRESHOLD, // 半按连点，全按时按住
+                        rapid_fire_mode::FULL_TRIGGER => orig_state.right_trigger >= FULL_TRIGGER_THRESHOLD, // 完全按下才连点，否则按住
                         rapid_fire_mode::AUTO_BY_WEAPON => weapon_name_opt.as_ref().is_some_and(|n| {
                             rapid_fire_weapons.contains(n) && !is_release_weapon
                         }),

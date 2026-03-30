@@ -1,5 +1,4 @@
-use anyhow::Result;
-use ndarray::{Array4, ArrayView2, Axis, Ix2};
+use anyhow::{Result, anyhow};
 use ort::{
     execution_providers::DirectMLExecutionProvider,
     session::{builder::GraphOptimizationLevel, Session},
@@ -102,14 +101,19 @@ impl OnnxDetector {
         let config = load_detection_config(model_path);
         
         // 从文件加载模型
-        let session = Session::builder()?
-            .with_execution_providers([DirectMLExecutionProvider::default().build()])?
-            .with_optimization_level(GraphOptimizationLevel::Level3)?
-            .with_intra_threads(num_cpus::get_physical() as usize)?
-            .commit_from_file(model_path)?;
+        let session = Session::builder()
+            .map_err(|e| anyhow!("创建 ONNX SessionBuilder 失败: {e}"))?
+            .with_execution_providers([DirectMLExecutionProvider::default().build()])
+            .map_err(|e| anyhow!("设置 DirectML 执行提供器失败: {e}"))?
+            .with_optimization_level(GraphOptimizationLevel::Level3)
+            .map_err(|e| anyhow!("设置图优化等级失败: {e}"))?
+            .with_intra_threads(std::cmp::max(1, num_cpus::get_physical() as usize / 2))
+            .map_err(|e| anyhow!("设置推理线程数失败: {e}"))?
+            .commit_from_file(model_path)
+            .map_err(|e| anyhow!("加载 ONNX 模型失败: {e}"))?;
 
-        let input_name  = session.inputs[0].name.clone();
-        let output_name = session.outputs[0].name.clone();
+        let input_name  = session.inputs()[0].name().to_string();
+        let output_name = session.outputs()[0].name().to_string();
 
         Ok(Self {
             session,
@@ -195,12 +199,10 @@ impl OnnxDetector {
             }
         }
 
-        let array: Array4<f32> = Array4::from_shape_vec(
-            (1, 3, inference_size, inference_size),
+        let input_tensor: Tensor<f32> = Tensor::from_array((
+            [1usize, 3, inference_size, inference_size],
             data,
-        )?;
-
-        let input_tensor: Tensor<f32> = Tensor::from_array(array)?;
+        ))?;
         let preprocess_ms = preprocess_start.elapsed().as_secs_f32() * 1000.0;
 
         // 3. 创建 I/O binding —— 这里就需要 &mut self.session
@@ -219,15 +221,15 @@ impl OnnxDetector {
             .remove(&self.output_name)
             .expect("模型输出缺失");
         let tensor: Tensor<f32> = dv.downcast()?;
-        let array_d = tensor.extract_array();
-        let raw: ArrayView2<f32> = array_d.index_axis(Axis(0), 0).into_dimensionality::<Ix2>()?;
+        let (shape, raw_data) = tensor.extract_tensor();
+        let rows = shape[1] as usize;
+        let cols = shape[2] as usize;
 
         // 1. 先筛置信度
-        let mut cand: Vec<Detection> = raw
-            .rows()
-            .into_iter()
-            .filter_map(|row| {
-                let score = row[4];
+        let mut cand: Vec<Detection> = (0..rows)
+            .filter_map(|r| {
+                let base = r * cols;
+                let score = raw_data[base + 4];
                 if score < self.conf_thres {
                     return None;
                 }
@@ -235,17 +237,17 @@ impl OnnxDetector {
                 //     "[enemy_det raw xywh] x={:.2}, y={:.2}, w={:.2}, h={:.2}, score={:.3}",
                 //     row[0], row[1], row[2], row[3], score
                 // );
-                let cls = row[5] as usize;
+                let cls = raw_data[base + 5] as usize;
                 if !self.classes.is_empty() && !self.classes.contains(&cls) {
                     return None;
                 }
                 // 还原到原始尺寸
                 let scale = self.src_size as f32 / inference_size as f32;
                 Some(Detection {
-                    x: row[0] * scale,
-                    y: row[1] * scale,
-                    w: row[2] * scale,
-                    h: row[3] * scale,
+                    x: raw_data[base] * scale,
+                    y: raw_data[base + 1] * scale,
+                    w: raw_data[base + 2] * scale,
+                    h: raw_data[base + 3] * scale,
                     score,
                 })
             })
