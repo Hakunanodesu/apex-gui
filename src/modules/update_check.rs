@@ -88,9 +88,17 @@ fn parse_latest_release(json: &str) -> Option<GhRelease> {
     list.into_iter().next()
 }
 
+fn strip_leading_v(tag: &str) -> &str {
+    let s = tag.trim();
+    match s.as_bytes().first() {
+        Some(b'v' | b'V') => &s[1..],
+        _ => s,
+    }
+}
+
 /// 规范化 tag（去掉 "v" 前缀），便于显示
 fn normalize_version(tag: &str) -> String {
-    tag.trim().to_string()
+    strip_leading_v(tag).to_string()
 }
 
 /// 比较 remote 是否严格大于 current（按 semver 三段数字比较）
@@ -106,7 +114,7 @@ fn version_greater_than(remote_tag: &str, current: &str) -> bool {
 }
 
 fn parse_three_parts(s: &str) -> Option<(u32, u32, u32)> {
-    let s = s.trim();
+    let s = strip_leading_v(s);
     let parts: Vec<&str> = s.splitn(3, '.').collect();
     if parts.len() != 3 {
         return None;
@@ -125,13 +133,23 @@ mod tests {
     fn test_version_greater_than() {
         assert!(version_greater_than("0.2.0", "0.1.0"));
         assert!(version_greater_than("1.0.0", "0.9.9"));
+        assert!(version_greater_than("v0.2.0", "0.1.0"));
         assert!(!version_greater_than("0.1.0", "0.1.0"));
         assert!(!version_greater_than("0.1.0", "0.2.0"));
+        assert!(!version_greater_than("v0.1.0", "0.2.0"));
     }
 
     #[test]
     fn test_parse_three_parts() {
         assert_eq!(parse_three_parts("0.1.0"), Some((0, 1, 0)));
         assert_eq!(parse_three_parts("2.3.4"), Some((2, 3, 4)));
+        assert_eq!(parse_three_parts("v1.2.3"), Some((1, 2, 3)));
+        assert_eq!(parse_three_parts("V0.0.1"), Some((0, 0, 1)));
+    }
+
+    #[test]
+    fn test_normalize_version_strips_v() {
+        assert_eq!(normalize_version("v1.2.3"), "1.2.3");
+        assert_eq!(normalize_version("  V2.0.0  "), "2.0.0");
     }
 }
