@@ -140,7 +140,7 @@ impl ConMapper {
         let special_weapons_release_to_fire = special_weapons_release_to_fire;
 
         let handle = thread::spawn(move || {
-            // 等待读取线程就绪（当前为 XInput）
+            // 等待读取线程就绪（Xbox XInput / DualShock 4 / DualSense 统一映射到 XGamepad）
             while !ready_flag.load(Ordering::SeqCst) {
                 if stop_clone.load(Ordering::SeqCst) {
                     return; // 如果收到停止信号就退出

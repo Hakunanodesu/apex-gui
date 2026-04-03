@@ -28,6 +28,7 @@ fast_image_resize = "6"
 image = "0.25"
 imageproc = "0.26"
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_UI_Input_XboxController"] }
+hidapi = "2.6.5"
 
 [build-dependencies]
 winresource = "0.1"

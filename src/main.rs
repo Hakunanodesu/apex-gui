@@ -9,14 +9,22 @@ use std::path::Path;
 mod utils;
 mod modules;
 mod shared_constants;
-use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, normalize_inner_ramp_mode, normalize_input_device, ConfigFile, check_dir_exist};
+use utils::{find_json_files, find_onnx_files, read_current_config, get_screen_height, load_config_file, save_config_file, save_current_config, normalize_inner_ramp_mode, normalize_input_device, ConfigFile, dir_exists};
 use modules::update_check::{check_github_update, UpdateCheckResult, UpdateInfo};
+#[cfg(debug_assertions)]
+use modules::gamepad_reading_thread::ConReader;
+#[cfg(debug_assertions)]
+use modules::gamepad_mapping_thread::ConMapper;
 use shared_constants::RAPID_FIRE_WEAPON_STEMS;
 use shared_constants::auth::LICENSE_CODE;
 use shared_constants::defaults;
-use shared_constants::input_device::{PLAYSTATION as INPUT_DEVICE_PLAYSTATION, XBOX as INPUT_DEVICE_XBOX};
+use shared_constants::input_device::{
+    DUALSENSE as INPUT_DEVICE_DUALSENSE,
+    DUALSHOCK4 as INPUT_DEVICE_DUALSHOCK4,
+    XBOX as INPUT_DEVICE_XBOX,
+};
 use shared_constants::assist_curve::{INNER_RAMP_LINEAR, INNER_RAMP_MODE_ITEMS, INNER_RAMP_SQUARE};
-use shared_constants::paths::{CONFIGS_DIR, MODELS_DIR};
+use shared_constants::paths::{CONFIGS_DIR, MODELS_DIR, VIGEMBUS_INSTALL_DIR};
 use shared_constants::rapid_fire_mode;
 use shared_constants::ui::{
     AA_ACTIVATE_MODE_AIM_AND_FIRE, AA_ACTIVATE_MODE_ITEMS, CHARACTER_WIDTH, GREEN_RGB,
@@ -24,7 +32,7 @@ use shared_constants::ui::{
     RAPID_FIRE_MODE_AUTO, RAPID_FIRE_MODE_FULL_TRIGGER, RAPID_FIRE_MODE_HALF_TRIGGER,
     RAPID_FIRE_MODE_DISABLED, RAPID_FIRE_MODE_ITEMS, RED_RGB, ROW_HEIGHT, SPACING, YELLOW_RGB,
 };
-use utils::enum_device_tool::enumerate_controllers;
+use utils::controller_probe::has_physical_controller_for_input_device;
 use modules::mapping_state_machine::MappingManager;
 use shared_constants::weapon_rec::{TEMPLATE_H as CANNY_H, TEMPLATE_W as CANNY_W};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -189,7 +197,7 @@ struct MyApp {
     
     // 输入设备选择
     use_controller: bool, // 是否使用手柄
-    input_device_selected: String, // 当前输入设备（PlayStation / Xbox）
+    input_device_selected: String, // 当前输入设备（Xbox / DualShock 4 / DualSense）
     input_device_items: Vec<String>,
     rapid_fire_mode: Arc<AtomicU8>, // 连点模式（跨线程共享）：0=关闭, 1=始终连点, 2=半按扳机连点
     rapid_fire_mode_selected: String,
@@ -277,6 +285,12 @@ struct MyApp {
     // 第一段曲线预览采样缓存（x, y）
     curve_preview_points_cache: Vec<(f32, f32)>,
     curve_preview_cache_key: Option<(f32, f32, f32, String)>, // (outer_diameter, start_strength, inner_strength, inner_ramp)
+    #[cfg(debug_assertions)]
+    input_tab_debug_reader: Option<ConReader>,
+    #[cfg(debug_assertions)]
+    input_tab_debug_mapper: Option<ConMapper>,
+    #[cfg(debug_assertions)]
+    input_tab_debug_device: Option<String>,
 }
 
 impl Default for MyApp {
@@ -343,7 +357,11 @@ impl Default for MyApp {
             add_config_dialog: None,
             use_controller: false, // 默认不使用手柄
             input_device_selected: INPUT_DEVICE_XBOX.to_string(),
-            input_device_items: vec![INPUT_DEVICE_PLAYSTATION.to_string(), INPUT_DEVICE_XBOX.to_string()],
+            input_device_items: vec![
+                INPUT_DEVICE_XBOX.to_string(),
+                INPUT_DEVICE_DUALSHOCK4.to_string(),
+                INPUT_DEVICE_DUALSENSE.to_string(),
+            ],
             rapid_fire_mode,
             rapid_fire_mode_selected: defaults::RAPID_FIRE_MODE.to_string(),
             rapid_fire_mode_items: RAPID_FIRE_MODE_ITEMS.iter().map(|s| (*s).to_string()).collect(),
@@ -383,7 +401,7 @@ impl Default for MyApp {
             assist_inner_ramp,
             vertical_str,
             aim_height,
-            con_exist: enumerate_controllers(),
+            con_exist: has_physical_controller_for_input_device(INPUT_DEVICE_XBOX),
             show_inference_preview: false,
             inference_preview_window_created: false,
             preview_allowed: false,
@@ -394,6 +412,12 @@ impl Default for MyApp {
             update_is_latest: Arc::new(AtomicBool::new(false)),
             curve_preview_points_cache: Vec::new(),
             curve_preview_cache_key: None,
+            #[cfg(debug_assertions)]
+            input_tab_debug_reader: None,
+            #[cfg(debug_assertions)]
+            input_tab_debug_mapper: None,
+            #[cfg(debug_assertions)]
+            input_tab_debug_device: None,
         };
         
         // 根据当前模型加载最小外圈直径（来自模型 json 的 size）
@@ -424,6 +448,88 @@ impl Default for MyApp {
 impl MyApp {
     fn selected_input_device_text(&self) -> String {
         normalize_input_device(&self.input_device_selected)
+    }
+
+    #[cfg(debug_assertions)]
+    fn sync_input_tab_debug_reader(&mut self) {
+        let desired_device = if self.param_tab == ParamTab::InputDevice && !self.mapping_manager.is_active() {
+            Some(self.selected_input_device_text())
+        } else {
+            None
+        };
+
+        match desired_device {
+            Some(device) => {
+                let same_device = self
+                    .input_tab_debug_device
+                    .as_ref()
+                    .is_some_and(|d| d == &device);
+                if !same_device {
+                    if let Some(mapper) = self.input_tab_debug_mapper.take() {
+                        mapper.stop();
+                    }
+                    if let Some(reader) = self.input_tab_debug_reader.take() {
+                        reader.stop();
+                    }
+                    if self.virtual_gamepad.lock().ok().is_some_and(|g| g.is_none()) {
+                        if let Ok(client) = Client::connect() {
+                            let client = Arc::new(client);
+                            let mut target = Xbox360Wired::new(
+                                client.clone(),
+                                vigem_client::TargetId::XBOX360_WIRED,
+                            );
+                            if target.plugin().is_ok()
+                                && let Ok(mut vg) = self.virtual_gamepad.lock()
+                            {
+                                *vg = Some(target);
+                            }
+                        }
+                    }
+
+                    let reader = ConReader::start(device.clone());
+                    let state = reader.state();
+                    let ready = reader.ready();
+                    let rapid_fire_weapons: Vec<String> = RAPID_FIRE_WEAPON_STEMS
+                        .iter()
+                        .map(|s| (*s).to_string())
+                        .collect();
+                    let mapper = ConMapper::start(
+                        state,
+                        self.virtual_gamepad.clone(),
+                        ready,
+                        None,
+                        self.outer_diameter,
+                        self.inner_diameter,
+                        self.outer_strength,
+                        self.inner_strength,
+                        self.start_strength,
+                        self.vertical_strength_factor,
+                        self.aim_height_factor,
+                        self.hipfire_strength_factor,
+                        self.assist_ema_alpha_str.clone(),
+                        self.aim_enable.clone(),
+                        self.assist_inner_ramp.clone(),
+                        self.rapid_fire_mode.clone(),
+                        None,
+                        rapid_fire_weapons,
+                        self.special_weapons_aim_and_fire.clone(),
+                        self.special_weapons_release_to_fire.clone(),
+                    );
+                    self.input_tab_debug_reader = Some(reader);
+                    self.input_tab_debug_mapper = Some(mapper);
+                    self.input_tab_debug_device = Some(device);
+                }
+            }
+            None => {
+                if let Some(mapper) = self.input_tab_debug_mapper.take() {
+                    mapper.stop();
+                }
+                if let Some(reader) = self.input_tab_debug_reader.take() {
+                    reader.stop();
+                }
+                self.input_tab_debug_device = None;
+            }
+        }
     }
 
     fn ensure_curve_preview_points_cache(&mut self) {
@@ -652,7 +758,7 @@ impl MyApp {
             }
             
             // 检测 ViGemBus 是否就绪
-            let vigem_ready = check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver");
+            let vigem_ready = dir_exists(VIGEMBUS_INSTALL_DIR);
             
             // ViGemBus 未就绪，打开帮助面板并返回
             if !vigem_ready {
@@ -666,13 +772,13 @@ impl MyApp {
                 self.show_help_window = true;
                 return;
             }
-            // 选择 Xbox 手柄且未检测到物理设备时，同样弹出帮助界面
-            if self.use_controller && self.selected_input_device_text() == INPUT_DEVICE_XBOX {
-                if !enumerate_controllers() {
-                    self.help_window_vigem_ready = Some(vigem_ready);
-                    self.show_help_window = true;
-                    return;
-                }
+            // 选中的输入设备未检测到物理手柄时，同样弹出帮助界面
+            if self.use_controller
+                && !has_physical_controller_for_input_device(&self.selected_input_device_text())
+            {
+                self.help_window_vigem_ready = Some(vigem_ready);
+                self.show_help_window = true;
+                return;
             }
 
             // 同步参数到 MappingManager
@@ -749,6 +855,19 @@ impl MyApp {
 
 }
 
+#[cfg(debug_assertions)]
+impl Drop for MyApp {
+    fn drop(&mut self) {
+        if let Some(mapper) = self.input_tab_debug_mapper.take() {
+            mapper.stop();
+        }
+        if let Some(reader) = self.input_tab_debug_reader.take() {
+            reader.stop();
+        }
+        self.input_tab_debug_device = None;
+    }
+}
+
 impl eframe::App for MyApp {
     fn ui(&mut self, _ui: &mut egui::Ui, _frame: &mut eframe::Frame) {}
 
@@ -795,9 +914,7 @@ impl eframe::App for MyApp {
             self.mapping_manager.update(&mut con_exist_local, vg_clone);
         self.con_exist = con_exist_local;
         if show_help_for_window_error {
-            self.help_window_vigem_ready = Some(check_dir_exist(
-                "C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver",
-            ));
+            self.help_window_vigem_ready = Some(dir_exists(VIGEMBUS_INSTALL_DIR));
             self.show_help_window = true;
         }
         
@@ -1788,7 +1905,7 @@ impl eframe::App for MyApp {
                             egui::Vec2::new(CHARACTER_WIDTH * 1.6, ROW_HEIGHT),
                             egui::Button::new("?")
                         ).clicked() {
-                            self.help_window_vigem_ready = Some(check_dir_exist("C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver"));
+                            self.help_window_vigem_ready = Some(dir_exists(VIGEMBUS_INSTALL_DIR));
                             self.show_help_window = true;
                         }
                     });
@@ -2598,7 +2715,8 @@ impl eframe::App for MyApp {
             
             // 使用缓存的检测结果
             let vigem_ready = self.help_window_vigem_ready.unwrap_or(false);
-            let controller_ready = enumerate_controllers();
+            let controller_ready =
+                has_physical_controller_for_input_device(&self.selected_input_device_text());
             
             // 计算对话框大小和位置（居中显示）
             let dialog_width = CHARACTER_WIDTH * 12.8 + SPACING * 3.5;
@@ -2708,6 +2826,9 @@ impl eframe::App for MyApp {
                         });
                 });
         }
+
+        #[cfg(debug_assertions)]
+        self.sync_input_tab_debug_reader();
     }
 }
 

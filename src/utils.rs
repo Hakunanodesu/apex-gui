@@ -1,6 +1,10 @@
 use std::fs;
 use crate::shared_constants::assist_curve::{INNER_RAMP_LINEAR, INNER_RAMP_SQUARE};
-use crate::shared_constants::input_device::{PLAYSTATION as INPUT_DEVICE_PLAYSTATION, XBOX as INPUT_DEVICE_XBOX};
+use crate::shared_constants::input_device::{
+    DUALSENSE as INPUT_DEVICE_DUALSENSE,
+    DUALSHOCK4 as INPUT_DEVICE_DUALSHOCK4,
+    XBOX as INPUT_DEVICE_XBOX,
+};
 use crate::shared_constants::paths::{CONFIGS_DIR, CURRENT_CONFIG_FILE};
 
 fn default_input_device() -> String {
@@ -8,8 +12,13 @@ fn default_input_device() -> String {
 }
 
 pub fn normalize_input_device(s: &str) -> String {
-    if s.trim().eq_ignore_ascii_case(INPUT_DEVICE_PLAYSTATION) {
-        INPUT_DEVICE_PLAYSTATION.to_string()
+    let v = s.trim();
+    if v.eq_ignore_ascii_case(INPUT_DEVICE_DUALSHOCK4) {
+        INPUT_DEVICE_DUALSHOCK4.to_string()
+    } else if v.eq_ignore_ascii_case(INPUT_DEVICE_DUALSENSE) {
+        INPUT_DEVICE_DUALSENSE.to_string()
+    } else if v.eq_ignore_ascii_case(INPUT_DEVICE_XBOX) {
+        INPUT_DEVICE_XBOX.to_string()
     } else {
         INPUT_DEVICE_XBOX.to_string()
     }
@@ -180,7 +189,7 @@ pub fn get_screen_height() -> f32 {
 }
 
 /// 检测指定路径的文件夹是否存在
-pub fn check_dir_exist(path: &str) -> bool {
+pub fn dir_exists(path: &str) -> bool {
     std::path::Path::new(path).exists()
 }
 
@@ -190,7 +199,18 @@ pub mod console_redirect {
     }
 }
 
-pub mod enum_device_tool {
+pub mod controller_probe {
+    use hidapi::{DeviceInfo, HidApi};
+    use crate::shared_constants::hid::{
+        DUALSENSE_PIDS,
+        DUALSHOCK4_PIDS,
+        SONY_VID,
+    };
+    use crate::shared_constants::input_device::{
+        DUALSENSE as INPUT_DEVICE_DUALSENSE,
+        DUALSHOCK4 as INPUT_DEVICE_DUALSHOCK4,
+        XBOX as INPUT_DEVICE_XBOX,
+    };
     use crate::shared_constants::xinput::SLOT_COUNT as XINPUT_SLOT_COUNT;
 
     /// ViGEm 虚拟 Xbox 约定占用 **XInput 用户索引 0**；物理手柄从索引 1 起参与检测与读取。
@@ -212,9 +232,54 @@ pub mod enum_device_tool {
     }
 
     /// 是否存在物理 Xbox/XInput 设备（仅检查索引 1..4，不含 0 号虚拟槽位）。
-    pub fn enumerate_controllers() -> bool {
+    fn has_physical_xinput_controller() -> bool {
         (VIRTUAL_XINPUT_USER_INDEX + 1..XINPUT_SLOT_COUNT)
             .any(|slot| is_xinput_controller_connected(slot))
+    }
+
+    fn is_dualsense_hid_device(d: &DeviceInfo) -> bool {
+        if d.vendor_id() != SONY_VID {
+            return false;
+        }
+        if DUALSENSE_PIDS.contains(&d.product_id()) {
+            return true;
+        }
+        d.product_string()
+            .is_some_and(|s| s.to_ascii_lowercase().contains("dualsense"))
+    }
+
+    fn is_dualshock4_hid_device(d: &DeviceInfo) -> bool {
+        if d.vendor_id() != SONY_VID {
+            return false;
+        }
+        if DUALSHOCK4_PIDS.contains(&d.product_id()) {
+            return true;
+        }
+        d.product_string().is_some_and(|s| {
+            let s = s.to_ascii_lowercase();
+            s.contains("dualshock") || s.contains("wireless controller")
+        })
+    }
+
+    fn has_matching_sony_hid_controller(match_fn: impl Fn(&DeviceInfo) -> bool) -> bool {
+        HidApi::new()
+            .ok()
+            .is_some_and(|api| api.device_list().any(match_fn))
+    }
+
+    /// 根据输入设备类型检查对应物理手柄是否存在。
+    pub fn has_physical_controller_for_input_device(input_device: &str) -> bool {
+        let v = input_device.trim();
+        if v.eq_ignore_ascii_case(INPUT_DEVICE_XBOX) {
+            return has_physical_xinput_controller();
+        }
+        if v.eq_ignore_ascii_case(INPUT_DEVICE_DUALSENSE) {
+            return has_matching_sony_hid_controller(is_dualsense_hid_device);
+        }
+        if v.eq_ignore_ascii_case(INPUT_DEVICE_DUALSHOCK4) {
+            return has_matching_sony_hid_controller(is_dualshock4_hid_device);
+        }
+        false
     }
 }
 

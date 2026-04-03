@@ -31,6 +31,16 @@ pub mod capture {
     pub const WEAPON_ROI_INTERVAL_MS: u64 = 500;
 }
 
+/// 手柄 HID 识别相关常量
+pub mod hid {
+    /// Sony Vendor ID
+    pub const SONY_VID: u16 = 0x054C;
+    /// DualSense 常见 Product ID（有线/无线/Edge）
+    pub const DUALSENSE_PIDS: [u16; 3] = [0x0CE6, 0x0DF2, 0x0CE5];
+    /// DualShock 4 常见 Product ID（v1/v2）
+    pub const DUALSHOCK4_PIDS: [u16; 2] = [0x05C4, 0x09CC];
+}
+
 /// 手柄映射/扳机输出相关常量（毫秒）
 pub mod trigger_timing {
     /// 统一时序单位（毫秒）
@@ -41,8 +51,9 @@ pub mod trigger_timing {
 
 /// 输入设备相关常量
 pub mod input_device {
-    pub const PLAYSTATION: &str = "PlayStation";
     pub const XBOX: &str = "Xbox";
+    pub const DUALSHOCK4: &str = "DualShock 4 (Beta)";
+    pub const DUALSENSE: &str = "DualSense";
 }
 
 /// XInput 相关常量
@@ -163,6 +174,7 @@ pub mod paths {
     pub const CONFIGS_DIR: &str = "configs";
     pub const MODELS_DIR: &str = "models";
     pub const CURRENT_CONFIG_FILE: &str = "configs/.current";
+    pub const VIGEMBUS_INSTALL_DIR: &str = "C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver";
 }
 
 /// 构建脚本（build.rs）相关常量

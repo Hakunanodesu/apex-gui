@@ -13,9 +13,8 @@ use crate::modules::{
 };
 use crate::shared_constants::RAPID_FIRE_WEAPON_STEMS;
 use crate::shared_constants::{defaults, paths::MODELS_DIR, rapid_fire_mode};
-use crate::shared_constants::input_device::XBOX as INPUT_DEVICE_XBOX;
 use crate::utils::{
-    enum_device_tool::enumerate_controllers,
+    controller_probe::has_physical_controller_for_input_device,
     console_redirect::log_error,
 };
 
@@ -50,7 +49,7 @@ pub struct MappingManager {
     
     // 配置参数
     current_model: String,
-    input_device: String, // 当前输入设备类型（PlayStation / Xbox）
+    input_device: String, // 当前输入设备类型（Xbox / DualShock 4 / DualSense）
     aim_enable: Arc<AtomicBool>, // 瞄准辅助开关
     outer_size: Arc<Mutex<String>>,
     inner_size: Arc<Mutex<String>>,
@@ -96,7 +95,7 @@ impl MappingManager {
             con_reader: None,
             con_mapper: None,
             current_model,
-            input_device: INPUT_DEVICE_XBOX.to_string(),
+            input_device: crate::shared_constants::input_device::XBOX.to_string(),
             aim_enable,
             outer_size,
             inner_size,
@@ -118,25 +117,6 @@ impl MappingManager {
     
     pub fn is_active(&self) -> bool {
         !matches!(self.state, MappingState::Idle | MappingState::Error { .. })
-    }
-    
-    pub fn _is_running(&self) -> bool {
-        matches!(self.state, MappingState::Running)
-    }
-    
-    pub fn _get_state_description(&self) -> &'static str {
-        match &self.state {
-            MappingState::Idle => "空闲",
-            MappingState::CheckingDevice => "检查设备",
-            MappingState::StartingCapture => "启动屏幕捕获",
-            MappingState::StartingDetector => "启动检测器",
-            MappingState::StartingWeaponRec => "启动枪械识别",
-            MappingState::StartingReader => "启动读取器",
-            MappingState::StartingMapper => "启动映射器",
-            MappingState::Running => "运行中",
-            MappingState::Stopping => "停止中",
-            MappingState::Error { .. } => "错误",
-        }
     }
     
     // 请求启动映射
@@ -175,21 +155,13 @@ impl MappingManager {
             }
             
             MappingState::CheckingDevice => {
-                if self.input_device == INPUT_DEVICE_XBOX {
-                    *con_exist = enumerate_controllers();
-                    self.device_available = *con_exist;
-                    if self.device_available {
-                        self.state = MappingState::StartingCapture;
-                    } else {
-                        self.state = MappingState::Error {
-                            message: "未检测到Xbox手柄设备".to_string(),
-                            from_state: Box::new(MappingState::CheckingDevice),
-                            _should_retry: true,
-                        };
-                    }
+                *con_exist = has_physical_controller_for_input_device(&self.input_device);
+                self.device_available = *con_exist;
+                if self.device_available {
+                    self.state = MappingState::StartingCapture;
                 } else {
                     self.state = MappingState::Error {
-                        message: "PlayStation 输入暂未实现".to_string(),
+                        message: format!("未检测到{}设备", self.input_device),
                         from_state: Box::new(MappingState::CheckingDevice),
                         _should_retry: true,
                     };
@@ -509,7 +481,7 @@ impl MappingManager {
         if let Some(reader) = self.con_reader.take() {
             reader.stop();
         }
-        *con_exist = enumerate_controllers();
+        *con_exist = has_physical_controller_for_input_device(&self.input_device);
 
         if let Some(wr) = self.weapon_rec.take() {
             wr.stop();
