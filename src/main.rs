@@ -399,7 +399,7 @@ impl Default for MyApp {
         // 根据当前模型加载最小外圈直径（来自模型 json 的 size）
         app.update_min_outer_from_model();
 
-        // 软件打开时创建 vigembus 虚拟手柄
+        // 软件打开时创建 vigembus 虚拟手柄（约定占用 XInput 用户索引 0）
         if let Ok(client) = Client::connect() {
             let client = Arc::new(client);
             let mut target = Xbox360Wired::new(client.clone(), vigem_client::TargetId::XBOX360_WIRED);
@@ -666,7 +666,15 @@ impl MyApp {
                 self.show_help_window = true;
                 return;
             }
-            
+            // 选择 Xbox 手柄且未检测到物理设备时，同样弹出帮助界面
+            if self.use_controller && self.selected_input_device_text() == INPUT_DEVICE_XBOX {
+                if !enumerate_controllers() {
+                    self.help_window_vigem_ready = Some(vigem_ready);
+                    self.show_help_window = true;
+                    return;
+                }
+            }
+
             // 同步参数到 MappingManager
             self.sync_params_to_manager();
             
@@ -787,6 +795,9 @@ impl eframe::App for MyApp {
             self.mapping_manager.update(&mut con_exist_local, vg_clone);
         self.con_exist = con_exist_local;
         if show_help_for_window_error {
+            self.help_window_vigem_ready = Some(check_dir_exist(
+                "C:/Program Files/Nefarius Software Solutions/ViGEm Bus Driver",
+            ));
             self.show_help_window = true;
         }
         

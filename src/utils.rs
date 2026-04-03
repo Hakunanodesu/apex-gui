@@ -193,6 +193,9 @@ pub mod console_redirect {
 pub mod enum_device_tool {
     use crate::shared_constants::xinput::SLOT_COUNT as XINPUT_SLOT_COUNT;
 
+    /// ViGEm 虚拟 Xbox 约定占用 **XInput 用户索引 0**；物理手柄从索引 1 起参与检测与读取。
+    pub const VIRTUAL_XINPUT_USER_INDEX: u32 = 0;
+
     fn is_xinput_controller_connected(user_index: u32) -> bool {
         use windows_sys::Win32::Foundation::ERROR_SUCCESS;
         use windows_sys::Win32::UI::Input::XboxController::{XINPUT_STATE, XInputGetState};
@@ -201,9 +204,17 @@ pub mod enum_device_tool {
         unsafe { XInputGetState(user_index, &mut state) == ERROR_SUCCESS }
     }
 
-    /// 仅检测 Xbox/XInput 设备是否存在（0~3 号槽位）
+    /// 第一个已连接的**物理**手柄槽位（跳过索引 0 的虚拟 ViGEm）。
+    pub fn first_physical_xinput_slot() -> Option<u32> {
+        (VIRTUAL_XINPUT_USER_INDEX + 1..XINPUT_SLOT_COUNT).find(|&slot| {
+            is_xinput_controller_connected(slot)
+        })
+    }
+
+    /// 是否存在物理 Xbox/XInput 设备（仅检查索引 1..4，不含 0 号虚拟槽位）。
     pub fn enumerate_controllers() -> bool {
-        (0..XINPUT_SLOT_COUNT).any(is_xinput_controller_connected)
+        (VIRTUAL_XINPUT_USER_INDEX + 1..XINPUT_SLOT_COUNT)
+            .any(|slot| is_xinput_controller_connected(slot))
     }
 }
 

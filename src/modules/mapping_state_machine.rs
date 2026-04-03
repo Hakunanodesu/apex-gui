@@ -296,7 +296,10 @@ impl MappingManager {
             
             MappingState::Error { message, from_state, _should_retry } => {
                 log_error(&format!("映射错误: {}", message));
-                if matches!(from_state.as_ref(), MappingState::StartingCapture) {
+                if matches!(
+                    from_state.as_ref(),
+                    MappingState::StartingCapture | MappingState::CheckingDevice
+                ) {
                     show_help_for_window_error = true;
                 }
                 // 根据错误来源决定清理策略

@@ -18,8 +18,8 @@ use windows_sys::Win32::UI::Input::XboxController::{
 
 use crate::shared_constants::error_limits::GAMEPAD_READING_MAX_CONSECUTIVE_ERRORS;
 use crate::shared_constants::input_device::XBOX as INPUT_DEVICE_XBOX;
-use crate::shared_constants::xinput::SLOT_COUNT as XINPUT_SLOT_COUNT;
 use crate::utils::console_redirect::log_error;
+use crate::utils::enum_device_tool::first_physical_xinput_slot;
 
 fn xinput_pressed(buttons: u16, mask: u16) -> bool {
     buttons & mask != 0
@@ -57,16 +57,6 @@ fn poll_xinput_to_gamepad(xg: &XINPUT_GAMEPAD) -> XGamepad {
     mapped_state
 }
 
-fn first_connected_xinput_slot() -> Option<u32> {
-    for slot in 0..XINPUT_SLOT_COUNT {
-        let mut state: XINPUT_STATE = unsafe { std::mem::zeroed() };
-        if unsafe { XInputGetState(slot, &mut state) } == ERROR_SUCCESS {
-            return Some(slot);
-        }
-    }
-    None
-}
-
 pub struct ConReader {
     stop_flag: Arc<AtomicBool>,
     state: Arc<Mutex<XGamepad>>,
@@ -93,7 +83,7 @@ impl ConReader {
                 return;
             }
 
-            let mut active_slot = match first_connected_xinput_slot() {
+            let mut active_slot = match first_physical_xinput_slot() {
                 Some(slot) => slot,
                 None => {
                     log_error("手柄读取 - XInputGetState 失败，未检测到 Xbox 手柄");
@@ -115,7 +105,7 @@ impl ConReader {
                 let mut xstate: XINPUT_STATE = unsafe { std::mem::zeroed() };
                 let mut result = unsafe { XInputGetState(active_slot, &mut xstate) };
                 if result != ERROR_SUCCESS {
-                    if let Some(new_slot) = first_connected_xinput_slot() {
+                    if let Some(new_slot) = first_physical_xinput_slot() {
                         active_slot = new_slot;
                         xstate = unsafe { std::mem::zeroed() };
                         result = unsafe { XInputGetState(active_slot, &mut xstate) };
