@@ -408,6 +408,7 @@ impl MappingManager {
             
             let state = reader.state();
             let ready = reader.ready();
+            let last_state_write_ns = reader.last_state_write_ns();
             let weapon_rec_result = self.weapon_rec.as_ref().map(|w| w.result());
             let rapid_fire_weapons: Vec<String> = RAPID_FIRE_WEAPON_STEMS
                 .iter()
@@ -417,7 +418,7 @@ impl MappingManager {
             let special_release = self.special_weapons_release_to_fire.clone();
             
             self.con_mapper = Some(ConMapper::start(
-                state, virtual_gamepad_ref, ready, Some(det.result()),
+                state, virtual_gamepad_ref, ready, last_state_write_ns, Some(det.result()),
                 params.0, params.1, params.2, params.3, params.4,
                 params.5, params.6, params.7, self.assist_ema_alpha.clone(),
                 self.aim_enable.clone(), self.assist_inner_ramp.clone(),

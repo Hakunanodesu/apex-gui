@@ -489,6 +489,7 @@ impl MyApp {
                     let reader = ConReader::start(device.clone());
                     let state = reader.state();
                     let ready = reader.ready();
+                    let last_state_write_ns = reader.last_state_write_ns();
                     let rapid_fire_weapons: Vec<String> = RAPID_FIRE_WEAPON_STEMS
                         .iter()
                         .map(|s| (*s).to_string())
@@ -497,6 +498,7 @@ impl MyApp {
                         state,
                         self.virtual_gamepad.clone(),
                         ready,
+                        last_state_write_ns,
                         None,
                         self.outer_diameter,
                         self.inner_diameter,

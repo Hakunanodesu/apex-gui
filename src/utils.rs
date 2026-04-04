@@ -283,3 +283,40 @@ pub mod controller_probe {
     }
 }
 
+pub mod monotonic_clock {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+
+    static START: OnceLock<Instant> = OnceLock::new();
+
+    /// 以进程启动后为基准的单调时钟（纳秒）。
+    pub fn now_ns() -> u64 {
+        START
+            .get_or_init(Instant::now)
+            .elapsed()
+            .as_nanos()
+            .min(u64::MAX as u128) as u64
+    }
+}
+
+#[cfg(debug_assertions)]
+pub mod debug_perf_panel {
+    use std::sync::{Mutex, OnceLock};
+
+    static MAPPER_LINE: OnceLock<Mutex<String>> = OnceLock::new();
+
+    pub fn set_mapper_perf_line(line: String) {
+        if let Ok(mut lock) = MAPPER_LINE.get_or_init(|| Mutex::new(String::new())).lock() {
+            *lock = line;
+        }
+    }
+
+    pub fn mapper_perf_line() -> String {
+        MAPPER_LINE
+            .get_or_init(|| Mutex::new(String::new()))
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_default()
+    }
+}
+

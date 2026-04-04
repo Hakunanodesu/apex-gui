@@ -1,12 +1,10 @@
 use std::sync::{
     Arc,
     Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-#[cfg(debug_assertions)]
-use std::collections::VecDeque;
 #[cfg(debug_assertions)]
 use std::io::{self, Write};
 use hidapi::{DeviceInfo, HidApi, HidDevice};
@@ -33,9 +31,11 @@ use crate::shared_constants::input_device::{
 };
 use crate::utils::console_redirect::log_error;
 use crate::utils::controller_probe::first_physical_xinput_slot;
+#[cfg(debug_assertions)]
+use crate::utils::debug_perf_panel::mapper_perf_line;
+use crate::utils::monotonic_clock::now_ns;
 
 const HID_READ_BUF_SIZE: usize = 128;
-const HID_READ_TIMEOUT_MS: i32 = 50;
 const DEVICE_RESCAN_INTERVAL_MS: u64 = 1000;
 
 #[derive(Clone, Copy)]
@@ -90,7 +90,11 @@ fn profile_matches_device(profile: PadProfile, d: &DeviceInfo) -> bool {
 fn open_sony_device(api: &HidApi, profile: PadProfile) -> Option<HidDevice> {
     api.device_list()
         .filter(|d| profile_matches_device(profile, d))
-        .find_map(|d| d.open_device(api).ok())
+        .find_map(|d| {
+            let dev = d.open_device(api).ok()?;
+            dev.set_blocking_mode(false).ok()?;
+            Some(dev)
+        })
 }
 
 fn stick_u8_to_i16(v: u8) -> i16 {
@@ -317,8 +321,6 @@ fn parse_sony_report_to_xgamepad(profile: PadProfile, report: &[u8]) -> Option<X
 
 #[cfg(debug_assertions)]
 const DEBUG_RENDER_INTERVAL_MS: u64 = 80;
-#[cfg(debug_assertions)]
-const POLL_INTERVAL_SAMPLES: usize = 32;
 
 #[cfg(debug_assertions)]
 fn dpad_text(v: u8) -> &'static str {
@@ -346,66 +348,50 @@ fn render_debug_panel(title: &str, lines: &[String], last_render: &mut Instant) 
     for line in lines {
         println!("{line}");
     }
+    let mapper_line = mapper_perf_line();
+    if !mapper_line.is_empty() {
+        println!("{mapper_line}");
+    }
     let _ = io::stdout().flush();
     *last_render = Instant::now();
 }
 
 #[cfg(debug_assertions)]
 struct PollRateTracker {
-    last_report_at: Option<Instant>,
-    last_interval_s: Option<f64>,
-    interval_ring: VecDeque<f64>,
+    window_start: Instant,
+    reports_in_window: u64,
+    last_reports_per_sec: u64,
 }
 
 #[cfg(debug_assertions)]
 impl PollRateTracker {
     fn new() -> Self {
         Self {
-            last_report_at: None,
-            last_interval_s: None,
-            interval_ring: VecDeque::with_capacity(POLL_INTERVAL_SAMPLES),
+            window_start: Instant::now(),
+            reports_in_window: 0,
+            last_reports_per_sec: 0,
+        }
+    }
+
+    fn roll_window_if_needed(&mut self, now: Instant) {
+        if now.duration_since(self.window_start) >= Duration::from_secs(1) {
+            self.last_reports_per_sec = self.reports_in_window;
+            self.reports_in_window = 0;
+            self.window_start = now;
         }
     }
 
     fn on_report(&mut self, now: Instant) {
-        if let Some(prev) = self.last_report_at {
-            let dt = now.duration_since(prev).as_secs_f64();
-            if dt > 0.0 && dt.is_finite() {
-                self.last_interval_s = Some(dt);
-                self.interval_ring.push_back(dt);
-                if self.interval_ring.len() > POLL_INTERVAL_SAMPLES {
-                    self.interval_ring.pop_front();
-                }
-            }
-        }
-        self.last_report_at = Some(now);
+        self.roll_window_if_needed(now);
+        self.reports_in_window = self.reports_in_window.saturating_add(1);
+    }
+
+    fn on_loop(&mut self, now: Instant) {
+        self.roll_window_if_needed(now);
     }
 
     fn line(&self) -> String {
-        let inst_hz = self.last_interval_s.filter(|dt| *dt > 0.0).map(|dt| 1.0 / dt);
-        let avg_hz = (!self.interval_ring.is_empty())
-            .then(|| {
-                let sum: f64 = self.interval_ring.iter().sum();
-                let mean = sum / self.interval_ring.len() as f64;
-                if mean > 0.0 { Some(1.0 / mean) } else { None }
-            })
-            .flatten();
-
-        match (inst_hz, avg_hz) {
-            (Some(i), Some(a)) => format!(
-                "Poll: Inst {:.1} Hz | Avg {:.1} Hz ({} samples)",
-                i,
-                a,
-                self.interval_ring.len()
-            ),
-            (Some(i), None) => format!("Poll: Inst {:.1} Hz | Avg --", i),
-            (None, Some(a)) => format!(
-                "Poll: Inst -- | Avg {:.1} Hz ({} samples)",
-                a,
-                self.interval_ring.len()
-            ),
-            (None, None) => "Poll: -- (no reports yet)".to_string(),
-        }
+        format!("New reports/s: {}", self.last_reports_per_sec)
     }
 }
 
@@ -614,6 +600,7 @@ pub struct ConReader {
     stop_flag: Arc<AtomicBool>,
     state: Arc<Mutex<XGamepad>>,
     ready_flag: Arc<AtomicBool>,
+    last_state_write_ns: Arc<AtomicU64>,
     handle: JoinHandle<()>,
     error_flag: Arc<AtomicBool>,
 }
@@ -624,10 +611,12 @@ impl ConReader {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let state = Arc::new(Mutex::new(XGamepad::default()));
         let ready_flag = Arc::new(AtomicBool::new(false));
+        let last_state_write_ns = Arc::new(AtomicU64::new(0));
         let error_flag = Arc::new(AtomicBool::new(false));
         let stop_clone = stop_flag.clone();
         let state_clone = state.clone();
         let ready_clone = ready_flag.clone();
+        let last_state_write_ns_clone = last_state_write_ns.clone();
         let error_flag_clone = error_flag.clone();
         let handle = thread::spawn(move || {
             if input_device.trim().eq_ignore_ascii_case(INPUT_DEVICE_XBOX) {
@@ -649,6 +638,9 @@ impl ConReader {
                 let mut poll_tracker = PollRateTracker::new();
 
                 while !stop_clone.load(Ordering::SeqCst) {
+                    #[cfg(debug_assertions)]
+                    poll_tracker.on_loop(Instant::now());
+
                     if active_slot.is_none()
                         && last_rescan.elapsed() >= Duration::from_millis(DEVICE_RESCAN_INTERVAL_MS)
                     {
@@ -696,6 +688,7 @@ impl ConReader {
                     match state_clone.lock() {
                         Ok(mut lock) => {
                             *lock = polled_state;
+                            last_state_write_ns_clone.store(now_ns(), Ordering::Release);
                             consecutive_errors = 0;
                         }
                         Err(e) => {
@@ -742,6 +735,7 @@ impl ConReader {
             }
             let mut consecutive_errors = 0;
             let mut buf = [0u8; HID_READ_BUF_SIZE];
+            let mut last_valid_state = XGamepad::default();
             let mut last_rescan = Instant::now()
                 .checked_sub(Duration::from_millis(DEVICE_RESCAN_INTERVAL_MS))
                 .unwrap_or_else(Instant::now);
@@ -756,7 +750,10 @@ impl ConReader {
             let mut poll_tracker = PollRateTracker::new();
 
             while !stop_clone.load(Ordering::SeqCst) {
-                let mut polled_state = XGamepad::default();
+                #[cfg(debug_assertions)]
+                poll_tracker.on_loop(Instant::now());
+
+                let mut polled_state = last_valid_state;
 
                 if dev.is_none()
                     && last_rescan.elapsed() >= Duration::from_millis(DEVICE_RESCAN_INTERVAL_MS)
@@ -770,37 +767,46 @@ impl ConReader {
                 }
 
                 if let Some(ref mut hid_dev) = dev {
-                    match hid_dev.read_timeout(&mut buf, HID_READ_TIMEOUT_MS) {
-                        Ok(n) => {
-                            if n > 0
-                                && let Some(parsed) =
+                    // 非阻塞模式下，每轮尽量读空队列，只保留最后一帧，避免消费到旧 report 造成输入滞后。
+                    let mut should_drop_dev = false;
+                    loop {
+                        match hid_dev.read(&mut buf) {
+                            Ok(0) => break, // 无更多数据
+                            Ok(n) => {
+                                if let Some(parsed) =
                                     parse_sony_report_to_xgamepad(profile, &buf[..n])
-                            {
-                                polled_state = parsed;
-                                #[cfg(debug_assertions)]
                                 {
-                                    poll_tracker.on_report(Instant::now());
-                                    latest_debug_lines = with_poll_line(
-                                        sony_debug_lines(profile, &buf[..n]),
-                                        &poll_tracker,
-                                    );
+                                    polled_state = parsed;
+                                    last_valid_state = parsed;
+                                    #[cfg(debug_assertions)]
+                                    {
+                                        poll_tracker.on_report(Instant::now());
+                                        latest_debug_lines = with_poll_line(
+                                            sony_debug_lines(profile, &buf[..n]),
+                                            &poll_tracker,
+                                        );
+                                    }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            log_error(&format!("手柄读取 - HID 读取失败: {}", e));
-                            dev = None;
-                            last_rescan = Instant::now();
-                            #[cfg(debug_assertions)]
-                            {
-                                latest_debug_lines = with_poll_line(
-                                    vec![format!(
-                                        "{} 读取失败，等待重连（每1秒重扫）",
-                                        profile.name()
-                                    )],
-                                    &poll_tracker,
-                                );
+                            Err(e) => {
+                                log_error(&format!("手柄读取 - HID 读取失败: {}", e));
+                                should_drop_dev = true;
+                                break;
                             }
+                        }
+                    }
+                    if should_drop_dev {
+                        dev = None;
+                        last_rescan = Instant::now();
+                        #[cfg(debug_assertions)]
+                        {
+                            latest_debug_lines = with_poll_line(
+                                vec![format!(
+                                    "{} 读取失败，等待重连（每1秒重扫）",
+                                    profile.name()
+                                )],
+                                &poll_tracker,
+                            );
                         }
                     }
                 } else {
@@ -819,6 +825,7 @@ impl ConReader {
                 match state_clone.lock() {
                     Ok(mut lock) => {
                         *lock = polled_state;
+                        last_state_write_ns_clone.store(now_ns(), Ordering::Release);
                         consecutive_errors = 0;
                     }
                     Err(e) => {
@@ -845,7 +852,14 @@ impl ConReader {
             }
         });
 
-        ConReader { stop_flag, state, ready_flag, handle, error_flag }
+        ConReader {
+            stop_flag,
+            state,
+            ready_flag,
+            last_state_write_ns,
+            handle,
+            error_flag,
+        }
     }
 
     /// 停止线程并等待 join 完成
@@ -863,6 +877,11 @@ impl ConReader {
     /// 获取 ready_flag，用于映射线程等待
     pub fn ready(&self) -> Arc<AtomicBool> {
         self.ready_flag.clone()
+    }
+
+    /// 最近一次将读取结果写入共享状态的单调时钟（ns）
+    pub fn last_state_write_ns(&self) -> Arc<AtomicU64> {
+        self.last_state_write_ns.clone()
     }
 
     /// 获取错误标志

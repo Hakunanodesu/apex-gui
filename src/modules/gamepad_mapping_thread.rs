@@ -1,12 +1,12 @@
-use std::{
-    sync::{
-        Arc,
-        Mutex,
-        atomic::{AtomicBool, AtomicU8, Ordering},
-    },
-    thread::{self, JoinHandle},
-    time::{Duration, Instant},
+use std::sync::{
+    Arc,
+    Mutex,
+    atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
 };
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+#[cfg(debug_assertions)]
+use std::collections::VecDeque;
 use vigem_client::{Client, Xbox360Wired, XGamepad};
 use crate::modules::enemy_det_thread::Detection;
 use crate::shared_constants::aim_assist::ASSIST_OUTPUT_EMA_ALPHA;
@@ -15,6 +15,94 @@ use crate::shared_constants::error_limits::GAMEPAD_MAPPING_MAX_CONSECUTIVE_ERROR
 use crate::shared_constants::rapid_fire_mode;
 use crate::shared_constants::trigger_timing::TRIGGER_TIMING_UNIT_MS;
 use crate::utils::console_redirect::log_error;
+#[cfg(debug_assertions)]
+use crate::utils::debug_perf_panel::set_mapper_perf_line;
+#[cfg(debug_assertions)]
+use crate::utils::monotonic_clock::now_ns;
+
+#[cfg(debug_assertions)]
+const PERF_SAMPLE_WINDOW: usize = 256;
+#[cfg(debug_assertions)]
+const PERF_PRINT_INTERVAL: Duration = Duration::from_secs(1);
+
+#[cfg(debug_assertions)]
+fn push_sample(samples: &mut VecDeque<u64>, value: u64) {
+    samples.push_back(value);
+    if samples.len() > PERF_SAMPLE_WINDOW {
+        samples.pop_front();
+    }
+}
+
+#[cfg(debug_assertions)]
+fn percentile_us(samples: &VecDeque<u64>, pct: u32) -> Option<u64> {
+    if samples.is_empty() {
+        return None;
+    }
+    let mut v: Vec<u64> = samples.iter().copied().collect();
+    v.sort_unstable();
+    let idx = ((v.len() - 1) as u128 * pct as u128 / 100) as usize;
+    v.get(idx).copied()
+}
+
+#[cfg(debug_assertions)]
+fn us_to_ms(v: Option<u64>) -> String {
+    v.map(|us| format!("{:.3}", us as f64 / 1000.0))
+        .unwrap_or_else(|| "--".to_string())
+}
+
+#[cfg(debug_assertions)]
+struct MapperPerfTracker {
+    loops_since_print: u64,
+    last_print_at: Instant,
+    reader_age_us: VecDeque<u64>,
+    vg_update_us: VecDeque<u64>,
+}
+
+#[cfg(debug_assertions)]
+impl MapperPerfTracker {
+    fn new() -> Self {
+        Self {
+            loops_since_print: 0,
+            last_print_at: Instant::now(),
+            reader_age_us: VecDeque::with_capacity(PERF_SAMPLE_WINDOW),
+            vg_update_us: VecDeque::with_capacity(PERF_SAMPLE_WINDOW),
+        }
+    }
+
+    fn on_loop(&mut self, reader_age_us: Option<u64>, vg_update_us: Option<u64>) {
+        self.loops_since_print += 1;
+        if let Some(v) = reader_age_us {
+            push_sample(&mut self.reader_age_us, v);
+        }
+        if let Some(v) = vg_update_us {
+            push_sample(&mut self.vg_update_us, v);
+        }
+    }
+
+    fn maybe_publish(&mut self) {
+        let elapsed = self.last_print_at.elapsed();
+        if elapsed < PERF_PRINT_INTERVAL {
+            return;
+        }
+        let hz = self.loops_since_print as f64 / elapsed.as_secs_f64().max(1e-6);
+        let age_p50 = us_to_ms(percentile_us(&self.reader_age_us, 50));
+        let age_p95 = us_to_ms(percentile_us(&self.reader_age_us, 95));
+        let age_max = us_to_ms(self.reader_age_us.iter().max().copied());
+        let vg_p50 = us_to_ms(percentile_us(&self.vg_update_us, 50));
+        let vg_p95 = us_to_ms(percentile_us(&self.vg_update_us, 95));
+        let vg_max = us_to_ms(self.vg_update_us.iter().max().copied());
+
+        set_mapper_perf_line(format!(
+            "MapperPerf: loop_hz={:.1} reader_age_ms(p50/p95/max)={}/{}/{} vg_update_ms(p50/p95/max)={}/{}/{}",
+            hz, age_p50, age_p95, age_max, vg_p50, vg_p95, vg_max
+        ));
+
+        self.loops_since_print = 0;
+        self.last_print_at = Instant::now();
+        self.reader_age_us.clear();
+        self.vg_update_us.clear();
+    }
+}
 
 // 当右扳机按下时，基于检测结果对右摇杆进行修正。
 // 返回 true 表示本帧在识别区内施加了辅助；false 表示无目标（含检测列表无框、或相对 outer 已超出识别区，强度为 0）。
@@ -106,6 +194,7 @@ impl ConMapper {
         state: Arc<Mutex<XGamepad>>,
         virtual_gamepad: Arc<Mutex<Option<Xbox360Wired<Arc<Client>>>>>,
         ready_flag: Arc<AtomicBool>,
+        last_state_write_ns: Arc<AtomicU64>,
         det_result: Option<Arc<Mutex<Option<Vec<Detection>>>>>,
         outer_size: f32,
         inner_size: f32,
@@ -140,6 +229,9 @@ impl ConMapper {
         let special_weapons_release_to_fire = special_weapons_release_to_fire;
 
         let handle = thread::spawn(move || {
+            #[cfg(not(debug_assertions))]
+            let _ = &last_state_write_ns;
+
             // 等待读取线程就绪（Xbox XInput / DualShock 4 / DualSense 统一映射到 XGamepad）
             while !ready_flag.load(Ordering::SeqCst) {
                 if stop_clone.load(Ordering::SeqCst) {
@@ -161,8 +253,17 @@ impl ConMapper {
             let release_pulse_duration = Duration::from_millis(TRIGGER_TIMING_UNIT_MS);
             let mut release_pulse_until: Option<Instant> = None;
             let mut assist_ema_xy: [f32; 2] = [0.0; 2];
+            #[cfg(debug_assertions)]
+            let mut perf_tracker = MapperPerfTracker::new();
 
             while !stop_clone.load(Ordering::SeqCst) {
+                #[cfg(debug_assertions)]
+                let now_ns_before_lock = now_ns();
+                #[cfg(debug_assertions)]
+                let reader_write_ns = last_state_write_ns.load(Ordering::Acquire);
+                #[cfg(debug_assertions)]
+                let reader_age_us = (reader_write_ns > 0 && now_ns_before_lock >= reader_write_ns)
+                    .then_some((now_ns_before_lock - reader_write_ns) / 1_000);
                 let orig_state = match state_clone.lock() {
                     Ok(guard) => guard.clone(),
                     Err(e) => {
@@ -313,7 +414,11 @@ impl ConMapper {
                 }
 
                 // 更新虚拟手柄状态
+                #[cfg(debug_assertions)]
+                let mut vg_update_us_sample = None;
                 if let Some(ref mut vg) = *vg_clone.lock().unwrap() {
+                    #[cfg(debug_assertions)]
+                    let vg_t0 = Instant::now();
                     if let Err(e) = vg.update(&mapped_state) {
                         log_error(&format!("手柄映射 - ViGEm更新状态失败: {:?}", e));
                         consecutive_errors += 1;
@@ -324,6 +429,16 @@ impl ConMapper {
                     } else {
                         consecutive_errors = 0; // 重置错误计数
                     }
+                    #[cfg(debug_assertions)]
+                    {
+                        vg_update_us_sample = Some(vg_t0.elapsed().as_micros().min(u64::MAX as u128) as u64);
+                    }
+                }
+
+                #[cfg(debug_assertions)]
+                {
+                    perf_tracker.on_loop(reader_age_us, vg_update_us_sample);
+                    perf_tracker.maybe_publish();
                 }
                 
                 thread::sleep(Duration::from_millis(1));
