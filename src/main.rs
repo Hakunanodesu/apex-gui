@@ -603,13 +603,8 @@ impl MyApp {
             if let Ok(model_cfg) = serde_json::from_str::<ModelJson>(&content) {
                 if let Some(size) = model_cfg.size {
                     self.min_outer_diameter = size.max(0.0);
-                    // 确保当前外圈及内外圈不小于该最小值
-                    if self.outer_diameter < self.min_outer_diameter {
-                        self.outer_diameter = self.min_outer_diameter;
-                    }
-                    if self.inner_diameter < self.min_outer_diameter {
-                        self.inner_diameter = self.min_outer_diameter;
-                    }
+                    // 仅更新约束下限，不在切换模型时直接改写当前配置值。
+                    // 否则会让“切换模型”间接污染配置文件（在后续保存时落盘）。
                     return;
                 }
             }

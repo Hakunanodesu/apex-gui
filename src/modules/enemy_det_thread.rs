@@ -1,8 +1,8 @@
 use anyhow::{Result, anyhow};
 use ort::{
     execution_providers::{CPUExecutionProvider, DirectMLExecutionProvider, ExecutionProvider},
-    session::{builder::GraphOptimizationLevel, Session},
-    value::Tensor,
+    session::{builder::GraphOptimizationLevel, IoBinding, Session},
+    value::{Tensor, TensorElementType, TensorRef},
 };
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, AtomicU64, Ordering}};
 use std::thread::{self, JoinHandle};
@@ -123,6 +123,7 @@ pub struct Detection {
 /// 封装 ONNX 推理的结构体，仅供DetectorThread内部使用
 struct OnnxDetector {
     session: Session,
+    binding: IoBinding,
     input_name: String,
     output_name: String,
     src_size: usize,
@@ -130,6 +131,10 @@ struct OnnxDetector {
     conf_thres: f32,
     iou_thres: f32,
     classes: Vec<usize>,
+    resizer: Resizer,
+    src_rgb_buf: Vec<u8>,
+    dst_rgb_buf: Vec<u8>,
+    input_buf: Vec<f32>,
 }
 
 impl OnnxDetector {
@@ -175,10 +180,54 @@ impl OnnxDetector {
             .map_err(|e| anyhow!("加载 ONNX 模型失败: {e}"))?;
 
         let input_name  = session.inputs()[0].name().to_string();
-        let output_name = session.outputs()[0].name().to_string();
+        let output_info = &session.outputs()[0];
+        let output_name = output_info.name().to_string();
+        if output_info.dtype().tensor_type() != Some(TensorElementType::Float32) {
+            return Err(anyhow!(
+                "模型输出类型不是 f32，当前实现无法解析: {}",
+                output_info.dtype()
+            ));
+        }
+
+        let mut binding = session
+            .create_binding()
+            .map_err(|e| anyhow!("创建 ONNX I/O binding 失败: {e}"))?;
+        let static_output_shape = output_info.dtype().tensor_shape().and_then(|shape| {
+            let mut dims = Vec::with_capacity(shape.len());
+            for d in shape.iter().copied() {
+                if d <= 0 {
+                    return None;
+                }
+                dims.push(d as usize);
+            }
+            Some(dims)
+        });
+
+        match static_output_shape {
+            Some(shape) => {
+                let output_numel = shape.iter().product::<usize>();
+                let output_tensor = Tensor::<f32>::from_array((shape, vec![0.0f32; output_numel]))
+                    .map_err(|e| anyhow!("创建预分配输出张量失败: {e}"))?;
+                binding
+                    .bind_output(&output_name, output_tensor)
+                    .map_err(|e| anyhow!("绑定 ONNX 预分配输出失败: {e}"))?;
+                log_info("智慧核心 ONNX 输出绑定模式: 预分配固定输出张量");
+            }
+            None => {
+                binding
+                    .bind_output_to_device(&output_name, &session.allocator().memory_info())
+                    .map_err(|e| anyhow!("绑定 ONNX 输出到设备失败: {e}"))?;
+                log_info("智慧核心 ONNX 输出绑定模式: 动态输出（按设备分配）");
+            }
+        }
+
+        let src_rgb_len = src_size * src_size * 3;
+        let dst_rgb_len = config.size * config.size * 3;
+        let input_len = 3 * config.size * config.size;
 
         Ok(Self {
             session,
+            binding,
             input_name,
             output_name,
             src_size,
@@ -186,6 +235,10 @@ impl OnnxDetector {
             conf_thres: config.conf_thres,
             iou_thres: config.iou_thres,
             classes: config.parse_classes(),
+            resizer: Resizer::new(),
+            src_rgb_buf: vec![0; src_rgb_len],
+            dst_rgb_buf: vec![0; dst_rgb_len],
+            input_buf: vec![0.0; input_len],
         })
     }
 
@@ -202,11 +255,16 @@ impl OnnxDetector {
         let dst_width = NonZeroU32::new(inference_size as u32).unwrap();
         let dst_height = NonZeroU32::new(inference_size as u32).unwrap();
 
-        let src_w_u32 = src_width.get();
-        let src_h_u32 = src_height.get();
-
         // 1. CHW u8 -> HWC u8 (RGB packed)，供 fast_image_resize 使用
-        let mut src_rgb: Vec<u8> = vec![0; (src_w_u32 * src_h_u32 * 3) as usize];
+        if buffer.len() < 3 * src_size * src_size {
+            return Err(anyhow!(
+                "输入缓冲区过小: got={}, expect>={}",
+                buffer.len(),
+                3 * src_size * src_size
+            ));
+        }
+
+        let src_rgb = self.src_rgb_buf.as_mut_slice();
         for row in 0..src_size {
             for col in 0..src_size {
                 let chw_idx = row * src_size + col;
@@ -220,29 +278,33 @@ impl OnnxDetector {
             }
         }
 
-        let src_image = Image::from_vec_u8(
-            src_width.get(),
-            src_height.get(),
-            src_rgb,
-            PixelType::U8x3,
-        ).expect("创建 fast_image_resize 源图失败");
+        {
+            let src_image = Image::from_slice_u8(
+                src_width.get(),
+                src_height.get(),
+                self.src_rgb_buf.as_mut_slice(),
+                PixelType::U8x3,
+            )
+            .map_err(|e| anyhow::anyhow!("创建 fast_image_resize 源图失败: {:?}", e))?;
 
-        let mut dst_image = Image::new(
-            dst_width.get(),
-            dst_height.get(),
-            PixelType::U8x3,
-        );
+            let mut dst_image = Image::from_slice_u8(
+                dst_width.get(),
+                dst_height.get(),
+                self.dst_rgb_buf.as_mut_slice(),
+                PixelType::U8x3,
+            )
+            .map_err(|e| anyhow::anyhow!("创建 fast_image_resize 目标图失败: {:?}", e))?;
 
-        let mut resizer = Resizer::new();
-        let options = ResizeOptions::new().resize_alg(fir::ResizeAlg::Nearest);
-        resizer
-            .resize(&src_image, &mut dst_image, &options)
-            .map_err(|e| anyhow::anyhow!("fast_image_resize 失败: {:?}", e))?;
+            let options = ResizeOptions::new().resize_alg(fir::ResizeAlg::Nearest);
+            self.resizer
+                .resize(&src_image, &mut dst_image, &options)
+                .map_err(|e| anyhow::anyhow!("fast_image_resize 失败: {:?}", e))?;
+        }
 
-        let dst_buf = dst_image.buffer().to_vec();
+        let dst_buf = self.dst_rgb_buf.as_slice();
 
         // 2. HWC u8 (RGB packed) -> NCHW f32（归一化到 [0,1]）
-        let mut data: Vec<f32> = vec![0.0; 3 * inference_size * inference_size];
+        let data = self.input_buf.as_mut_slice();
         for row in 0..inference_size {
             for col in 0..inference_size {
                 let rgb_idx = (row * inference_size + col) * 3;
@@ -261,23 +323,16 @@ impl OnnxDetector {
             }
         }
 
-        let input_tensor: Tensor<f32> = Tensor::from_array((
+        let input_tensor = TensorRef::<f32>::from_array_view((
             [1usize, 3, inference_size, inference_size],
-            data,
+            self.input_buf.as_slice(),
         ))?;
         let preprocess_ms = preprocess_start.elapsed().as_secs_f32() * 1000.0;
 
-        // 3. 创建 I/O binding —— 这里就需要 &mut self.session
-        let mut binding = self.session.create_binding()?;
-        binding.bind_input(&self.input_name, &input_tensor)?;
-        binding.bind_output_to_device(
-            &self.output_name,
-            &self.session.allocator().memory_info(),
-        )?;
-
-        // 4. 运行推理
+        // 3. 复用 I/O binding：每帧只重绑输入
         let infer_start = std::time::Instant::now();
-        let mut outputs = self.session.run_binding(&mut binding)?;
+        self.binding.bind_input(&self.input_name, &input_tensor)?;
+        let mut outputs = self.session.run_binding(&self.binding)?;
         let infer_ms = infer_start.elapsed().as_secs_f32() * 1000.0;
         let dv = outputs
             .remove(&self.output_name)
