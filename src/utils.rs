@@ -194,8 +194,87 @@ pub fn dir_exists(path: &str) -> bool {
 }
 
 pub mod console_redirect {
+    use chrono::{Duration, Local, NaiveDate};
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
+    use std::path::Path;
+    use std::sync::{Mutex, Once, OnceLock};
+
+    const LOG_RETENTION_DAYS: i64 = 30;
+    static LOG_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    static LOG_INIT: Once = Once::new();
+    static RUN_ID: OnceLock<String> = OnceLock::new();
+
+    fn logs_dir() -> Option<std::path::PathBuf> {
+        std::env::current_dir().ok().map(|cwd| cwd.join("logs"))
+    }
+
+    fn cleanup_old_logs(dir: &Path, today: NaiveDate) {
+        let cutoff = today - Duration::days(LOG_RETENTION_DAYS);
+        let entries = match fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("log") {
+                continue;
+            }
+            let date_str = match path.file_stem().and_then(|s| s.to_str()) {
+                Some(s) => s,
+                None => continue,
+            };
+            let file_date = match NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            if file_date < cutoff {
+                let _ = fs::remove_file(path);
+            }
+        }
+    }
+
+    fn run_id() -> &'static str {
+        RUN_ID.get_or_init(|| {
+            let now = Local::now().format("%Y%m%d-%H%M%S");
+            let pid = std::process::id();
+            format!("{now}-{pid}")
+        })
+    }
+
+    fn write_log_line(level: &str, message: &str) {
+        let now = Local::now();
+        let today = now.date_naive();
+        let timestamp = now.format("%Y-%m-%d %H:%M:%S");
+
+        LOG_INIT.call_once(|| {
+            if let Some(dir) = logs_dir() {
+                let _ = fs::create_dir_all(&dir);
+                cleanup_old_logs(&dir, today);
+            }
+        });
+
+        if let Some(dir) = logs_dir() {
+            let lock = LOG_LOCK.get_or_init(|| Mutex::new(()));
+            if let Ok(_guard) = lock.lock() {
+                let _ = fs::create_dir_all(&dir);
+                let file_path = dir.join(format!("{}.log", today.format("%Y-%m-%d")));
+                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(file_path) {
+                    let _ = writeln!(file, "[{timestamp}] [{level}] [RUN:{}] {message}", run_id());
+                }
+            }
+        }
+    }
+
     pub fn log_error(message: &str) {
+        write_log_line("ERROR", message);
         eprintln!("{message}");
+    }
+
+    pub fn log_info(message: &str) {
+        write_log_line("INFO", message);
+        println!("{message}");
     }
 }
 

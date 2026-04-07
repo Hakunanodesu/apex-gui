@@ -1,6 +1,6 @@
 [package]
 name = "apex-egui"
-version = "4.0.2"
+version = "4.1.0"
 edition = "2024"
 
 [profile.release]
@@ -22,6 +22,7 @@ vigem_client = { package = "vigem-client", version = "0.1.4" }
 windows-capture = "1.5.0"
 ort = { version = "2.0.0-rc.12", features = ["directml"] }
 anyhow = "1.0.102"
+chrono = "0.4"
 num_cpus = "1.17.0"
 ureq = "3"
 fast_image_resize = "6"

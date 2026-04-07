@@ -13,7 +13,7 @@ use crate::shared_constants::aim_assist::ASSIST_OUTPUT_EMA_ALPHA;
 use crate::shared_constants::assist_curve::{INNER_RAMP_LINEAR, INNER_RAMP_SQUARE};
 use crate::shared_constants::error_limits::GAMEPAD_MAPPING_MAX_CONSECUTIVE_ERRORS;
 use crate::shared_constants::rapid_fire_mode;
-use crate::shared_constants::trigger_timing::TRIGGER_TIMING_UNIT_MS;
+use crate::shared_constants::trigger_timing::{RELEASE_TO_FIRE_PULSE_MS, TRIGGER_TIMING_UNIT_MS};
 use crate::utils::console_redirect::log_error;
 #[cfg(debug_assertions)]
 use crate::utils::debug_perf_panel::set_mapper_perf_line;
@@ -248,7 +248,7 @@ impl ConMapper {
             // 松手开火：记录上一帧右扳机是否按下
             let mut release_prev_pressed: bool = false;
             // 松手开火：松开后维持“按下”状态的截止时间
-            let release_pulse_duration = Duration::from_millis(TRIGGER_TIMING_UNIT_MS);
+            let release_pulse_duration = Duration::from_millis(RELEASE_TO_FIRE_PULSE_MS);
             let mut release_pulse_until: Option<Instant> = None;
             let mut assist_ema_xy: [f32; 2] = [0.0; 2];
             #[cfg(debug_assertions)]
@@ -300,7 +300,7 @@ impl ConMapper {
                         release_prev_pressed = true;
                         release_pulse_until = None;
                     } else {
-                        // 从按下到松开的瞬间：启动一个持续 50ms 的开火脉冲
+                        // 从按下到松开的瞬间：启动一个持续 RELEASE_TO_FIRE_PULSE_MS 的开火脉冲
                         if release_prev_pressed {
                             release_prev_pressed = false;
                             release_pulse_until = Some(Instant::now() + release_pulse_duration);

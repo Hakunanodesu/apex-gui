@@ -58,6 +58,9 @@ fn load_window_icon() -> Option<egui::viewport::IconData> {
 }
 
 fn main() -> Result<(), eframe::Error> {
+    #[cfg(debug_assertions)]
+    modules::enemy_det_thread::debug_probe_execution_provider_chain();
+
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([
             CHARACTER_WIDTH * 32.0,

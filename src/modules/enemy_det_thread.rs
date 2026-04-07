@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
 use ort::{
-    execution_providers::DirectMLExecutionProvider,
+    execution_providers::{CPUExecutionProvider, DirectMLExecutionProvider, ExecutionProvider},
     session::{builder::GraphOptimizationLevel, Session},
     value::Tensor,
 };
@@ -16,7 +16,7 @@ use std::num::NonZeroU32;
 
 use crate::shared_constants::detection_defaults;
 use crate::shared_constants::error_limits::ENEMY_DET_MAX_CONSECUTIVE_ERRORS;
-use crate::utils::console_redirect::log_error;
+use crate::utils::console_redirect::{log_error, log_info};
 
 /// 检测配置结构体
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +72,44 @@ fn load_detection_config(model_path: &Path) -> DetectionConfig {
     }
 }
 
+#[cfg(debug_assertions)]
+pub fn debug_probe_execution_provider_chain() {
+    log_info("智慧核心 Debug EP 自检开始");
+
+    let mut session_builder = match Session::builder() {
+        Ok(b) => b,
+        Err(e) => {
+            log_error(&format!("智慧核心 Debug EP 自检失败: 创建 SessionBuilder 失败 ({e})"));
+            return;
+        }
+    };
+
+    let mut registered_eps: Vec<&'static str> = Vec::new();
+    let mut primary_ep: Option<&'static str> = None;
+
+    match DirectMLExecutionProvider::default().register(&mut session_builder) {
+        Ok(()) => {
+            primary_ep.get_or_insert("DirectML");
+            registered_eps.push("DirectML");
+        }
+        Err(e) => log_error(&format!("智慧核心 Debug EP 注册失败: DirectML ({e})")),
+    }
+
+    match CPUExecutionProvider::default().register(&mut session_builder) {
+        Ok(()) => {
+            primary_ep.get_or_insert("CPU");
+            registered_eps.push("CPU");
+        }
+        Err(e) => {
+            log_error(&format!("智慧核心 Debug EP 注册失败: CPU ({e})"));
+            return;
+        }
+    }
+
+    log_info(&format!("智慧核心 Debug EP 实际命中主 EP: {}", primary_ep.unwrap_or("CPU")));
+    log_info(&format!("智慧核心 Debug EP 已注册 EP 链: {}", registered_eps.join(" -> ")));
+}
+
 /// 检测结果结构体，仅供本文件内部和线程推理用
 #[derive(Clone, Debug)]
 pub struct Detection {
@@ -100,11 +138,35 @@ impl OnnxDetector {
         // 从同名JSON文件加载配置
         let config = load_detection_config(model_path);
         
+        // 按优先级手动注册 EP，便于输出“实际命中的主 EP”
+        let mut session_builder = Session::builder()
+            .map_err(|e| anyhow!("创建 ONNX SessionBuilder 失败: {e}"))?;
+        let mut registered_eps: Vec<&'static str> = Vec::new();
+        let mut primary_ep: Option<&'static str> = None;
+
+        match DirectMLExecutionProvider::default().register(&mut session_builder) {
+            Ok(()) => {
+                primary_ep.get_or_insert("DirectML");
+                registered_eps.push("DirectML");
+            }
+            Err(e) => {
+                log_error(&format!("智慧核心 ONNX EP 注册失败: DirectML ({e})"));
+            }
+        }
+        match CPUExecutionProvider::default().register(&mut session_builder) {
+            Ok(()) => {
+                primary_ep.get_or_insert("CPU");
+                registered_eps.push("CPU");
+            }
+            Err(e) => return Err(anyhow!("注册 CPU 执行提供器失败: {e}")),
+        }
+
+        let primary_ep = primary_ep.unwrap_or("CPU");
+        log_info(&format!("智慧核心 ONNX 实际命中主 EP: {primary_ep}"));
+        log_info(&format!("智慧核心 ONNX 已注册 EP 链: {}", registered_eps.join(" -> ")));
+        
         // 从文件加载模型
-        let session = Session::builder()
-            .map_err(|e| anyhow!("创建 ONNX SessionBuilder 失败: {e}"))?
-            .with_execution_providers([DirectMLExecutionProvider::default().build()])
-            .map_err(|e| anyhow!("设置 DirectML 执行提供器失败: {e}"))?
+        let session = session_builder
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| anyhow!("设置图优化等级失败: {e}"))?
             .with_intra_threads(std::cmp::max(1, num_cpus::get_physical() as usize / 2))

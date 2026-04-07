@@ -4,3 +4,4 @@
 /models/*.json
 /models/*.onnx
 /configs/*.json
+/logs/*.log
