@@ -151,11 +151,11 @@ fn setup_fonts(ctx: &egui::Context) {
         egui::FontData::from_owned(jetbrains_font_data.to_vec()).into(),
     );
 
-    // 使用 include_bytes! 编译时嵌入中文字体文件
-    let noto_font_data = include_bytes!("../fonts/NotoSansCJKsc-Regular.otf");
+    // 使用 include_bytes! 编译时嵌入中文字体（阿里巴巴普惠体）
+    let cjk_font_data = include_bytes!("../fonts/AlibabaPuHuiTi-3-55-Regular.otf");
     fonts.font_data.insert(
-        "noto_cjk".to_owned(),
-        egui::FontData::from_owned(noto_font_data.to_vec()).into(),
+        "cjk_sans".to_owned(),
+        egui::FontData::from_owned(cjk_font_data.to_vec()).into(),
     );
     
     // 设置字体族顺序：英文字体优先，中文字体作为回退
@@ -167,8 +167,8 @@ fn setup_fonts(ctx: &egui::Context) {
             fonts_in_family.push("jetbrains_mono".to_owned());
         }
         // 中文字体在后（作为中文回退）
-        if fonts.font_data.contains_key("noto_cjk") {
-            fonts_in_family.push("noto_cjk".to_owned());
+        if fonts.font_data.contains_key("cjk_sans") {
+            fonts_in_family.push("cjk_sans".to_owned());
         }
     }
     
