@@ -124,6 +124,7 @@ public sealed class DemoWindow : GameWindow
             ImGuiWindowFlags.NoCollapse;
 
         ImGui.Begin("MainOverlay", windowFlags);
+        DrawTopPanel();
 
         if (ImGui.BeginTabBar("RootTabs"))
         {
@@ -143,6 +144,14 @@ public sealed class DemoWindow : GameWindow
         }
 
         ImGui.End();
+    }
+
+    private void DrawTopPanel()
+    {
+        ImGui.Text("模型选择");
+        ImGui.SameLine();
+        DrawOnnxModelCombo("##TopModelCombo");
+        ImGui.Separator();
     }
 
     private void DrawHomeTab()
@@ -191,26 +200,6 @@ public sealed class DemoWindow : GameWindow
         }
 
         var selected = _onnxModels[Math.Clamp(_onnxSelectedModelIndex, 0, _onnxModels.Count - 1)];
-        if (ImGui.BeginCombo("模型", selected.DisplayName))
-        {
-            for (var i = 0; i < _onnxModels.Count; i++)
-            {
-                var isSelected = i == _onnxSelectedModelIndex;
-                if (ImGui.Selectable(_onnxModels[i].DisplayName, isSelected))
-                {
-                    _onnxSelectedModelIndex = i;
-                }
-
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
-        }
-
-        selected = _onnxModels[Math.Clamp(_onnxSelectedModelIndex, 0, _onnxModels.Count - 1)];
         ImGui.Text($"输入尺寸: {selected.InputWidth}x{selected.InputHeight}");
         ImGui.Text($"conf_thres: {selected.ConfThreshold:0.###}");
         ImGui.Text($"iou_thres: {selected.IouThreshold:0.###}");
@@ -238,6 +227,41 @@ public sealed class DemoWindow : GameWindow
         ImGui.Text($"推理耗时 P99: {_onnxSnapshot.P99InferenceMs:0.00} ms");
         ImGui.Text($"检测框数量: {_onnxSnapshot.DetectionCount}");
         ImGui.Text($"输出摘要: {_onnxSnapshot.OutputSummary}");
+    }
+
+    private void DrawOnnxModelCombo(string id)
+    {
+        if (_onnxModels.Count == 0)
+        {
+            ImGui.BeginDisabled();
+            ImGui.SetNextItemWidth(-1);
+            ImGui.Combo(id, ref _onnxSelectedModelIndex, "无可用模型\0");
+            ImGui.EndDisabled();
+            return;
+        }
+
+        _onnxSelectedModelIndex = Math.Clamp(_onnxSelectedModelIndex, 0, _onnxModels.Count - 1);
+        var selected = _onnxModels[_onnxSelectedModelIndex];
+
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.BeginCombo(id, selected.DisplayName))
+        {
+            for (var i = 0; i < _onnxModels.Count; i++)
+            {
+                var isSelected = i == _onnxSelectedModelIndex;
+                if (ImGui.Selectable(_onnxModels[i].DisplayName, isSelected))
+                {
+                    _onnxSelectedModelIndex = i;
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
     }
 
     private void RefreshOnnxModels()
