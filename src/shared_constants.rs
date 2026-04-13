@@ -151,7 +151,7 @@ pub mod auth {
 
 /// 更新检查相关常量
 pub mod update_check {
-    pub const RELEASES_URL: &str = "https://api.github.com/repos/Hakunanodesu/apex-egui/releases";
+    pub const RELEASES_URL: &str = "https://api.github.com/repos/Hakunanodesu/apex-gui/releases";
     pub const REQUEST_TIMEOUT_MS: u64 = 5000;
 }
 
