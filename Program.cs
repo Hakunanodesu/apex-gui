@@ -34,6 +34,8 @@ window.Run();
 
 public sealed class DemoWindow : GameWindow
 {
+    private const string ViGemBusInstallerUrl = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe";
+
     private ImGuiController? _controller;
     private float _dpiScale = 1.0f;
 
@@ -51,7 +53,10 @@ public sealed class DemoWindow : GameWindow
     private bool _dxgiPreviewEnabled = true;
 
     private readonly List<OnnxModelConfig> _onnxModels = new();
-    private int _onnxSelectedModelIndex;
+    private int _onnxTopSelectedModelIndex;
+    private int _onnxDebugSelectedModelIndex;
+    private readonly List<string> _configFiles = new();
+    private int _selectedConfigFileIndex;
     private OnnxDmlWorker? _onnxWorker;
     private string _onnxStatus = "未启动";
     private OnnxInferenceSnapshot _onnxSnapshot;
@@ -71,6 +76,7 @@ public sealed class DemoWindow : GameWindow
         RefreshDpiScale();
         GL.ClearColor(0.10f, 0.11f, 0.13f, 1.0f);
         RefreshOnnxModels();
+        RefreshConfigFiles();
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
@@ -148,15 +154,53 @@ public sealed class DemoWindow : GameWindow
 
     private void DrawTopPanel()
     {
-        ImGui.Text("模型选择");
+        var vigemReady = Directory.Exists(@"C:\Program Files\Nefarius Software Solutions");
+        ImGui.TextUnformatted("ViGemBus");
         ImGui.SameLine();
-        DrawOnnxModelCombo("##TopModelCombo");
+        if (vigemReady)
+        {
+            ImGui.TextColored(new Vector4(0.18f, 0.78f, 0.29f, 1f), "已就绪");
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(0.86f, 0.24f, 0.24f, 1f), "未就绪");
+        }
+        ImGui.SameLine();
+        var vigemActionLabel = vigemReady ? "重新安装" : "安装";
+        if (ImGui.Button(vigemActionLabel))
+        {
+            OpenViGemBusInstaller();
+        }
+
         ImGui.Separator();
+
+        ImGui.TextUnformatted("配置");
+        ImGui.SameLine();
+        DrawConfigFileCombo("##TopConfigCombo");
+    }
+
+    private static void OpenViGemBusInstaller()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = ViGemBusInstallerUrl,
+                UseShellExecute = true
+            };
+            Process.Start(psi);
+        }
+        catch
+        {
+            // Ignore launcher failures to keep UI responsive.
+        }
     }
 
     private void DrawHomeTab()
     {
-        // Intentionally left blank.
+        ImGui.Text("模型");
+        ImGui.SameLine();
+        DrawOnnxModelCombo("##HomeModelCombo", ref _onnxTopSelectedModelIndex);
     }
 
     private void DrawDxgiTab()
@@ -199,7 +243,11 @@ public sealed class DemoWindow : GameWindow
             return;
         }
 
-        var selected = _onnxModels[Math.Clamp(_onnxSelectedModelIndex, 0, _onnxModels.Count - 1)];
+        ImGui.Text("模型选择");
+        ImGui.SameLine();
+        DrawOnnxModelCombo("##DebugModelCombo", ref _onnxDebugSelectedModelIndex);
+
+        var selected = _onnxModels[Math.Clamp(_onnxDebugSelectedModelIndex, 0, _onnxModels.Count - 1)];
         ImGui.Text($"输入尺寸: {selected.InputWidth}x{selected.InputHeight}");
         ImGui.Text($"conf_thres: {selected.ConfThreshold:0.###}");
         ImGui.Text($"iou_thres: {selected.IouThreshold:0.###}");
@@ -229,29 +277,64 @@ public sealed class DemoWindow : GameWindow
         ImGui.Text($"输出摘要: {_onnxSnapshot.OutputSummary}");
     }
 
-    private void DrawOnnxModelCombo(string id)
+    private void DrawOnnxModelCombo(string id, ref int selectedIndex)
     {
         if (_onnxModels.Count == 0)
         {
             ImGui.BeginDisabled();
             ImGui.SetNextItemWidth(-1);
-            ImGui.Combo(id, ref _onnxSelectedModelIndex, "无可用模型\0");
+            ImGui.Combo(id, ref selectedIndex, "无可用模型\0");
             ImGui.EndDisabled();
             return;
         }
 
-        _onnxSelectedModelIndex = Math.Clamp(_onnxSelectedModelIndex, 0, _onnxModels.Count - 1);
-        var selected = _onnxModels[_onnxSelectedModelIndex];
+        selectedIndex = Math.Clamp(selectedIndex, 0, _onnxModels.Count - 1);
+        var selected = _onnxModels[selectedIndex];
 
         ImGui.SetNextItemWidth(-1);
         if (ImGui.BeginCombo(id, selected.DisplayName))
         {
             for (var i = 0; i < _onnxModels.Count; i++)
             {
-                var isSelected = i == _onnxSelectedModelIndex;
+                var isSelected = i == selectedIndex;
                 if (ImGui.Selectable(_onnxModels[i].DisplayName, isSelected))
                 {
-                    _onnxSelectedModelIndex = i;
+                    selectedIndex = i;
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+    }
+
+    private void DrawConfigFileCombo(string id)
+    {
+        if (_configFiles.Count == 0)
+        {
+            ImGui.BeginDisabled();
+            ImGui.SetNextItemWidth(-1);
+            ImGui.Combo(id, ref _selectedConfigFileIndex, "无可用配置\0");
+            ImGui.EndDisabled();
+            return;
+        }
+
+        _selectedConfigFileIndex = Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1);
+        var selected = _configFiles[_selectedConfigFileIndex];
+
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.BeginCombo(id, selected))
+        {
+            for (var i = 0; i < _configFiles.Count; i++)
+            {
+                var isSelected = i == _selectedConfigFileIndex;
+                if (ImGui.Selectable(_configFiles[i], isSelected))
+                {
+                    _selectedConfigFileIndex = i;
                 }
 
                 if (isSelected)
@@ -267,25 +350,63 @@ public sealed class DemoWindow : GameWindow
     private void RefreshOnnxModels()
     {
         _onnxModels.Clear();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var model in OnnxModelConfigLoader.LoadFromDirectory(Path.Combine(AppContext.BaseDirectory, "Models")))
-        {
-            if (seen.Add(model.OnnxPath))
-            {
-                _onnxModels.Add(model);
-            }
-        }
-
-        foreach (var model in OnnxModelConfigLoader.LoadFromDirectory(Path.Combine(Environment.CurrentDirectory, "Models")))
-        {
-            if (seen.Add(model.OnnxPath))
-            {
-                _onnxModels.Add(model);
-            }
-        }
+        var modelsDir = Path.Combine(AppContext.BaseDirectory, "Models");
+        _onnxModels.AddRange(OnnxModelConfigLoader.LoadFromDirectory(modelsDir));
 
         _onnxModels.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
-        _onnxSelectedModelIndex = Math.Clamp(_onnxSelectedModelIndex, 0, Math.Max(0, _onnxModels.Count - 1));
+        _onnxTopSelectedModelIndex = Math.Clamp(_onnxTopSelectedModelIndex, 0, Math.Max(0, _onnxModels.Count - 1));
+        _onnxDebugSelectedModelIndex = Math.Clamp(_onnxDebugSelectedModelIndex, 0, Math.Max(0, _onnxModels.Count - 1));
+    }
+
+    private void RefreshConfigFiles()
+    {
+        var oldSelection = _configFiles.Count > 0 && _selectedConfigFileIndex >= 0 && _selectedConfigFileIndex < _configFiles.Count
+            ? _configFiles[_selectedConfigFileIndex]
+            : null;
+
+        _configFiles.Clear();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var searchRoots = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "Configs"),
+            Path.Combine(Environment.CurrentDirectory, "Configs")
+        };
+
+        foreach (var root in searchRoots)
+        {
+            if (!Directory.Exists(root))
+            {
+                continue;
+            }
+
+            foreach (var jsonPath in Directory.EnumerateFiles(root, "*.json", SearchOption.TopDirectoryOnly))
+            {
+                var fileName = Path.GetFileNameWithoutExtension(jsonPath);
+                if (!string.IsNullOrWhiteSpace(fileName) && seen.Add(fileName))
+                {
+                    _configFiles.Add(fileName);
+                }
+            }
+        }
+
+        _configFiles.Sort(StringComparer.OrdinalIgnoreCase);
+        if (_configFiles.Count == 0)
+        {
+            _selectedConfigFileIndex = 0;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(oldSelection))
+        {
+            var oldIndex = _configFiles.FindIndex(name => string.Equals(name, oldSelection, StringComparison.OrdinalIgnoreCase));
+            if (oldIndex >= 0)
+            {
+                _selectedConfigFileIndex = oldIndex;
+                return;
+            }
+        }
+
+        _selectedConfigFileIndex = Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1);
     }
 
     private void StartOnnxInference(OnnxModelConfig model)

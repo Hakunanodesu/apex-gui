@@ -9,10 +9,16 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)'=='Release'">
+    <PublishRelease>true</PublishRelease>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <PublishRelease>true</PublishRelease>
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>none</DebugType>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,5 +37,29 @@
     <EmbeddedResource Include="Assets\Fonts\AlibabaPuHuiTi-3-55-Regular.otf" />
     <EmbeddedResource Include="Assets\Fonts\JetBrainsMono-Regular.ttf" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Models\**\*">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="CleanPublishDirBeforePublish"
+          BeforeTargets="BeforePublish"
+          Condition="'$(IsCrossTargetingBuild)' != 'true' and '$(PublishDir)' != ''">
+    <RemoveDir Directories="$(PublishDir)" Condition="Exists('$(PublishDir)')" />
+    <MakeDir Directories="$(PublishDir)" />
+  </Target>
+
+  <Target Name="RemovePdbAndLibAfterPublish"
+          AfterTargets="Publish"
+          Condition="'$(IsCrossTargetingBuild)' != 'true' and '$(PublishDir)' != '' and Exists('$(PublishDir)')">
+    <ItemGroup>
+      <PublishSymbolsAndLibs Include="$(PublishDir)**\*.pdb;$(PublishDir)**\*.lib" />
+    </ItemGroup>
+    <Delete Files="@(PublishSymbolsAndLibs)" />
+  </Target>
 
 </Project>
