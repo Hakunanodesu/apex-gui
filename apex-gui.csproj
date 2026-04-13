@@ -7,12 +7,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishRelease>true</PublishRelease>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='Release'">
-    <PublishRelease>true</PublishRelease>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
@@ -44,22 +44,11 @@
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
+    <Content Include="Configs\**\*">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
   </ItemGroup>
-
-  <Target Name="CleanPublishDirBeforePublish"
-          BeforeTargets="BeforePublish"
-          Condition="'$(IsCrossTargetingBuild)' != 'true' and '$(PublishDir)' != ''">
-    <RemoveDir Directories="$(PublishDir)" Condition="Exists('$(PublishDir)')" />
-    <MakeDir Directories="$(PublishDir)" />
-  </Target>
-
-  <Target Name="RemovePdbAndLibAfterPublish"
-          AfterTargets="Publish"
-          Condition="'$(IsCrossTargetingBuild)' != 'true' and '$(PublishDir)' != '' and Exists('$(PublishDir)')">
-    <ItemGroup>
-      <PublishSymbolsAndLibs Include="$(PublishDir)**\*.pdb;$(PublishDir)**\*.lib" />
-    </ItemGroup>
-    <Delete Files="@(PublishSymbolsAndLibs)" />
-  </Target>
 
 </Project>
