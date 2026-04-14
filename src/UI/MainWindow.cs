@@ -20,20 +20,40 @@ using static Vortice.DXGI.DXGI;
 public sealed partial class MainWindow : GameWindow
 {
     private const string ViGemBusInstallerUrl = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe";
+    private const int DefaultSnapOuterRange = 1;
+    private const int DefaultSnapInnerRange = 1;
+    private const float DefaultSnapOuterStrength = 0f;
+    private const float DefaultSnapInnerStrength = 0f;
+    private const float DefaultSnapStartStrength = 0f;
+    private const float DefaultSnapVerticalStrengthFactor = 1f;
+    private const float DefaultSnapHipfireStrengthFactor = 1f;
+    private const float DefaultSnapHeight = 0f;
 
     private ImGuiController? _controller;
     private float _dpiScale = 1.0f;
 
     private readonly List<OnnxModelConfig> _onnxModels = new();
     private int _onnxTopSelectedModelIndex = -1;
+    private static readonly string[] HomeSnapModeOptions = { "开火吸附", "瞄准吸附" };
+    private int _homeSnapModeIndex = -1;
     private readonly List<string> _configFiles = new();
     private int _selectedConfigFileIndex;
     private string _addConfigNameBuffer = string.Empty;
     private string _configAddModalError = string.Empty;
     private bool _configAddModalOpen;
     private bool _configDeleteModalOpen;
+    private bool _configAddModalOpenRequested;
+    private bool _configDeleteModalOpenRequested;
     private string? _pendingDeleteConfigBaseName;
     private bool _smartCoreEnabled;
+    private int _snapOuterRange = DefaultSnapOuterRange;
+    private float _snapOuterStrength = DefaultSnapOuterStrength;
+    private int _snapInnerRange = DefaultSnapInnerRange;
+    private float _snapInnerStrength = DefaultSnapInnerStrength;
+    private float _snapStartStrength = DefaultSnapStartStrength;
+    private float _snapVerticalStrengthFactor = DefaultSnapVerticalStrengthFactor;
+    private float _snapHipfireStrengthFactor = DefaultSnapHipfireStrengthFactor;
+    private float _snapHeight = DefaultSnapHeight;
     public MainWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings)
         : base(gameWindowSettings, nativeWindowSettings)
     {
@@ -144,74 +164,280 @@ public sealed partial class MainWindow : GameWindow
     private void DrawHomeTab()
     {
         var vigemReady = Directory.Exists(@"C:\Program Files\Nefarius Software Solutions");
-        ImGui.TextUnformatted("ViGemBus");
-        ImGui.SameLine();
-        if (vigemReady)
-        {
-            ImGui.TextUnformatted("已就绪");
-        }
-        else
-        {
-            ImGui.TextUnformatted("未就绪");
-        }
-        ImGui.SameLine();
-        var vigemActionLabel = vigemReady ? "重新安装" : "安装";
-        if (ImGui.Button(vigemActionLabel))
-        {
-            OpenViGemBusInstaller();
-        }
-
-        ImGui.TextUnformatted("选择配置");
-        ImGui.SameLine();
         var topPanelStyle = ImGui.GetStyle();
         var addButtonWidth = ImGui.CalcTextSize("添加").X + topPanelStyle.FramePadding.X * 2f;
         var deleteButtonWidth = ImGui.CalcTextSize("删除").X + topPanelStyle.FramePadding.X * 2f;
         var reserveWidth = addButtonWidth + deleteButtonWidth + topPanelStyle.ItemSpacing.X * 2f;
-        var comboWidth = MathF.Max(120f, ImGui.GetContentRegionAvail().X - reserveWidth);
-        DrawConfigFileCombo("##TopConfigCombo", comboWidth);
-        ImGui.SameLine();
-        if (ImGui.Button("添加", new Vector2(addButtonWidth, 0f)))
+
+        // 修改这里的文本即可统一控制所有第一列宽度。
+        var firstColumnWidth = ImGui.CalcTextSize("一二三四五六 ").X;
+
+        if (ImGui.BeginTable("##HomeTopTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
-            _addConfigNameBuffer = string.Empty;
-            _configAddModalError = string.Empty;
-            _configAddModalOpen = true;
-            ImGui.OpenPopup("请输入新配置名称");
-        }
-        ImGui.SameLine();
-        if (_configFiles.Count > 0)
-        {
-            if (ImGui.Button("删除", new Vector2(deleteButtonWidth, 0f)))
+            ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, firstColumnWidth);
+            ImGui.TableSetupColumn("Content", ImGuiTableColumnFlags.WidthStretch);
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("依赖状态");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextUnformatted("ViGemBus");
+            ImGui.SameLine();
+            ImGui.TextUnformatted(vigemReady ? "已就绪" : "未就绪");
+            ImGui.SameLine();
+            var vigemActionLabel = vigemReady ? "重新安装" : "安装";
+            if (ImGui.Button(vigemActionLabel))
             {
-                _pendingDeleteConfigBaseName = _configFiles[Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1)];
-                _configDeleteModalOpen = true;
-                ImGui.OpenPopup("删除配置确认");
+                OpenViGemBusInstaller();
             }
-        }
-        else
-        {
-            ImGui.BeginDisabled();
-            ImGui.Button("删除", new Vector2(deleteButtonWidth, 0f));
-            ImGui.EndDisabled();
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("配置选择");
+            ImGui.TableSetColumnIndex(1);
+            var configComboWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
+            DrawConfigFileCombo("##TopConfigCombo", configComboWidth);
+            ImGui.SameLine();
+            if (ImGui.Button("添加", new Vector2(addButtonWidth, 0f)))
+            {
+                _addConfigNameBuffer = string.Empty;
+                _configAddModalError = string.Empty;
+                _configAddModalOpen = true;
+                _configAddModalOpenRequested = true;
+            }
+            ImGui.SameLine();
+            if (_configFiles.Count > 0)
+            {
+                if (ImGui.Button("删除", new Vector2(deleteButtonWidth, 0f)))
+                {
+                    _pendingDeleteConfigBaseName = _configFiles[Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1)];
+                    _configDeleteModalOpen = true;
+                    _configDeleteModalOpenRequested = true;
+                }
+            }
+            else
+            {
+                ImGui.BeginDisabled();
+                ImGui.Button("删除", new Vector2(deleteButtonWidth, 0f));
+                ImGui.EndDisabled();
+            }
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("智慧核心");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Checkbox("##SmartCoreEnabled", ref _smartCoreEnabled);
+
+            ImGui.EndTable();
         }
 
         DrawConfigFileModals();
 
-        ImGui.Checkbox("智慧核心", ref _smartCoreEnabled);
-
         ImGui.Separator();
         ImGui.Separator();
 
-        ImGui.Text("选择模型");
-        ImGui.SameLine();
         var modelLineStyle = ImGui.GetStyle();
         var refreshButtonWidth = ImGui.CalcTextSize("刷新").X + modelLineStyle.FramePadding.X * 2f;
-        var modelComboWidth = MathF.Max(120f, ImGui.GetContentRegionAvail().X - refreshButtonWidth - modelLineStyle.ItemSpacing.X);
-        DrawHomeModelCombo("##HomeModelCombo", modelComboWidth);
-        ImGui.SameLine();
-        if (ImGui.Button("刷新", new Vector2(refreshButtonWidth, 0f)))
+        if (ImGui.BeginTable("##HomeMainTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
-            RefreshOnnxModels();
+            ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, firstColumnWidth);
+            ImGui.TableSetupColumn("Content", ImGuiTableColumnFlags.WidthStretch);
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("选择模型");
+            ImGui.TableSetColumnIndex(1);
+            var modelComboWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
+            DrawHomeModelCombo("##HomeModelCombo", modelComboWidth);
+            ImGui.SameLine();
+            if (ImGui.Button("刷新", new Vector2(refreshButtonWidth, 0f)))
+            {
+                RefreshOnnxModels();
+            }
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("开启吸附方式");
+            ImGui.TableSetColumnIndex(1);
+            var selectedSnapModeLabel = _homeSnapModeIndex >= 0 && _homeSnapModeIndex < HomeSnapModeOptions.Length
+                ? HomeSnapModeOptions[_homeSnapModeIndex]
+                : string.Empty;
+            var snapComboWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
+            ImGui.SetNextItemWidth(snapComboWidth);
+            ImGui.BeginDisabled(_configFiles.Count == 0);
+            if (ImGui.BeginCombo("##HomeSnapModeCombo", selectedSnapModeLabel))
+            {
+                for (var i = 0; i < HomeSnapModeOptions.Length; i++)
+                {
+                    var isSelected = i == _homeSnapModeIndex;
+                    if (ImGui.Selectable(HomeSnapModeOptions[i], isSelected))
+                    {
+                        _homeSnapModeIndex = i;
+                        TryWriteStringValueToCurrentConfig("snap", HomeSnapModeOptions[i]);
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
+                    }
+                }
+
+                ImGui.EndCombo();
+            }
+            ImGui.EndDisabled();
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("吸附参数设定");
+            ImGui.TableSetColumnIndex(1);
+            var selectedModelSize = _onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count
+                ? Math.Max(1, _onnxModels[_onnxTopSelectedModelIndex].InputHeight)
+                : 1;
+            var displayHeightLimit = GetDisplayHeightOrWindowHeight();
+            var snapOuterRangeMax = Math.Max(selectedModelSize, displayHeightLimit);
+            _snapOuterRange = Math.Clamp(_snapOuterRange, selectedModelSize, snapOuterRangeMax);
+            _snapInnerRange = Math.Clamp(_snapInnerRange, 1, _snapOuterRange);
+            _snapOuterStrength = Math.Clamp(_snapOuterStrength, 0f, 1f);
+            _snapInnerStrength = Math.Clamp(_snapInnerStrength, 0f, 1f);
+            var snapRangeInputWidth = ImGui.CalcTextSize("0000").X + topPanelStyle.FramePadding.X * 2f;
+            var snapStrengthInputWidth = snapRangeInputWidth + ImGui.GetFrameHeight() * 2f + topPanelStyle.ItemInnerSpacing.X * 2f;
+            ImGui.TextUnformatted("外圈范围");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(snapRangeInputWidth);
+            if (ImGui.InputInt("##SnapOuterRange", ref _snapOuterRange, 0, 0))
+            {
+                _snapOuterRange = Math.Clamp(_snapOuterRange, selectedModelSize, snapOuterRangeMax);
+                _snapInnerRange = Math.Clamp(_snapInnerRange, 1, _snapOuterRange);
+                TryWriteIntValueToCurrentConfig("snapOuterRange", _snapOuterRange);
+                TryWriteIntValueToCurrentConfig("snapInnerRange", _snapInnerRange);
+            }
+            ImGui.SameLine();
+            ImGui.TextUnformatted("外圈强度");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(snapStrengthInputWidth);
+            if (ImGui.InputFloat("##SnapOuterStrength", ref _snapOuterStrength, 0.01f, 0.01f, "%.2f"))
+            {
+                _snapOuterStrength = Math.Clamp(_snapOuterStrength, 0f, 1f);
+                TryWriteFloatValueToCurrentConfig("snapOuterStrength", _snapOuterStrength);
+            }
+            ImGui.TextUnformatted("内圈范围");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(snapRangeInputWidth);
+            if (ImGui.InputInt("##SnapInnerRange", ref _snapInnerRange, 0, 0))
+            {
+                _snapInnerRange = Math.Clamp(_snapInnerRange, 1, _snapOuterRange);
+                TryWriteIntValueToCurrentConfig("snapInnerRange", _snapInnerRange);
+            }
+            ImGui.SameLine();
+            ImGui.TextUnformatted("内圈强度");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(snapStrengthInputWidth);
+            if (ImGui.InputFloat("##SnapInnerStrength", ref _snapInnerStrength, 0.01f, 0.01f, "%.2f"))
+            {
+                _snapInnerStrength = Math.Clamp(_snapInnerStrength, 0f, 1f);
+                TryWriteFloatValueToCurrentConfig("snapInnerStrength", _snapInnerStrength);
+            }
+
+            var snapExtraInputWidth = snapStrengthInputWidth;
+            _snapStartStrength = Math.Clamp(_snapStartStrength, 0f, 1f);
+            _snapVerticalStrengthFactor = Math.Clamp(_snapVerticalStrengthFactor, 0f, 1f);
+            _snapHipfireStrengthFactor = Math.Clamp(_snapHipfireStrengthFactor, 0f, 1f);
+            _snapHeight = Math.Clamp(_snapHeight, 0f, 1f);
+            ImGui.TextUnformatted("起始强度");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(snapExtraInputWidth);
+            if (ImGui.InputFloat("##SnapStartStrength", ref _snapStartStrength, 0.01f, 0.01f, "%.2f"))
+            {
+                _snapStartStrength = Math.Clamp(_snapStartStrength, 0f, 1f);
+                TryWriteFloatValueToCurrentConfig("snapStartStrength", _snapStartStrength);
+            }
+            ImGui.SameLine();
+            ImGui.TextUnformatted("垂直强度系数");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(snapExtraInputWidth);
+            if (ImGui.InputFloat("##SnapVerticalStrengthFactor", ref _snapVerticalStrengthFactor, 0.01f, 0.01f, "%.2f"))
+            {
+                _snapVerticalStrengthFactor = Math.Clamp(_snapVerticalStrengthFactor, 0f, 1f);
+                TryWriteFloatValueToCurrentConfig("snapVerticalStrengthFactor", _snapVerticalStrengthFactor);
+            }
+            ImGui.SameLine();
+            ImGui.TextUnformatted("腰射强度系数");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(snapExtraInputWidth);
+            if (ImGui.InputFloat("##SnapHipfireStrengthFactor", ref _snapHipfireStrengthFactor, 0.01f, 0.01f, "%.2f"))
+            {
+                _snapHipfireStrengthFactor = Math.Clamp(_snapHipfireStrengthFactor, 0f, 1f);
+                TryWriteFloatValueToCurrentConfig("snapHipfireStrengthFactor", _snapHipfireStrengthFactor);
+            }
+            
+            ImGui.TextUnformatted("吸附高度");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(snapExtraInputWidth);
+            if (ImGui.InputFloat("##SnapHeight", ref _snapHeight, 0.01f, 0.01f, "%.2f"))
+            {
+                _snapHeight = Math.Clamp(_snapHeight, 0f, 1f);
+                TryWriteFloatValueToCurrentConfig("snapHeight", _snapHeight);
+            }
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextUnformatted("吸附曲线预览");
+            ImGui.TableSetColumnIndex(1);
+            DrawSnapCurvePreview();
+
+            ImGui.EndTable();
         }
+    }
+
+    private void DrawSnapCurvePreview()
+    {
+        var previewHeight = ImGui.GetFrameHeightWithSpacing() * 4f;
+        var previewWidth = MathF.Min(previewHeight * 2f, ImGui.GetContentRegionAvail().X);
+        var canvasPos = ImGui.GetCursorScreenPos();
+        var canvasSize = new Vector2(previewWidth, previewHeight);
+        ImGui.InvisibleButton("##SnapCurvePreviewCanvas", canvasSize);
+
+        var drawList = ImGui.GetWindowDrawList();
+        var canvasMin = canvasPos;
+        var canvasMax = canvasPos + canvasSize;
+        const float axisPadding = 12f;
+        var plotMin = new Vector2(canvasMin.X + axisPadding, canvasMin.Y + axisPadding);
+        var plotMax = new Vector2(canvasMax.X - axisPadding, canvasMax.Y - axisPadding);
+
+        var axisColor = ImGui.GetColorU32(ImGuiCol.Text);
+        var lineColor = ImGui.GetColorU32(new Vector4(0.20f, 0.70f, 1.00f, 1.00f));
+        var pointColor = ImGui.GetColorU32(new Vector4(1.00f, 0.45f, 0.20f, 1.00f));
+        var borderColor = ImGui.GetColorU32(ImGuiCol.Border);
+        var bgColor = ImGui.GetColorU32(new Vector4(0.08f, 0.09f, 0.11f, 1.00f));
+
+        drawList.AddRectFilled(canvasMin, canvasMax, bgColor, 4f);
+        drawList.AddRect(canvasMin, canvasMax, borderColor, 4f);
+        drawList.AddLine(new Vector2(plotMin.X, plotMax.Y), new Vector2(plotMax.X, plotMax.Y), axisColor, 1.5f);
+        drawList.AddLine(new Vector2(plotMin.X, plotMin.Y), new Vector2(plotMin.X, plotMax.Y), axisColor, 1.5f);
+
+        var innerRangeForPreview = Math.Max(1, _snapInnerRange);
+        var startStrengthForPreview = Math.Clamp(_snapStartStrength, 0f, 1f);
+        var innerStrengthForPreview = Math.Clamp(_snapInnerStrength, 0f, 1f);
+        var outerStrengthForPreview = Math.Clamp(_snapOuterStrength, 0f, 1f);
+
+        Vector2 MapToPlot(float x, float y)
+        {
+            var nx = Math.Clamp(x / innerRangeForPreview, 0f, 1f);
+            var ny = Math.Clamp(y, 0f, 1f);
+            return new Vector2(
+                plotMin.X + nx * (plotMax.X - plotMin.X),
+                plotMax.Y - ny * (plotMax.Y - plotMin.Y));
+        }
+
+        var lineStart = MapToPlot(0f, startStrengthForPreview);
+        var lineEnd = MapToPlot(innerRangeForPreview, innerStrengthForPreview);
+        var highlightPoint = MapToPlot(innerRangeForPreview, outerStrengthForPreview);
+
+        drawList.AddLine(lineStart, lineEnd, lineColor, 2.0f);
+        drawList.AddCircleFilled(highlightPoint, 4.0f, pointColor);
+        drawList.AddText(new Vector2(plotMin.X + 4f, plotMin.Y + 2f), axisColor, "1");
+        drawList.AddText(new Vector2(plotMin.X + 4f, plotMax.Y - ImGui.GetTextLineHeight() - 2f), axisColor, "0");
+        drawList.AddText(new Vector2(plotMax.X - 24f, plotMax.Y - ImGui.GetTextLineHeight() - 2f), axisColor, innerRangeForPreview.ToString());
     }
 
     private void DrawHomeModelCombo(string id, float width = -1f)
@@ -230,7 +456,7 @@ public sealed partial class MainWindow : GameWindow
         {
             var selectedWhenDisabled = _onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count
                 ? _onnxModels[_onnxTopSelectedModelIndex].DisplayName
-                : "未指定模型";
+                : string.Empty;
             var disabledIndex = 0;
             ImGui.BeginDisabled();
             ImGui.SetNextItemWidth(comboWidth);
@@ -245,21 +471,11 @@ public sealed partial class MainWindow : GameWindow
         var indexBeforeUi = _onnxTopSelectedModelIndex;
         var selectedLabel = _onnxTopSelectedModelIndex >= 0
             ? _onnxModels[_onnxTopSelectedModelIndex].DisplayName
-            : "未指定模型";
+            : string.Empty;
 
         ImGui.SetNextItemWidth(comboWidth);
         if (ImGui.BeginCombo(id, selectedLabel))
         {
-            var isUnspecified = _onnxTopSelectedModelIndex < 0;
-            if (ImGui.Selectable("未指定模型", isUnspecified))
-            {
-                _onnxTopSelectedModelIndex = -1;
-            }
-            if (isUnspecified)
-            {
-                ImGui.SetItemDefaultFocus();
-            }
-
             for (var i = 0; i < _onnxModels.Count; i++)
             {
                 var isSelected = i == _onnxTopSelectedModelIndex;
@@ -279,14 +495,7 @@ public sealed partial class MainWindow : GameWindow
 
         if (_onnxTopSelectedModelIndex != indexBeforeUi)
         {
-            if (_onnxTopSelectedModelIndex >= 0)
-            {
-                TryWriteSelectedModelNameToCurrentConfig(_onnxModels[_onnxTopSelectedModelIndex].DisplayName);
-            }
-            else
-            {
-                ClearSelectedModelNameFromCurrentConfig();
-            }
+            TryWriteSelectedModelNameToCurrentConfig(_onnxModels[_onnxTopSelectedModelIndex].DisplayName);
         }
     }
 
@@ -295,9 +504,10 @@ public sealed partial class MainWindow : GameWindow
         var comboWidth = width > 0f ? width : -1f;
         if (_configFiles.Count == 0)
         {
+            var disabledIndex = 0;
             ImGui.BeginDisabled();
             ImGui.SetNextItemWidth(comboWidth);
-            ImGui.Combo(id, ref _selectedConfigFileIndex, "无可用配置\0");
+            ImGui.Combo(id, ref disabledIndex, "\0");
             ImGui.EndDisabled();
             return;
         }
@@ -435,6 +645,8 @@ public sealed partial class MainWindow : GameWindow
 
     private static string ConfigCurrentFilePath => Path.Combine(ConfigsDirectoryPath, ".current");
 
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
+
     private static string? TryReadCurrentConfigFileName()
     {
         try
@@ -483,47 +695,23 @@ public sealed partial class MainWindow : GameWindow
 
     private void TryWriteSelectedModelNameToCurrentConfig(string modelName)
     {
-        if (_configFiles.Count == 0)
-        {
-            return;
-        }
-
-        var configIndex = Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1);
-        var configPath = Path.Combine(ConfigsDirectoryPath, _configFiles[configIndex] + ".json");
-        try
-        {
-            JsonObject root;
-            if (File.Exists(configPath))
-            {
-                var raw = File.ReadAllText(configPath);
-                if (string.IsNullOrWhiteSpace(raw))
-                {
-                    root = new JsonObject();
-                }
-                else
-                {
-                    root = JsonNode.Parse(raw) as JsonObject ?? new JsonObject();
-                }
-            }
-            else
-            {
-                root = new JsonObject();
-            }
-
-            root["model"] = modelName;
-            File.WriteAllText(configPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
-        }
-        catch
-        {
-            // Keep model switching responsive if file IO fails.
-        }
+        TryWriteStringValueToCurrentConfig("model", modelName);
     }
 
     private void TryApplyModelSelectionFromCurrentConfig()
     {
-        if (_configFiles.Count == 0 || _onnxModels.Count == 0)
+        if (_configFiles.Count == 0)
+        {
+            _homeSnapModeIndex = -1;
+            _onnxTopSelectedModelIndex = -1;
+            return;
+        }
+
+        _homeSnapModeIndex = TryReadSnapModeIndexFromCurrentConfig();
+        if (_onnxModels.Count == 0)
         {
             _onnxTopSelectedModelIndex = -1;
+            ApplySnapParametersFromCurrentConfig();
             return;
         }
 
@@ -538,41 +726,188 @@ public sealed partial class MainWindow : GameWindow
         if (modelIndex < 0)
         {
             _onnxTopSelectedModelIndex = -1;
+            ApplySnapParametersFromCurrentConfig();
             return;
         }
 
         _onnxTopSelectedModelIndex = modelIndex;
+        ApplySnapParametersFromCurrentConfig();
+    }
+
+    private int TryReadSnapModeIndexFromCurrentConfig()
+    {
+        var modeValue = TryReadStringValueFromCurrentConfig("snap");
+        if (string.IsNullOrWhiteSpace(modeValue))
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < HomeSnapModeOptions.Length; i++)
+        {
+            if (string.Equals(HomeSnapModeOptions[i], modeValue, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private string? TryReadSelectedModelNameFromCurrentConfig()
     {
-        if (_configFiles.Count == 0)
+        return TryReadStringValueFromCurrentConfig("model");
+    }
+
+    private void ApplySnapParametersFromCurrentConfig()
+    {
+        var selectedModelSize = _onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count
+            ? Math.Max(1, _onnxModels[_onnxTopSelectedModelIndex].InputHeight)
+            : DefaultSnapOuterRange;
+        var displayHeightLimit = GetDisplayHeightOrWindowHeight();
+        var snapOuterRangeMax = Math.Max(selectedModelSize, displayHeightLimit);
+
+        _snapOuterRange = Math.Clamp(TryReadIntValueFromCurrentConfig("snapOuterRange") ?? DefaultSnapOuterRange, selectedModelSize, snapOuterRangeMax);
+        _snapInnerRange = Math.Clamp(TryReadIntValueFromCurrentConfig("snapInnerRange") ?? DefaultSnapInnerRange, 1, _snapOuterRange);
+        _snapOuterStrength = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapOuterStrength") ?? DefaultSnapOuterStrength, 0f, 1f);
+        _snapInnerStrength = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapInnerStrength") ?? DefaultSnapInnerStrength, 0f, 1f);
+        _snapStartStrength = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapStartStrength") ?? DefaultSnapStartStrength, 0f, 1f);
+        _snapVerticalStrengthFactor = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapVerticalStrengthFactor") ?? DefaultSnapVerticalStrengthFactor, 0f, 1f);
+        _snapHipfireStrengthFactor = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapHipfireStrengthFactor") ?? DefaultSnapHipfireStrengthFactor, 0f, 1f);
+        _snapHeight = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapHeight") ?? DefaultSnapHeight, 0f, 1f);
+    }
+
+    private void ResetConfigUiStateToDefaults()
+    {
+        _smartCoreEnabled = false;
+        _homeSnapModeIndex = -1;
+        _onnxTopSelectedModelIndex = -1;
+        _snapOuterRange = DefaultSnapOuterRange;
+        _snapInnerRange = DefaultSnapInnerRange;
+        _snapOuterStrength = DefaultSnapOuterStrength;
+        _snapInnerStrength = DefaultSnapInnerStrength;
+        _snapStartStrength = DefaultSnapStartStrength;
+        _snapVerticalStrengthFactor = DefaultSnapVerticalStrengthFactor;
+        _snapHipfireStrengthFactor = DefaultSnapHipfireStrengthFactor;
+        _snapHeight = DefaultSnapHeight;
+    }
+
+    private void TryWriteStringValueToCurrentConfig(string key, string value)
+    {
+        if (!TryGetCurrentConfigPath(out var configPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(configPath);
+            root[key] = value;
+            SaveJsonObject(configPath, root);
+        }
+        catch
+        {
+            // Keep selection changes responsive if file IO fails.
+        }
+    }
+
+    private void TryWriteIntValueToCurrentConfig(string key, int value)
+    {
+        if (!TryGetCurrentConfigPath(out var configPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(configPath);
+            root[key] = value;
+            SaveJsonObject(configPath, root);
+        }
+        catch
+        {
+            // Keep selection changes responsive if file IO fails.
+        }
+    }
+
+    private void TryWriteFloatValueToCurrentConfig(string key, float value)
+    {
+        if (!TryGetCurrentConfigPath(out var configPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(configPath);
+            root[key] = value;
+            SaveJsonObject(configPath, root);
+        }
+        catch
+        {
+            // Keep selection changes responsive if file IO fails.
+        }
+    }
+
+    private string? TryReadStringValueFromCurrentConfig(string key)
+    {
+        if (!TryGetCurrentConfigPath(out var configPath))
         {
             return null;
         }
 
-        var configIndex = Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1);
-        var configPath = Path.Combine(ConfigsDirectoryPath, _configFiles[configIndex] + ".json");
         try
         {
-            if (!File.Exists(configPath))
+            if (!TryLoadJsonObject(configPath, out var root))
             {
                 return null;
             }
 
-            var raw = File.ReadAllText(configPath);
-            if (string.IsNullOrWhiteSpace(raw))
+            var value = root[key]?.GetValue<string>()?.Trim();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private int? TryReadIntValueFromCurrentConfig(string key)
+    {
+        if (!TryGetCurrentConfigPath(out var configPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            if (!TryLoadJsonObject(configPath, out var root))
             {
                 return null;
             }
 
-            if (JsonNode.Parse(raw) is not JsonObject root)
+            return root[key]?.GetValue<int>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private float? TryReadFloatValueFromCurrentConfig(string key)
+    {
+        if (!TryGetCurrentConfigPath(out var configPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            if (!TryLoadJsonObject(configPath, out var root))
             {
                 return null;
             }
 
-            var modelValue = root["model"]?.GetValue<string>();
-            return string.IsNullOrWhiteSpace(modelValue) ? null : modelValue.Trim();
+            return root[key]?.GetValue<float>();
         }
         catch
         {
@@ -582,30 +917,21 @@ public sealed partial class MainWindow : GameWindow
 
     private void ClearSelectedModelNameFromCurrentConfig()
     {
-        if (_configFiles.Count == 0)
+        RemoveStringKeyFromCurrentConfig("model");
+    }
+
+    private void RemoveStringKeyFromCurrentConfig(string key)
+    {
+        if (!TryGetCurrentConfigPath(out var configPath))
         {
             return;
         }
 
-        var configIndex = Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1);
-        var configPath = Path.Combine(ConfigsDirectoryPath, _configFiles[configIndex] + ".json");
         try
         {
-            JsonObject root;
-            if (File.Exists(configPath))
-            {
-                var raw = File.ReadAllText(configPath);
-                root = string.IsNullOrWhiteSpace(raw)
-                    ? new JsonObject()
-                    : JsonNode.Parse(raw) as JsonObject ?? new JsonObject();
-            }
-            else
-            {
-                root = new JsonObject();
-            }
-
-            root.Remove("model");
-            File.WriteAllText(configPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine);
+            var root = LoadJsonObjectOrEmpty(configPath);
+            root.Remove(key);
+            SaveJsonObject(configPath, root);
         }
         catch
         {
@@ -613,8 +939,60 @@ public sealed partial class MainWindow : GameWindow
         }
     }
 
+    private bool TryGetCurrentConfigPath(out string configPath)
+    {
+        configPath = string.Empty;
+        if (_configFiles.Count == 0)
+        {
+            return false;
+        }
+
+        var configIndex = Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1);
+        configPath = Path.Combine(ConfigsDirectoryPath, _configFiles[configIndex] + ".json");
+        return true;
+    }
+
+    private static bool TryLoadJsonObject(string path, out JsonObject root)
+    {
+        root = new JsonObject();
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        var raw = File.ReadAllText(path);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        if (JsonNode.Parse(raw) is not JsonObject parsed)
+        {
+            return false;
+        }
+
+        root = parsed;
+        return true;
+    }
+
+    private static JsonObject LoadJsonObjectOrEmpty(string path)
+    {
+        return TryLoadJsonObject(path, out var root) ? root : new JsonObject();
+    }
+
+    private static void SaveJsonObject(string path, JsonObject root)
+    {
+        File.WriteAllText(path, root.ToJsonString(IndentedJsonOptions) + Environment.NewLine);
+    }
+
     private void DrawConfigFileModals()
     {
+        if (_configAddModalOpenRequested)
+        {
+            ImGui.OpenPopup("请输入新配置名称");
+            _configAddModalOpenRequested = false;
+        }
+
         if (ImGui.BeginPopupModal("请输入新配置名称", ref _configAddModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.InputText("##AddConfigNameInput", ref _addConfigNameBuffer, 256);
@@ -646,6 +1024,12 @@ public sealed partial class MainWindow : GameWindow
             }
 
             ImGui.EndPopup();
+        }
+
+        if (_configDeleteModalOpenRequested)
+        {
+            ImGui.OpenPopup("删除配置确认");
+            _configDeleteModalOpenRequested = false;
         }
 
         if (ImGui.BeginPopupModal("删除配置确认", ref _configDeleteModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
@@ -725,6 +1109,7 @@ public sealed partial class MainWindow : GameWindow
             }
 
             File.WriteAllText(path, "{}" + Environment.NewLine);
+            ResetConfigUiStateToDefaults();
             RefreshConfigFiles(baseName);
             return true;
         }
@@ -822,6 +1207,31 @@ public sealed partial class MainWindow : GameWindow
         _dpiScale = nextDpiScale;
         _controller.SetDpiScale(_dpiScale);
     }
+
+    private int GetDisplayHeightOrWindowHeight()
+    {
+        try
+        {
+            unsafe
+            {
+                var monitor = GLFW.GetPrimaryMonitor();
+                if (monitor != null)
+                {
+                    var videoMode = GLFW.GetVideoMode(monitor);
+                    if (videoMode != null && videoMode->Height > 0)
+                    {
+                        return videoMode->Height;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Fallback to window height when monitor query fails.
+        }
+
+        return Math.Max(1, ClientSize.Y);
+    }
 }
 
 internal static class RuntimePerformance
@@ -872,6 +1282,7 @@ internal static class RuntimePerformance
 
 public sealed class ImGuiController : IDisposable
 {
+    private const float BaseFontSize = 16.0f;
     private readonly IntPtr _context;
     private readonly int _vertexArray;
     private readonly int _vertexBuffer;
@@ -989,15 +1400,15 @@ public sealed class ImGuiController : IDisposable
 
     public void SetDpiScale(float dpiScale)
     {
-        var clamped = Math.Clamp(dpiScale, 0.5f, 4.0f);
-        if (MathF.Abs(clamped - _dpiScale) < 0.01f)
+        if (MathF.Abs(dpiScale - _dpiScale) < 0.01f)
         {
             return;
         }
 
-        _dpiScale = clamped;
+        _dpiScale = dpiScale;
         var io = ImGui.GetIO();
-        io.FontGlobalScale = _dpiScale;
+        ConfigureFonts(io);
+        CreateFontTexture();
     }
 
     private void ConfigureFonts(ImGuiIOPtr io)
@@ -1005,10 +1416,9 @@ public sealed class ImGuiController : IDisposable
         io.Fonts.Clear();
 
         var zhFontPath = ResourceAssets.ExtractToTemp("AlibabaPuHuiTi-3-55-Regular.otf");
-        var enFontPath = ResourceAssets.ExtractToTemp("JetBrainsMono-Regular.ttf");
+        var scaledFontSize = BaseFontSize * _dpiScale;
 
-        io.Fonts.AddFontFromFileTTF(zhFontPath, 18.0f, null, io.Fonts.GetGlyphRangesChineseFull());
-        _englishFont = io.Fonts.AddFontFromFileTTF(enFontPath, 17.0f, null, io.Fonts.GetGlyphRangesDefault());
+        _englishFont = io.Fonts.AddFontFromFileTTF(zhFontPath, scaledFontSize, null, io.Fonts.GetGlyphRangesChineseFull());
         _hasEnglishFont = true;
     }
 
@@ -1169,6 +1579,12 @@ public sealed class ImGuiController : IDisposable
     {
         var io = ImGui.GetIO();
         io.Fonts.GetTexDataAsRGBA32(out IntPtr pixels, out var width, out var height, out _);
+
+        if (_fontTexture != 0)
+        {
+            GL.DeleteTexture(_fontTexture);
+            _fontTexture = 0;
+        }
 
         _fontTexture = GL.GenTexture();
         GL.BindTexture(TextureTarget.Texture2D, _fontTexture);

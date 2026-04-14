@@ -35,7 +35,6 @@
     <None Remove="Assets\**\*" />
     <EmbeddedResource Include="Assets\Icons\3mz_ds_ver.png" />
     <EmbeddedResource Include="Assets\Fonts\AlibabaPuHuiTi-3-55-Regular.otf" />
-    <EmbeddedResource Include="Assets\Fonts\JetBrainsMono-Regular.ttf" />
   </ItemGroup>
 
   <ItemGroup>
