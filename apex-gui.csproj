@@ -25,6 +25,8 @@
     <PackageReference Include="ImGui.NET" Version="1.91.6.1" />
     <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.22.1" />
     <PackageReference Include="OpenTK" Version="4.9.4" />
+    <PackageReference Include="SDL3-CS" Version="3.4.2" />
+    <PackageReference Include="SDL3-CS.Native" Version="3.4.2" />
     <PackageReference Include="StbImageSharp" Version="2.30.15" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />

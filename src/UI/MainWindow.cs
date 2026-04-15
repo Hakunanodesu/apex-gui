@@ -11,6 +11,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Common.Input;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
+using SDL3;
 using StbImageSharp;
 using Vortice.Direct3D;
 using Vortice.Direct3D11;
@@ -21,6 +22,7 @@ using static Vortice.DXGI.DXGI;
 public sealed partial class MainWindow : GameWindow
 {
     private const string ViGemBusInstallerUrl = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe";
+    private const string WindowStateFileName = "window_state.ini";
     private const int DefaultSnapOuterRange = 1;
     private const int DefaultSnapInnerRange = 1;
     private const float DefaultSnapOuterStrength = 0f;
@@ -37,7 +39,25 @@ public sealed partial class MainWindow : GameWindow
     private int _onnxTopSelectedModelIndex = -1;
     private static readonly string[] HomeSnapModeOptions = { "开火吸附", "瞄准吸附" };
     private static readonly string[] SnapInnerInterpolationTypeOptions = { "线性插值", "二次插值" };
+    private static readonly string[] SpecialWeaponNames =
+    {
+        "30-30",
+        "g7",
+        "kraber",
+        "longbow",
+        "mastiff",
+        "p2020_single",
+        "peacekeeper",
+        "sentinel",
+        "triple_take",
+        "wingman"
+    };
+    private const string SpecialWeaponLogicConfigKey = "specialWeaponLogic";
+    private const string AimSnapWeaponListConfigKey = "aimSnapWeapons";
+    private const string RapidFireWeaponListConfigKey = "rapidFireWeapons";
     private int _homeSnapModeIndex = -1;
+    private readonly bool[] _specialWeaponAimSnapEnabled = new bool[SpecialWeaponNames.Length];
+    private readonly bool[] _specialWeaponRapidFireEnabled = new bool[SpecialWeaponNames.Length];
     private readonly List<string> _configFiles = new();
     private int _selectedConfigFileIndex;
     private string _addConfigNameBuffer = string.Empty;
@@ -57,6 +77,88 @@ public sealed partial class MainWindow : GameWindow
     private float _snapHipfireStrengthFactor = DefaultSnapHipfireStrengthFactor;
     private float _snapHeight = DefaultSnapHeight;
     private int _snapInnerInterpolationTypeIndex;
+    private int _selectedGamepadIndex;
+    private OpenTK.Mathematics.Vector2i _lastNormalClientSize;
+    private OpenTK.Mathematics.Vector2i _lastNormalLocation;
+
+    internal static string WindowStateFilePath => Path.Combine(Environment.CurrentDirectory, WindowStateFileName);
+
+    internal static bool TryLoadWindowState(out WindowStateSnapshot snapshot)
+    {
+        snapshot = new WindowStateSnapshot();
+        try
+        {
+            if (!File.Exists(WindowStateFilePath))
+            {
+                return false;
+            }
+
+            var lines = File.ReadAllLines(WindowStateFilePath);
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var rawLine in lines)
+            {
+                var line = rawLine.Trim();
+                if (string.IsNullOrEmpty(line) || line.StartsWith(';') || line.StartsWith('#') || line.StartsWith('['))
+                {
+                    continue;
+                }
+
+                var equalIndex = line.IndexOf('=');
+                if (equalIndex <= 0 || equalIndex >= line.Length - 1)
+                {
+                    continue;
+                }
+
+                var key = line[..equalIndex].Trim();
+                var value = line[(equalIndex + 1)..].Trim();
+                if (key.Length == 0)
+                {
+                    continue;
+                }
+
+                values[key] = value;
+            }
+
+            if (!values.TryGetValue("X", out var xRaw) || !int.TryParse(xRaw, out var x))
+            {
+                return false;
+            }
+
+            if (!values.TryGetValue("Y", out var yRaw) || !int.TryParse(yRaw, out var y))
+            {
+                return false;
+            }
+
+            if (!values.TryGetValue("Width", out var widthRaw) || !int.TryParse(widthRaw, out var width) || width <= 0)
+            {
+                return false;
+            }
+
+            if (!values.TryGetValue("Height", out var heightRaw) || !int.TryParse(heightRaw, out var height) || height <= 0)
+            {
+                return false;
+            }
+
+            var isMaximized = values.TryGetValue("IsMaximized", out var maximizedRaw) && bool.TryParse(maximizedRaw, out var parsedMaximized)
+                ? parsedMaximized
+                : false;
+
+            snapshot = new WindowStateSnapshot
+            {
+                X = x,
+                Y = y,
+                Width = width,
+                Height = height,
+                IsMaximized = isMaximized
+            };
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public MainWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings)
         : base(gameWindowSettings, nativeWindowSettings)
     {
@@ -65,12 +167,14 @@ public sealed partial class MainWindow : GameWindow
     protected override void OnLoad()
     {
         base.OnLoad();
+        SDL.InitSubSystem(SDL.InitFlags.Gamepad);
         _controller = new ImGuiController(ClientSize.X, ClientSize.Y);
         VSync = VSyncMode.Off;
         RefreshDpiScale();
-        GL.ClearColor(0.10f, 0.11f, 0.13f, 1.0f);
         RefreshOnnxModels();
         RefreshConfigFiles();
+        _lastNormalClientSize = ClientSize;
+        _lastNormalLocation = Location;
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
@@ -147,23 +251,6 @@ public sealed partial class MainWindow : GameWindow
         ImGui.End();
     }
 
-    private static void OpenViGemBusInstaller()
-    {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = ViGemBusInstallerUrl,
-                UseShellExecute = true
-            };
-            Process.Start(psi);
-        }
-        catch
-        {
-            // Ignore launcher failures to keep UI responsive.
-        }
-    }
-
     private void DrawHomeTab()
     {
         var vigemReady = Directory.Exists(@"C:\Program Files\Nefarius Software Solutions");
@@ -186,25 +273,56 @@ public sealed partial class MainWindow : GameWindow
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("依赖状态");
             ImGui.TableSetColumnIndex(1);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("ViGemBus");
-            ImGui.SameLine();
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(vigemReady ? "已就绪" : "未就绪");
-            ImGui.SameLine();
             var vigemActionLabel = vigemReady ? "重新安装" : "安装";
-            if (ImGui.Button(vigemActionLabel))
+            var gamepads = GetConnectedGamepadOptions();
+            var hasGamepads = gamepads.Length > 0;
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
+            if (ImGui.BeginTable("##DependencyStatusSubTable", 3, ImGuiTableFlags.SizingStretchProp))
             {
-                OpenViGemBusInstaller();
+                ImGui.TableSetupColumn("##DepName", ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("ViGemBus").X);
+                ImGui.TableSetupColumn("##DepState", ImGuiTableColumnFlags.WidthFixed, baseTextWidth * 3f);
+                ImGui.TableSetupColumn("##DepAction", ImGuiTableColumnFlags.WidthStretch);
+
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted("ViGemBus");
+                ImGui.TableSetColumnIndex(1);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted(vigemReady ? "已就绪" : "未就绪");
+                ImGui.TableSetColumnIndex(2);
+                if (ImGui.Button(vigemActionLabel))
+                {
+                    OpenViGemBusInstaller();
+                }
+
+                ImGui.TableNextRow();
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted("输入设备");
+                ImGui.TableSetColumnIndex(1);
+                ImGui.AlignTextToFramePadding();
+                ImGui.TextUnformatted(hasGamepads ? "已就绪" : "未就绪");
+                ImGui.TableSetColumnIndex(2);
+                _selectedGamepadIndex = hasGamepads
+                    ? (_selectedGamepadIndex >= 0 && _selectedGamepadIndex < gamepads.Length ? _selectedGamepadIndex : 0)
+                    : -1;
+                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - reserveWidth);
+                ImGui.Combo("##InputDeviceCombo", ref _selectedGamepadIndex, gamepads, gamepads.Length);
+
+                ImGui.EndTable();
             }
 
             ImGui.TableNextRow();
             ImGui.TableNextRow();
-       
+        
             ImGui.TableSetColumnIndex(0);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("配置选择");
             ImGui.TableSetColumnIndex(1);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
             var configComboWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
             DrawConfigFileCombo("##TopConfigCombo", configComboWidth);
             ImGui.SameLine();
@@ -276,39 +394,6 @@ public sealed partial class MainWindow : GameWindow
 
             ImGui.TableSetColumnIndex(0);
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("开启吸附方式");
-            ImGui.TableSetColumnIndex(1);
-            _homeSnapModeIndex = _homeSnapModeIndex >= 0 && _homeSnapModeIndex < HomeSnapModeOptions.Length ? _homeSnapModeIndex : 0;
-            var selectedSnapModeLabel = HomeSnapModeOptions[_homeSnapModeIndex];
-            var snapComboWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
-            ImGui.SetNextItemWidth(snapComboWidth);
-            ImGui.BeginDisabled(_configFiles.Count == 0);
-            if (ImGui.BeginCombo("##HomeSnapModeCombo", selectedSnapModeLabel))
-            {
-                for (var i = 0; i < HomeSnapModeOptions.Length; i++)
-                {
-                    var isSelected = i == _homeSnapModeIndex;
-                    if (ImGui.Selectable(HomeSnapModeOptions[i], isSelected))
-                    {
-                        _homeSnapModeIndex = i;
-                        TryWriteStringValueToCurrentConfig("snap", HomeSnapModeOptions[i]);
-                    }
-
-                    if (isSelected)
-                    {
-                        ImGui.SetItemDefaultFocus();
-                    }
-                }
-
-                ImGui.EndCombo();
-            }
-            ImGui.EndDisabled();
-
-            ImGui.TableNextRow();
-            ImGui.TableNextRow();
-
-            ImGui.TableSetColumnIndex(0);
-            ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("吸附参数设定");
             ImGui.TableSetColumnIndex(1);
             var selectedModelSize = _onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count
@@ -329,6 +414,7 @@ public sealed partial class MainWindow : GameWindow
             _snapHeight = Math.Clamp(_snapHeight, 0f, 1f);
             var snapLabelWidth = baseTextWidth * 6f;
             var snapLastLabelWidth = baseTextWidth * 4f;
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
             if (ImGui.BeginTable("##SnapSettingsGrid", 6, ImGuiTableFlags.SizingFixedFit))
             {
                 ImGui.TableSetupColumn("##SnapLabelCol0", ImGuiTableColumnFlags.WidthFixed, snapLabelWidth);
@@ -339,14 +425,11 @@ public sealed partial class MainWindow : GameWindow
                 ImGui.TableSetupColumn("##SnapInputCol2", ImGuiTableColumnFlags.WidthFixed, snapStrengthInputWidth);
 
                 // Row 1: ranges
-                var snapFirstRowTopOffset = topPanelStyle.CellPadding.Y;
                 ImGui.TableNextRow();
                 ImGui.TableSetColumnIndex(0);
-                ImGui.SetCursorPosY(ImGui.GetCursorPosY() - snapFirstRowTopOffset);
                 ImGui.AlignTextToFramePadding();
                 ImGui.TextUnformatted("内圈范围");
                 ImGui.TableSetColumnIndex(1);
-                ImGui.SetCursorPosY(ImGui.GetCursorPosY() - snapFirstRowTopOffset);
                 ImGui.SetNextItemWidth(snapRangeInputWidth);
                 if (ImGui.InputInt("##SnapInnerRange", ref _snapInnerRange, 0, 0))
                 {
@@ -355,11 +438,9 @@ public sealed partial class MainWindow : GameWindow
                 }
 
                 ImGui.TableSetColumnIndex(2);
-                ImGui.SetCursorPosY(ImGui.GetCursorPosY() - snapFirstRowTopOffset);
                 ImGui.AlignTextToFramePadding();
                 ImGui.TextUnformatted("外圈范围");
                 ImGui.TableSetColumnIndex(3);
-                ImGui.SetCursorPosY(ImGui.GetCursorPosY() - snapFirstRowTopOffset);
                 ImGui.SetNextItemWidth(snapRangeInputWidth);
                 if (ImGui.InputInt("##SnapOuterRange", ref _snapOuterRange, 0, 0))
                 {
@@ -480,18 +561,104 @@ public sealed partial class MainWindow : GameWindow
             ImGui.TableNextRow();
 
             ImGui.TableSetColumnIndex(0);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("吸附曲线预览");
             ImGui.TableSetColumnIndex(1);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
             DrawSnapCurvePreview();
+
+            ImGui.TableNextRow();
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("开启吸附方式");
+            ImGui.TableSetColumnIndex(1);
+            _homeSnapModeIndex = _homeSnapModeIndex >= 0 && _homeSnapModeIndex < HomeSnapModeOptions.Length ? _homeSnapModeIndex : 0;
+            var selectedSnapModeLabel = HomeSnapModeOptions[_homeSnapModeIndex];
+            var snapComboWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
+            ImGui.SetNextItemWidth(snapComboWidth);
+            ImGui.BeginDisabled(_configFiles.Count == 0);
+            if (ImGui.BeginCombo("##HomeSnapModeCombo", selectedSnapModeLabel))
+            {
+                for (var i = 0; i < HomeSnapModeOptions.Length; i++)
+                {
+                    var isSelected = i == _homeSnapModeIndex;
+                    if (ImGui.Selectable(HomeSnapModeOptions[i], isSelected))
+                    {
+                        _homeSnapModeIndex = i;
+                        TryWriteStringValueToCurrentConfig("snap", HomeSnapModeOptions[i]);
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
+                    }
+                }
+
+                ImGui.EndCombo();
+            }
+            ImGui.EndDisabled();
+
+            ImGui.TableNextRow();
+            ImGui.TableNextRow();
+            
+            ImGui.TableSetColumnIndex(0);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("特殊武器逻辑");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.SetCursorPosY(ImGui.GetCursorPosY() + topPanelStyle.CellPadding.Y);
+            ImGui.BeginDisabled(_configFiles.Count == 0);
+            var weaponNameColumnWidth = ImGui.CalcTextSize("武器名").X;
+            for (var i = 0; i < SpecialWeaponNames.Length; i++)
+            {
+                weaponNameColumnWidth = MathF.Max(weaponNameColumnWidth, ImGui.CalcTextSize(SpecialWeaponNames[i]).X);
+            }
+
+            var aimSnapColumnWidth = ImGui.CalcTextSize("瞄准吸附").X;
+            var rapidFireColumnWidth = ImGui.CalcTextSize("开火连点").X;
+            var specialWeaponStyle = ImGui.GetStyle();
+            weaponNameColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
+            aimSnapColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
+            rapidFireColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
+            if (ImGui.BeginTable(
+                    "##SpecialWeaponLogicTable",
+                    3,
+                    ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.BordersOuter | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX))
+            {
+                ImGui.TableSetupColumn("武器名", ImGuiTableColumnFlags.WidthFixed, weaponNameColumnWidth);
+                ImGui.TableSetupColumn("瞄准吸附", ImGuiTableColumnFlags.WidthFixed, aimSnapColumnWidth);
+                ImGui.TableSetupColumn("开火连点", ImGuiTableColumnFlags.WidthFixed, rapidFireColumnWidth);
+                ImGui.TableHeadersRow();
+
+                for (var i = 0; i < SpecialWeaponNames.Length; i++)
+                {
+                    ImGui.TableNextRow();
+
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.AlignTextToFramePadding();
+                    ImGui.TextUnformatted(SpecialWeaponNames[i]);
+
+                    ImGui.TableSetColumnIndex(1);
+                    if (ImGui.Checkbox($"##SpecialWeaponAimSnap_{i}", ref _specialWeaponAimSnapEnabled[i]))
+                    {
+                        TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i]);
+                    }
+
+                    ImGui.TableSetColumnIndex(2);
+                    if (ImGui.Checkbox($"##SpecialWeaponRapidFire_{i}", ref _specialWeaponRapidFireEnabled[i]))
+                    {
+                        TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i]);
+                    }
+                }
+
+                ImGui.EndTable();
+            }
+            ImGui.EndDisabled();
 
             ImGui.EndTable();
         }
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Separator();
-        ImGui.Spacing();
     }
 
     private void DrawSnapCurvePreview()
@@ -561,9 +728,11 @@ public sealed partial class MainWindow : GameWindow
         }
 
         drawList.AddCircleFilled(highlightPoint, 4.0f, pointColor);
-        drawList.AddText(new Vector2(plotMin.X + 4f, plotMin.Y + 2f), axisColor, "1");
+        drawList.AddText(new Vector2(plotMin.X + 4f, plotMin.Y + 2f), axisColor, "1.0");
         drawList.AddText(new Vector2(plotMin.X + 4f, plotMax.Y - ImGui.GetTextLineHeight() - 2f), axisColor, "0");
-        drawList.AddText(new Vector2(plotMax.X - 24f, plotMax.Y - ImGui.GetTextLineHeight() - 2f), axisColor, innerRangeForPreview.ToString());
+        var xAxisTickLabel = innerRangeForPreview.ToString();
+        var xAxisTickLabelWidth = ImGui.CalcTextSize(xAxisTickLabel).X;
+        drawList.AddText(new Vector2(plotMax.X - xAxisTickLabelWidth - 10f, plotMax.Y - ImGui.GetTextLineHeight() - 2f), axisColor, xAxisTickLabel);
     }
 
     private void DrawHomeModelCombo(string id, float width = -1f)
@@ -838,6 +1007,7 @@ public sealed partial class MainWindow : GameWindow
         }
 
         _homeSnapModeIndex = TryReadSnapModeIndexFromCurrentConfig();
+        ApplySpecialWeaponLogicFromCurrentConfig();
         if (_onnxModels.Count == 0)
         {
             _onnxTopSelectedModelIndex = -1;
@@ -922,6 +1092,8 @@ public sealed partial class MainWindow : GameWindow
         _snapHipfireStrengthFactor = DefaultSnapHipfireStrengthFactor;
         _snapHeight = DefaultSnapHeight;
         _snapInnerInterpolationTypeIndex = 0;
+        Array.Clear(_specialWeaponAimSnapEnabled);
+        Array.Clear(_specialWeaponRapidFireEnabled);
     }
 
     private int TryReadSnapInnerInterpolationTypeIndexFromCurrentConfig()
@@ -997,6 +1169,250 @@ public sealed partial class MainWindow : GameWindow
         catch
         {
             // Keep selection changes responsive if file IO fails.
+        }
+    }
+
+    private void TryWriteSpecialWeaponLogicValueToCurrentConfig(int weaponIndex, bool aimSnapEnabled, bool rapidFireEnabled)
+    {
+        if (weaponIndex < 0 || weaponIndex >= SpecialWeaponNames.Length)
+        {
+            return;
+        }
+
+        if (!TryGetCurrentConfigPath(out var configPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(configPath);
+            var specialWeaponLogicRoot = EnsureSpecialWeaponLogicRoot(root);
+            _specialWeaponAimSnapEnabled[weaponIndex] = aimSnapEnabled;
+            _specialWeaponRapidFireEnabled[weaponIndex] = rapidFireEnabled;
+            specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponAimSnapEnabled);
+            specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponRapidFireEnabled);
+            RemoveLegacySpecialWeaponEntries(specialWeaponLogicRoot);
+            SaveJsonObject(configPath, root);
+        }
+        catch
+        {
+            // Keep UI responsive if file IO fails.
+        }
+    }
+
+    private void ApplySpecialWeaponLogicFromCurrentConfig()
+    {
+        Array.Clear(_specialWeaponAimSnapEnabled);
+        Array.Clear(_specialWeaponRapidFireEnabled);
+
+        if (!TryGetCurrentConfigPath(out var configPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(configPath);
+            var specialWeaponLogicRoot = EnsureSpecialWeaponLogicRoot(root);
+            var hasAnyChanges = false;
+            var hasAimSnapList = TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[AimSnapWeaponListConfigKey], _specialWeaponAimSnapEnabled);
+            var hasRapidFireList = TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[RapidFireWeaponListConfigKey], _specialWeaponRapidFireEnabled);
+            var legacyAimSnapFlags = new bool[SpecialWeaponNames.Length];
+            var legacyRapidFireFlags = new bool[SpecialWeaponNames.Length];
+            var hasLegacyValues = TryApplyLegacySpecialWeaponLogic(
+                specialWeaponLogicRoot,
+                legacyAimSnapFlags,
+                legacyRapidFireFlags,
+                loadAimSnapFlags: true,
+                loadRapidFireFlags: true,
+                out var hasLegacyChanges);
+            var shouldMigrateFromLegacy = hasLegacyValues && (
+                !hasAimSnapList ||
+                !hasRapidFireList ||
+                (IsAllFalse(_specialWeaponAimSnapEnabled) && IsAllFalse(_specialWeaponRapidFireEnabled)));
+            if (shouldMigrateFromLegacy)
+            {
+                Array.Copy(legacyAimSnapFlags, _specialWeaponAimSnapEnabled, SpecialWeaponNames.Length);
+                Array.Copy(legacyRapidFireFlags, _specialWeaponRapidFireEnabled, SpecialWeaponNames.Length);
+                hasAnyChanges = true;
+            }
+
+            if (specialWeaponLogicRoot[AimSnapWeaponListConfigKey] is not JsonArray)
+            {
+                specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponAimSnapEnabled);
+                hasAnyChanges = true;
+            }
+
+            if (specialWeaponLogicRoot[RapidFireWeaponListConfigKey] is not JsonArray)
+            {
+                specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponRapidFireEnabled);
+                hasAnyChanges = true;
+            }
+
+            if (hasAimSnapList && specialWeaponLogicRoot[AimSnapWeaponListConfigKey] is JsonArray)
+            {
+                specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponAimSnapEnabled);
+            }
+
+            if (hasRapidFireList && specialWeaponLogicRoot[RapidFireWeaponListConfigKey] is JsonArray)
+            {
+                specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponRapidFireEnabled);
+            }
+
+            var removedLegacyEntries = RemoveLegacySpecialWeaponEntries(specialWeaponLogicRoot);
+            hasAnyChanges |= hasLegacyChanges || removedLegacyEntries;
+
+            if (hasAnyChanges)
+            {
+                SaveJsonObject(configPath, root);
+            }
+        }
+        catch
+        {
+            // Ignore malformed data and keep defaults in UI.
+            Array.Clear(_specialWeaponAimSnapEnabled);
+            Array.Clear(_specialWeaponRapidFireEnabled);
+        }
+    }
+
+    private static JsonObject EnsureSpecialWeaponLogicRoot(JsonObject root)
+    {
+        if (root[SpecialWeaponLogicConfigKey] is JsonObject specialWeaponLogicRoot)
+        {
+            return specialWeaponLogicRoot;
+        }
+
+        specialWeaponLogicRoot = new JsonObject();
+        root[SpecialWeaponLogicConfigKey] = specialWeaponLogicRoot;
+        return specialWeaponLogicRoot;
+    }
+
+    private static JsonArray BuildEnabledWeaponListNode(IReadOnlyList<bool> enabledFlags)
+    {
+        var listNode = new JsonArray();
+        for (var i = 0; i < SpecialWeaponNames.Length; i++)
+        {
+            if (i < enabledFlags.Count && enabledFlags[i])
+            {
+                listNode.Add(SpecialWeaponNames[i]);
+            }
+        }
+
+        return listNode;
+    }
+
+    private static bool TryApplyEnabledWeaponListFromNode(JsonNode? node, bool[] target)
+    {
+        if (node is not JsonArray listNode)
+        {
+            return false;
+        }
+
+        Array.Clear(target);
+        foreach (var item in listNode)
+        {
+            string? weaponName;
+            try
+            {
+                weaponName = item?.GetValue<string>()?.Trim();
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(weaponName))
+            {
+                continue;
+            }
+
+            var index = Array.FindIndex(SpecialWeaponNames, name => string.Equals(name, weaponName, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0)
+            {
+                target[index] = true;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryApplyLegacySpecialWeaponLogic(
+        JsonObject specialWeaponLogicRoot,
+        bool[] aimSnapFlags,
+        bool[] rapidFireFlags,
+        bool loadAimSnapFlags,
+        bool loadRapidFireFlags,
+        out bool changed)
+    {
+        changed = false;
+        var hasAnyLegacyValue = false;
+        for (var i = 0; i < SpecialWeaponNames.Length; i++)
+        {
+            var weaponName = SpecialWeaponNames[i];
+            if (specialWeaponLogicRoot[weaponName] is not JsonObject legacyNode)
+            {
+                continue;
+            }
+
+            if (loadAimSnapFlags && TryReadBoolFromNode(legacyNode["aimSnap"], out var aimSnapEnabled))
+            {
+                aimSnapFlags[i] = aimSnapEnabled;
+                changed = true;
+                hasAnyLegacyValue |= aimSnapEnabled;
+            }
+
+            if (loadRapidFireFlags && TryReadBoolFromNode(legacyNode["rapidFire"], out var rapidFireEnabled))
+            {
+                rapidFireFlags[i] = rapidFireEnabled;
+                changed = true;
+                hasAnyLegacyValue |= rapidFireEnabled;
+            }
+        }
+
+        return hasAnyLegacyValue;
+    }
+
+    private static bool RemoveLegacySpecialWeaponEntries(JsonObject specialWeaponLogicRoot)
+    {
+        var removed = false;
+        for (var i = 0; i < SpecialWeaponNames.Length; i++)
+        {
+            removed |= specialWeaponLogicRoot.Remove(SpecialWeaponNames[i]);
+        }
+
+        return removed;
+    }
+
+    private static bool IsAllFalse(IReadOnlyList<bool> values)
+    {
+        for (var i = 0; i < values.Count; i++)
+        {
+            if (values[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryReadBoolFromNode(JsonNode? node, out bool value)
+    {
+        value = false;
+        if (node is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            value = node.GetValue<bool>();
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -1262,7 +1678,12 @@ public sealed partial class MainWindow : GameWindow
                 return false;
             }
 
-            File.WriteAllText(path, "{}" + Environment.NewLine);
+            var root = new JsonObject();
+            var specialWeaponLogicRoot = EnsureSpecialWeaponLogicRoot(root);
+            specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = new JsonArray();
+            specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = new JsonArray();
+
+            SaveJsonObject(path, root);
             ResetConfigUiStateToDefaults();
             RefreshConfigFiles(baseName);
             return true;
@@ -1311,6 +1732,13 @@ public sealed partial class MainWindow : GameWindow
         GL.Viewport(0, 0, ClientSize.X, ClientSize.Y);
         _controller?.WindowResized(ClientSize.X, ClientSize.Y);
         RefreshDpiScale();
+        RememberNormalWindowBounds();
+    }
+
+    protected override void OnMove(WindowPositionEventArgs e)
+    {
+        base.OnMove(e);
+        RememberNormalWindowBounds();
     }
 
     protected override void OnTextInput(TextInputEventArgs e)
@@ -1336,6 +1764,8 @@ public sealed partial class MainWindow : GameWindow
         }
 
         _controller?.Dispose();
+        SaveWindowState();
+        SDL.QuitSubSystem(SDL.InitFlags.Gamepad);
         base.OnUnload();
     }
 
@@ -1362,6 +1792,53 @@ public sealed partial class MainWindow : GameWindow
         _controller.SetDpiScale(_dpiScale);
     }
 
+    private static void OpenViGemBusInstaller()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = ViGemBusInstallerUrl,
+                UseShellExecute = true
+            };
+            Process.Start(psi);
+        }
+        catch
+        {
+            // Ignore launcher failures to keep UI responsive.
+        }
+    }
+
+    private static string[] GetConnectedGamepadOptions()
+    {
+        if ((SDL.WasInit(SDL.InitFlags.Gamepad) & SDL.InitFlags.Gamepad) == 0)
+        {
+            if (!SDL.InitSubSystem(SDL.InitFlags.Gamepad))
+            {
+                return Array.Empty<string>();
+            }
+        }
+
+        var gamepads = SDL.GetGamepads(out var count);
+        if (gamepads is null || count <= 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var options = new List<string>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var instanceId = gamepads[i];
+            var name = SDL.GetGamepadNameForID(instanceId);
+            if (!string.IsNullOrWhiteSpace(name))
+            {
+                options.Add(name);
+            }
+        }
+
+        return options.ToArray();
+    }
+
     private int GetDisplayHeightOrWindowHeight()
     {
         try
@@ -1386,6 +1863,66 @@ public sealed partial class MainWindow : GameWindow
 
         return Math.Max(1, ClientSize.Y);
     }
+
+    private void RememberNormalWindowBounds()
+    {
+        if (WindowState == WindowState.Maximized)
+        {
+            return;
+        }
+
+        if (ClientSize.X > 0 && ClientSize.Y > 0)
+        {
+            _lastNormalClientSize = ClientSize;
+        }
+
+        _lastNormalLocation = Location;
+    }
+
+    private void SaveWindowState()
+    {
+        try
+        {
+            var useLastNormalBounds = WindowState == WindowState.Maximized;
+            var size = useLastNormalBounds ? _lastNormalClientSize : ClientSize;
+            var location = useLastNormalBounds ? _lastNormalLocation : Location;
+            if (size.X <= 0 || size.Y <= 0)
+            {
+                size = ClientSize;
+            }
+
+            var snapshot = new WindowStateSnapshot
+            {
+                X = location.X,
+                Y = location.Y,
+                Width = Math.Max(400, size.X),
+                Height = Math.Max(300, size.Y),
+                IsMaximized = WindowState == WindowState.Maximized
+            };
+            var content = string.Join(
+                Environment.NewLine,
+                "[WindowState]",
+                $"X={snapshot.X}",
+                $"Y={snapshot.Y}",
+                $"Width={snapshot.Width}",
+                $"Height={snapshot.Height}",
+                $"IsMaximized={snapshot.IsMaximized}") + Environment.NewLine;
+            File.WriteAllText(WindowStateFilePath, content);
+        }
+        catch
+        {
+            // Ignore persistence failures to avoid blocking shutdown.
+        }
+    }
+}
+
+internal sealed class WindowStateSnapshot
+{
+    public int X { get; init; }
+    public int Y { get; init; }
+    public int Width { get; init; }
+    public int Height { get; init; }
+    public bool IsMaximized { get; init; }
 }
 
 internal static class RuntimePerformance
