@@ -55,9 +55,11 @@ public sealed partial class MainWindow : GameWindow
     private const string SpecialWeaponLogicConfigKey = "specialWeaponLogic";
     private const string AimSnapWeaponListConfigKey = "aimSnapWeapons";
     private const string RapidFireWeaponListConfigKey = "rapidFireWeapons";
+    private const string ReleaseFireWeaponListConfigKey = "releaseFireWeapons";
     private int _homeSnapModeIndex = -1;
     private readonly bool[] _specialWeaponAimSnapEnabled = new bool[SpecialWeaponNames.Length];
     private readonly bool[] _specialWeaponRapidFireEnabled = new bool[SpecialWeaponNames.Length];
+    private readonly bool[] _specialWeaponReleaseFireEnabled = new bool[SpecialWeaponNames.Length];
     private readonly List<string> _configFiles = new();
     private int _selectedConfigFileIndex;
     private string _addConfigNameBuffer = string.Empty;
@@ -79,7 +81,6 @@ public sealed partial class MainWindow : GameWindow
     private int _snapInnerInterpolationTypeIndex;
     private int _selectedGamepadIndex;
     private OpenTK.Mathematics.Vector2i _lastNormalClientSize;
-    private OpenTK.Mathematics.Vector2i _lastNormalLocation;
 
     internal static string WindowStateFilePath => Path.Combine(Environment.CurrentDirectory, WindowStateFileName);
 
@@ -119,16 +120,6 @@ public sealed partial class MainWindow : GameWindow
                 values[key] = value;
             }
 
-            if (!values.TryGetValue("X", out var xRaw) || !int.TryParse(xRaw, out var x))
-            {
-                return false;
-            }
-
-            if (!values.TryGetValue("Y", out var yRaw) || !int.TryParse(yRaw, out var y))
-            {
-                return false;
-            }
-
             if (!values.TryGetValue("Width", out var widthRaw) || !int.TryParse(widthRaw, out var width) || width <= 0)
             {
                 return false;
@@ -145,8 +136,6 @@ public sealed partial class MainWindow : GameWindow
 
             snapshot = new WindowStateSnapshot
             {
-                X = x,
-                Y = y,
                 Width = width,
                 Height = height,
                 IsMaximized = isMaximized
@@ -174,7 +163,6 @@ public sealed partial class MainWindow : GameWindow
         RefreshOnnxModels();
         RefreshConfigFiles();
         _lastNormalClientSize = ClientSize;
-        _lastNormalLocation = Location;
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
@@ -617,19 +605,22 @@ public sealed partial class MainWindow : GameWindow
 
             var aimSnapColumnWidth = ImGui.CalcTextSize("瞄准吸附").X;
             var rapidFireColumnWidth = ImGui.CalcTextSize("开火连点").X;
+            var releaseFireColumnWidth = ImGui.CalcTextSize("松手开火").X;
             var specialWeaponStyle = ImGui.GetStyle();
             weaponNameColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
             aimSnapColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
             rapidFireColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
+            releaseFireColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() + topPanelStyle.CellPadding.Y);
             if (ImGui.BeginTable(
                     "##SpecialWeaponLogicTable",
-                    3,
+                    4,
                     ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.BordersOuter | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX))
             {
                 ImGui.TableSetupColumn("武器名", ImGuiTableColumnFlags.WidthFixed, weaponNameColumnWidth);
                 ImGui.TableSetupColumn("瞄准吸附", ImGuiTableColumnFlags.WidthFixed, aimSnapColumnWidth);
                 ImGui.TableSetupColumn("开火连点", ImGuiTableColumnFlags.WidthFixed, rapidFireColumnWidth);
+                ImGui.TableSetupColumn("松手开火", ImGuiTableColumnFlags.WidthFixed, releaseFireColumnWidth);
                 ImGui.TableHeadersRow();
 
                 for (var i = 0; i < SpecialWeaponNames.Length; i++)
@@ -643,13 +634,19 @@ public sealed partial class MainWindow : GameWindow
                     ImGui.TableSetColumnIndex(1);
                     if (ImGui.Checkbox($"##SpecialWeaponAimSnap_{i}", ref _specialWeaponAimSnapEnabled[i]))
                     {
-                        TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i]);
+                        TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i], _specialWeaponReleaseFireEnabled[i]);
                     }
 
                     ImGui.TableSetColumnIndex(2);
                     if (ImGui.Checkbox($"##SpecialWeaponRapidFire_{i}", ref _specialWeaponRapidFireEnabled[i]))
                     {
-                        TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i]);
+                        TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i], _specialWeaponReleaseFireEnabled[i]);
+                    }
+
+                    ImGui.TableSetColumnIndex(3);
+                    if (ImGui.Checkbox($"##SpecialWeaponReleaseFire_{i}", ref _specialWeaponReleaseFireEnabled[i]))
+                    {
+                        TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i], _specialWeaponReleaseFireEnabled[i]);
                     }
                 }
 
@@ -1094,6 +1091,7 @@ public sealed partial class MainWindow : GameWindow
         _snapInnerInterpolationTypeIndex = 0;
         Array.Clear(_specialWeaponAimSnapEnabled);
         Array.Clear(_specialWeaponRapidFireEnabled);
+        Array.Clear(_specialWeaponReleaseFireEnabled);
     }
 
     private int TryReadSnapInnerInterpolationTypeIndexFromCurrentConfig()
@@ -1172,7 +1170,7 @@ public sealed partial class MainWindow : GameWindow
         }
     }
 
-    private void TryWriteSpecialWeaponLogicValueToCurrentConfig(int weaponIndex, bool aimSnapEnabled, bool rapidFireEnabled)
+    private void TryWriteSpecialWeaponLogicValueToCurrentConfig(int weaponIndex, bool aimSnapEnabled, bool rapidFireEnabled, bool releaseFireEnabled)
     {
         if (weaponIndex < 0 || weaponIndex >= SpecialWeaponNames.Length)
         {
@@ -1190,9 +1188,10 @@ public sealed partial class MainWindow : GameWindow
             var specialWeaponLogicRoot = EnsureSpecialWeaponLogicRoot(root);
             _specialWeaponAimSnapEnabled[weaponIndex] = aimSnapEnabled;
             _specialWeaponRapidFireEnabled[weaponIndex] = rapidFireEnabled;
+            _specialWeaponReleaseFireEnabled[weaponIndex] = releaseFireEnabled;
             specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponAimSnapEnabled);
             specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponRapidFireEnabled);
-            RemoveLegacySpecialWeaponEntries(specialWeaponLogicRoot);
+            specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponReleaseFireEnabled);
             SaveJsonObject(configPath, root);
         }
         catch
@@ -1205,6 +1204,7 @@ public sealed partial class MainWindow : GameWindow
     {
         Array.Clear(_specialWeaponAimSnapEnabled);
         Array.Clear(_specialWeaponRapidFireEnabled);
+        Array.Clear(_specialWeaponReleaseFireEnabled);
 
         if (!TryGetCurrentConfigPath(out var configPath))
         {
@@ -1218,25 +1218,7 @@ public sealed partial class MainWindow : GameWindow
             var hasAnyChanges = false;
             var hasAimSnapList = TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[AimSnapWeaponListConfigKey], _specialWeaponAimSnapEnabled);
             var hasRapidFireList = TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[RapidFireWeaponListConfigKey], _specialWeaponRapidFireEnabled);
-            var legacyAimSnapFlags = new bool[SpecialWeaponNames.Length];
-            var legacyRapidFireFlags = new bool[SpecialWeaponNames.Length];
-            var hasLegacyValues = TryApplyLegacySpecialWeaponLogic(
-                specialWeaponLogicRoot,
-                legacyAimSnapFlags,
-                legacyRapidFireFlags,
-                loadAimSnapFlags: true,
-                loadRapidFireFlags: true,
-                out var hasLegacyChanges);
-            var shouldMigrateFromLegacy = hasLegacyValues && (
-                !hasAimSnapList ||
-                !hasRapidFireList ||
-                (IsAllFalse(_specialWeaponAimSnapEnabled) && IsAllFalse(_specialWeaponRapidFireEnabled)));
-            if (shouldMigrateFromLegacy)
-            {
-                Array.Copy(legacyAimSnapFlags, _specialWeaponAimSnapEnabled, SpecialWeaponNames.Length);
-                Array.Copy(legacyRapidFireFlags, _specialWeaponRapidFireEnabled, SpecialWeaponNames.Length);
-                hasAnyChanges = true;
-            }
+            var hasReleaseFireList = TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey], _specialWeaponReleaseFireEnabled);
 
             if (specialWeaponLogicRoot[AimSnapWeaponListConfigKey] is not JsonArray)
             {
@@ -1250,6 +1232,12 @@ public sealed partial class MainWindow : GameWindow
                 hasAnyChanges = true;
             }
 
+            if (specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] is not JsonArray)
+            {
+                specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponReleaseFireEnabled);
+                hasAnyChanges = true;
+            }
+
             if (hasAimSnapList && specialWeaponLogicRoot[AimSnapWeaponListConfigKey] is JsonArray)
             {
                 specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponAimSnapEnabled);
@@ -1260,8 +1248,10 @@ public sealed partial class MainWindow : GameWindow
                 specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponRapidFireEnabled);
             }
 
-            var removedLegacyEntries = RemoveLegacySpecialWeaponEntries(specialWeaponLogicRoot);
-            hasAnyChanges |= hasLegacyChanges || removedLegacyEntries;
+            if (hasReleaseFireList && specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] is JsonArray)
+            {
+                specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] = BuildEnabledWeaponListNode(_specialWeaponReleaseFireEnabled);
+            }
 
             if (hasAnyChanges)
             {
@@ -1273,6 +1263,7 @@ public sealed partial class MainWindow : GameWindow
             // Ignore malformed data and keep defaults in UI.
             Array.Clear(_specialWeaponAimSnapEnabled);
             Array.Clear(_specialWeaponRapidFireEnabled);
+            Array.Clear(_specialWeaponReleaseFireEnabled);
         }
     }
 
@@ -1331,66 +1322,6 @@ public sealed partial class MainWindow : GameWindow
             if (index >= 0)
             {
                 target[index] = true;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool TryApplyLegacySpecialWeaponLogic(
-        JsonObject specialWeaponLogicRoot,
-        bool[] aimSnapFlags,
-        bool[] rapidFireFlags,
-        bool loadAimSnapFlags,
-        bool loadRapidFireFlags,
-        out bool changed)
-    {
-        changed = false;
-        var hasAnyLegacyValue = false;
-        for (var i = 0; i < SpecialWeaponNames.Length; i++)
-        {
-            var weaponName = SpecialWeaponNames[i];
-            if (specialWeaponLogicRoot[weaponName] is not JsonObject legacyNode)
-            {
-                continue;
-            }
-
-            if (loadAimSnapFlags && TryReadBoolFromNode(legacyNode["aimSnap"], out var aimSnapEnabled))
-            {
-                aimSnapFlags[i] = aimSnapEnabled;
-                changed = true;
-                hasAnyLegacyValue |= aimSnapEnabled;
-            }
-
-            if (loadRapidFireFlags && TryReadBoolFromNode(legacyNode["rapidFire"], out var rapidFireEnabled))
-            {
-                rapidFireFlags[i] = rapidFireEnabled;
-                changed = true;
-                hasAnyLegacyValue |= rapidFireEnabled;
-            }
-        }
-
-        return hasAnyLegacyValue;
-    }
-
-    private static bool RemoveLegacySpecialWeaponEntries(JsonObject specialWeaponLogicRoot)
-    {
-        var removed = false;
-        for (var i = 0; i < SpecialWeaponNames.Length; i++)
-        {
-            removed |= specialWeaponLogicRoot.Remove(SpecialWeaponNames[i]);
-        }
-
-        return removed;
-    }
-
-    private static bool IsAllFalse(IReadOnlyList<bool> values)
-    {
-        for (var i = 0; i < values.Count; i++)
-        {
-            if (values[i])
-            {
-                return false;
             }
         }
 
@@ -1682,6 +1613,7 @@ public sealed partial class MainWindow : GameWindow
             var specialWeaponLogicRoot = EnsureSpecialWeaponLogicRoot(root);
             specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = new JsonArray();
             specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = new JsonArray();
+            specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] = new JsonArray();
 
             SaveJsonObject(path, root);
             ResetConfigUiStateToDefaults();
@@ -1876,7 +1808,6 @@ public sealed partial class MainWindow : GameWindow
             _lastNormalClientSize = ClientSize;
         }
 
-        _lastNormalLocation = Location;
     }
 
     private void SaveWindowState()
@@ -1885,7 +1816,6 @@ public sealed partial class MainWindow : GameWindow
         {
             var useLastNormalBounds = WindowState == WindowState.Maximized;
             var size = useLastNormalBounds ? _lastNormalClientSize : ClientSize;
-            var location = useLastNormalBounds ? _lastNormalLocation : Location;
             if (size.X <= 0 || size.Y <= 0)
             {
                 size = ClientSize;
@@ -1893,8 +1823,6 @@ public sealed partial class MainWindow : GameWindow
 
             var snapshot = new WindowStateSnapshot
             {
-                X = location.X,
-                Y = location.Y,
                 Width = Math.Max(400, size.X),
                 Height = Math.Max(300, size.Y),
                 IsMaximized = WindowState == WindowState.Maximized
@@ -1902,8 +1830,6 @@ public sealed partial class MainWindow : GameWindow
             var content = string.Join(
                 Environment.NewLine,
                 "[WindowState]",
-                $"X={snapshot.X}",
-                $"Y={snapshot.Y}",
                 $"Width={snapshot.Width}",
                 $"Height={snapshot.Height}",
                 $"IsMaximized={snapshot.IsMaximized}") + Environment.NewLine;
@@ -1918,8 +1844,6 @@ public sealed partial class MainWindow : GameWindow
 
 internal sealed class WindowStateSnapshot
 {
-    public int X { get; init; }
-    public int Y { get; init; }
     public int Width { get; init; }
     public int Height { get; init; }
     public bool IsMaximized { get; init; }
