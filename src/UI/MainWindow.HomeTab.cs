@@ -246,7 +246,7 @@ public sealed partial class MainWindow
             if (ImGui.InputInt("##SnapInnerRange", ref _snapInnerRange, 0, 0))
             {
                 _snapInnerRange = Math.Clamp(_snapInnerRange, 1, _snapOuterRange);
-                TryWriteIntValueToCurrentConfig("snapInnerRange", _snapInnerRange);
+                TryWriteIntToCurrentConfig("snapInnerRange", _snapInnerRange);
             }
 
             ImGui.TableSetColumnIndex(2);
@@ -258,8 +258,8 @@ public sealed partial class MainWindow
             {
                 _snapOuterRange = Math.Clamp(_snapOuterRange, selectedModelSize, snapOuterRangeMax);
                 _snapInnerRange = Math.Clamp(_snapInnerRange, 1, _snapOuterRange);
-                TryWriteIntValueToCurrentConfig("snapOuterRange", _snapOuterRange);
-                TryWriteIntValueToCurrentConfig("snapInnerRange", _snapInnerRange);
+                TryWriteIntToCurrentConfig("snapOuterRange", _snapOuterRange);
+                TryWriteIntToCurrentConfig("snapInnerRange", _snapInnerRange);
             }
 
             ImGui.TableSetColumnIndex(5);
@@ -282,7 +282,7 @@ public sealed partial class MainWindow
             if (ImGui.InputFloat("##SnapInnerStrength", ref _snapInnerStrength, 0.01f, 0.01f, "%.2f"))
             {
                 _snapInnerStrength = Math.Clamp(_snapInnerStrength, 0f, 1f);
-                TryWriteFloatValueToCurrentConfig("snapInnerStrength", _snapInnerStrength);
+                TryWriteFloatToCurrentConfig("snapInnerStrength", _snapInnerStrength);
             }
 
             ImGui.TableSetColumnIndex(2);
@@ -293,7 +293,7 @@ public sealed partial class MainWindow
             if (ImGui.InputFloat("##SnapOuterStrength", ref _snapOuterStrength, 0.01f, 0.01f, "%.2f"))
             {
                 _snapOuterStrength = Math.Clamp(_snapOuterStrength, 0f, 1f);
-                TryWriteFloatValueToCurrentConfig("snapOuterStrength", _snapOuterStrength);
+                TryWriteFloatToCurrentConfig("snapOuterStrength", _snapOuterStrength);
             }
 
             ImGui.TableSetColumnIndex(4);
@@ -304,7 +304,7 @@ public sealed partial class MainWindow
             if (ImGui.InputFloat("##SnapStartStrength", ref _snapStartStrength, 0.01f, 0.01f, "%.2f"))
             {
                 _snapStartStrength = Math.Clamp(_snapStartStrength, 0f, 1f);
-                TryWriteFloatValueToCurrentConfig("snapStartStrength", _snapStartStrength);
+                TryWriteFloatToCurrentConfig("snapStartStrength", _snapStartStrength);
             }
 
             // Row 3: extras
@@ -318,7 +318,7 @@ public sealed partial class MainWindow
             if (ImGui.InputFloat("##SnapHipfireStrengthFactor", ref _snapHipfireStrengthFactor, 0.01f, 0.01f, "%.2f"))
             {
                 _snapHipfireStrengthFactor = Math.Clamp(_snapHipfireStrengthFactor, 0f, 1f);
-                TryWriteFloatValueToCurrentConfig("snapHipfireStrengthFactor", _snapHipfireStrengthFactor);
+                TryWriteFloatToCurrentConfig("snapHipfireStrengthFactor", _snapHipfireStrengthFactor);
             }
 
             ImGui.TableSetColumnIndex(2);
@@ -329,7 +329,7 @@ public sealed partial class MainWindow
             if (ImGui.InputFloat("##SnapVerticalStrengthFactor", ref _snapVerticalStrengthFactor, 0.01f, 0.01f, "%.2f"))
             {
                 _snapVerticalStrengthFactor = Math.Clamp(_snapVerticalStrengthFactor, 0f, 1f);
-                TryWriteFloatValueToCurrentConfig("snapVerticalStrengthFactor", _snapVerticalStrengthFactor);
+                TryWriteFloatToCurrentConfig("snapVerticalStrengthFactor", _snapVerticalStrengthFactor);
             }
 
             ImGui.TableSetColumnIndex(4);
@@ -340,7 +340,7 @@ public sealed partial class MainWindow
             if (ImGui.InputFloat("##SnapHeight", ref _snapHeight, 0.01f, 0.01f, "%.2f"))
             {
                 _snapHeight = Math.Clamp(_snapHeight, 0f, 1f);
-                TryWriteFloatValueToCurrentConfig("snapHeight", _snapHeight);
+                TryWriteFloatToCurrentConfig("snapHeight", _snapHeight);
             }
 
             // Row 4: interpolation
@@ -363,7 +363,7 @@ public sealed partial class MainWindow
                     if (ImGui.Selectable(SnapInnerInterpolationTypeOptions[i], isSelected))
                     {
                         _snapInnerInterpolationTypeIndex = i;
-                        TryWriteStringValueToCurrentConfig("snapInnerInterpolationType", SnapInnerInterpolationTypeOptions[i]);
+                        TryWriteStringToCurrentConfig("snapInnerInterpolationType", SnapInnerInterpolationTypeOptions[i]);
                     }
 
                     if (isSelected)
@@ -414,7 +414,7 @@ public sealed partial class MainWindow
                 if (ImGui.Selectable(HomeSnapModeOptions[i], isSelected))
                 {
                     _homeSnapModeIndex = i;
-                    TryWriteStringValueToCurrentConfig("snap", HomeSnapModeOptions[i]);
+                    TryWriteStringToCurrentConfig("snap", HomeSnapModeOptions[i]);
                 }
 
                 if (isSelected)

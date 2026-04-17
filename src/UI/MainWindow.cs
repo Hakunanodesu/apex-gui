@@ -3,7 +3,6 @@ using System.Numerics;
 using System.Diagnostics;
 using System.Threading;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using ImGuiNET;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
@@ -85,6 +84,9 @@ public sealed partial class MainWindow : GameWindow
     private ViGEmMappingWorker? _viGEmMappingWorker;
     private readonly ConfigService _configService = new(ConfigsDirectoryPath);
     private readonly ConfigAppService _configAppService = new();
+    private readonly ConfigContextService _configContextService = new();
+    private readonly ConfigSelectionService _configSelectionService = new();
+    private readonly ConfigFileLifecycleService _configFileLifecycleService = new();
     private readonly DependencyService _dependencyService = new();
     private readonly InputDeviceService _inputDeviceService = new();
     private readonly SpecialWeaponLogicService _specialWeaponLogicService = new();
@@ -449,7 +451,7 @@ public sealed partial class MainWindow : GameWindow
 
     private void TryWriteSelectedModelNameToCurrentConfig(string modelName)
     {
-        TryWriteStringValueToCurrentConfig("model", modelName);
+        TryWriteStringToCurrentConfig("model", modelName);
     }
 
     private void TryApplyModelSelectionFromCurrentConfig()
@@ -470,67 +472,57 @@ public sealed partial class MainWindow : GameWindow
             return;
         }
 
-        var modelName = TryReadSelectedModelNameFromCurrentConfig();
-        if (string.IsNullOrWhiteSpace(modelName))
-        {
-            _onnxTopSelectedModelIndex = -1;
-            ApplySnapParametersFromCurrentConfig();
-            return;
-        }
-
-        var modelIndex = _onnxModels.FindIndex(m => string.Equals(m.DisplayName, modelName, StringComparison.OrdinalIgnoreCase));
-        if (modelIndex < 0)
-        {
-            _onnxTopSelectedModelIndex = -1;
-            ApplySnapParametersFromCurrentConfig();
-            return;
-        }
-
-        _onnxTopSelectedModelIndex = modelIndex;
+        _onnxTopSelectedModelIndex = _configSelectionService.ResolveModelIndex(TryReadSelectedModelNameFromCurrentConfig(), _onnxModels);
         ApplySnapParametersFromCurrentConfig();
     }
 
     private int TryReadSnapModeIndexFromCurrentConfig()
     {
-        var modeValue = TryReadStringValueFromCurrentConfig("snap");
-        if (string.IsNullOrWhiteSpace(modeValue))
-        {
-            return 0;
-        }
-
-        for (var i = 0; i < HomeSnapModeOptions.Length; i++)
-        {
-            if (string.Equals(HomeSnapModeOptions[i], modeValue, StringComparison.OrdinalIgnoreCase))
-            {
-                return i;
-            }
-        }
-
-        return 0;
+        return _configSelectionService.ResolveOptionIndex(
+            TryReadStringFromCurrentConfig("snap"),
+            HomeSnapModeOptions,
+            0);
     }
 
     private string? TryReadSelectedModelNameFromCurrentConfig()
     {
-        return TryReadStringValueFromCurrentConfig("model");
+        return TryReadStringFromCurrentConfig("model");
     }
 
     private void ApplySnapParametersFromCurrentConfig()
     {
+        if (!TryResolveCurrentConfigPath(out var configPath))
+        {
+            return;
+        }
+
         var selectedModelSize = _onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count
             ? Math.Max(1, _onnxModels[_onnxTopSelectedModelIndex].InputHeight)
             : DefaultSnapOuterRange;
-        var displayHeightLimit = GetDisplayHeightOrWindowHeight();
-        var snapOuterRangeMax = Math.Max(selectedModelSize, displayHeightLimit);
+        var snapConfigState = _configSelectionService.ReadSnapConfig(
+            _configService,
+            configPath,
+            selectedModelSize,
+            GetDisplayHeightOrWindowHeight(),
+            DefaultSnapOuterRange,
+            DefaultSnapInnerRange,
+            DefaultSnapOuterStrength,
+            DefaultSnapInnerStrength,
+            DefaultSnapStartStrength,
+            DefaultSnapVerticalStrengthFactor,
+            DefaultSnapHipfireStrengthFactor,
+            DefaultSnapHeight,
+            SnapInnerInterpolationTypeOptions);
 
-        _snapOuterRange = Math.Clamp(TryReadIntValueFromCurrentConfig("snapOuterRange") ?? DefaultSnapOuterRange, selectedModelSize, snapOuterRangeMax);
-        _snapInnerRange = Math.Clamp(TryReadIntValueFromCurrentConfig("snapInnerRange") ?? DefaultSnapInnerRange, 1, _snapOuterRange);
-        _snapOuterStrength = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapOuterStrength") ?? DefaultSnapOuterStrength, 0f, 1f);
-        _snapInnerStrength = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapInnerStrength") ?? DefaultSnapInnerStrength, 0f, 1f);
-        _snapStartStrength = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapStartStrength") ?? DefaultSnapStartStrength, 0f, 1f);
-        _snapVerticalStrengthFactor = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapVerticalStrengthFactor") ?? DefaultSnapVerticalStrengthFactor, 0f, 1f);
-        _snapHipfireStrengthFactor = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapHipfireStrengthFactor") ?? DefaultSnapHipfireStrengthFactor, 0f, 1f);
-        _snapHeight = Math.Clamp(TryReadFloatValueFromCurrentConfig("snapHeight") ?? DefaultSnapHeight, 0f, 1f);
-        _snapInnerInterpolationTypeIndex = TryReadSnapInnerInterpolationTypeIndexFromCurrentConfig();
+        _snapOuterRange = snapConfigState.OuterRange;
+        _snapInnerRange = snapConfigState.InnerRange;
+        _snapOuterStrength = snapConfigState.OuterStrength;
+        _snapInnerStrength = snapConfigState.InnerStrength;
+        _snapStartStrength = snapConfigState.StartStrength;
+        _snapVerticalStrengthFactor = snapConfigState.VerticalStrengthFactor;
+        _snapHipfireStrengthFactor = snapConfigState.HipfireStrengthFactor;
+        _snapHeight = snapConfigState.Height;
+        _snapInnerInterpolationTypeIndex = snapConfigState.InnerInterpolationTypeIndex;
     }
 
     private void ResetConfigUiStateToDefaults()
@@ -552,288 +544,103 @@ public sealed partial class MainWindow : GameWindow
         Array.Clear(_specialWeaponReleaseFireEnabled);
     }
 
-    private int TryReadSnapInnerInterpolationTypeIndexFromCurrentConfig()
+    private void TryWriteStringToCurrentConfig(string key, string value)
     {
-        var interpolationTypeValue = TryReadStringValueFromCurrentConfig("snapInnerInterpolationType");
-        if (string.IsNullOrWhiteSpace(interpolationTypeValue))
-        {
-            return 0;
-        }
-
-        for (var i = 0; i < SnapInnerInterpolationTypeOptions.Length; i++)
-        {
-            if (string.Equals(SnapInnerInterpolationTypeOptions[i], interpolationTypeValue, StringComparison.OrdinalIgnoreCase))
-            {
-                return i;
-            }
-        }
-
-        return 0;
-    }
-
-    private void TryWriteStringValueToCurrentConfig(string key, string value)
-    {
-        if (!TryGetCurrentConfigPath(out var configPath))
+        if (!TryResolveCurrentConfigPath(out var configPath))
         {
             return;
         }
 
-        try
-        {
-            var root = LoadJsonObjectOrEmpty(configPath);
-            root[key] = value;
-            SaveJsonObject(configPath, root);
-        }
-        catch
-        {
-            // Keep selection changes responsive if file IO fails.
-        }
+        _configService.TryWriteString(configPath, key, value);
     }
 
-    private void TryWriteIntValueToCurrentConfig(string key, int value)
+    private void TryWriteIntToCurrentConfig(string key, int value)
     {
-        if (!TryGetCurrentConfigPath(out var configPath))
+        if (!TryResolveCurrentConfigPath(out var configPath))
         {
             return;
         }
 
-        try
-        {
-            var root = LoadJsonObjectOrEmpty(configPath);
-            root[key] = value;
-            SaveJsonObject(configPath, root);
-        }
-        catch
-        {
-            // Keep selection changes responsive if file IO fails.
-        }
+        _configService.TryWriteInt(configPath, key, value);
     }
 
-    private void TryWriteFloatValueToCurrentConfig(string key, float value)
+    private void TryWriteFloatToCurrentConfig(string key, float value)
     {
-        if (!TryGetCurrentConfigPath(out var configPath))
+        if (!TryResolveCurrentConfigPath(out var configPath))
         {
             return;
         }
 
-        try
-        {
-            var root = LoadJsonObjectOrEmpty(configPath);
-            root[key] = value;
-            SaveJsonObject(configPath, root);
-        }
-        catch
-        {
-            // Keep selection changes responsive if file IO fails.
-        }
+        _configService.TryWriteFloat(configPath, key, value);
     }
 
     private void TryWriteSpecialWeaponLogicValueToCurrentConfig(int weaponIndex, bool aimSnapEnabled, bool rapidFireEnabled, bool releaseFireEnabled)
     {
-        if (weaponIndex < 0 || weaponIndex >= SpecialWeaponNames.Length)
+        if (!TryResolveCurrentConfigPath(out var configPath))
         {
             return;
         }
 
-        if (!TryGetCurrentConfigPath(out var configPath))
-        {
-            return;
-        }
-
-        try
-        {
-            var root = LoadJsonObjectOrEmpty(configPath);
-            var specialWeaponLogicRoot = _specialWeaponLogicService.EnsureRoot(root, SpecialWeaponLogicConfigKey);
-            _specialWeaponAimSnapEnabled[weaponIndex] = aimSnapEnabled;
-            _specialWeaponRapidFireEnabled[weaponIndex] = rapidFireEnabled;
-            _specialWeaponReleaseFireEnabled[weaponIndex] = releaseFireEnabled;
-            specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = _specialWeaponLogicService.BuildEnabledWeaponListNode(_specialWeaponAimSnapEnabled, SpecialWeaponNames);
-            specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = _specialWeaponLogicService.BuildEnabledWeaponListNode(_specialWeaponRapidFireEnabled, SpecialWeaponNames);
-            specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] = _specialWeaponLogicService.BuildEnabledWeaponListNode(_specialWeaponReleaseFireEnabled, SpecialWeaponNames);
-            SaveJsonObject(configPath, root);
-        }
-        catch
-        {
-            // Keep UI responsive if file IO fails.
-        }
+        _specialWeaponLogicService.UpdateSingleWeaponAndSave(
+            _configService,
+            configPath,
+            SpecialWeaponLogicConfigKey,
+            AimSnapWeaponListConfigKey,
+            RapidFireWeaponListConfigKey,
+            ReleaseFireWeaponListConfigKey,
+            SpecialWeaponNames,
+            weaponIndex,
+            aimSnapEnabled,
+            rapidFireEnabled,
+            releaseFireEnabled,
+            _specialWeaponAimSnapEnabled,
+            _specialWeaponRapidFireEnabled,
+            _specialWeaponReleaseFireEnabled);
     }
 
     private void ApplySpecialWeaponLogicFromCurrentConfig()
     {
-        Array.Clear(_specialWeaponAimSnapEnabled);
-        Array.Clear(_specialWeaponRapidFireEnabled);
-        Array.Clear(_specialWeaponReleaseFireEnabled);
-
-        if (!TryGetCurrentConfigPath(out var configPath))
+        if (!TryResolveCurrentConfigPath(out var configPath))
         {
-            return;
-        }
-
-        try
-        {
-            var root = LoadJsonObjectOrEmpty(configPath);
-            var specialWeaponLogicRoot = _specialWeaponLogicService.EnsureRoot(root, SpecialWeaponLogicConfigKey);
-            var hasAnyChanges = false;
-            var hasAimSnapList = _specialWeaponLogicService.TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[AimSnapWeaponListConfigKey], _specialWeaponAimSnapEnabled, SpecialWeaponNames);
-            var hasRapidFireList = _specialWeaponLogicService.TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[RapidFireWeaponListConfigKey], _specialWeaponRapidFireEnabled, SpecialWeaponNames);
-            var hasReleaseFireList = _specialWeaponLogicService.TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey], _specialWeaponReleaseFireEnabled, SpecialWeaponNames);
-
-            if (specialWeaponLogicRoot[AimSnapWeaponListConfigKey] is not JsonArray)
-            {
-                specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = _specialWeaponLogicService.BuildEnabledWeaponListNode(_specialWeaponAimSnapEnabled, SpecialWeaponNames);
-                hasAnyChanges = true;
-            }
-
-            if (specialWeaponLogicRoot[RapidFireWeaponListConfigKey] is not JsonArray)
-            {
-                specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = _specialWeaponLogicService.BuildEnabledWeaponListNode(_specialWeaponRapidFireEnabled, SpecialWeaponNames);
-                hasAnyChanges = true;
-            }
-
-            if (specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] is not JsonArray)
-            {
-                specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] = _specialWeaponLogicService.BuildEnabledWeaponListNode(_specialWeaponReleaseFireEnabled, SpecialWeaponNames);
-                hasAnyChanges = true;
-            }
-
-            if (hasAimSnapList && specialWeaponLogicRoot[AimSnapWeaponListConfigKey] is JsonArray)
-            {
-                specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = _specialWeaponLogicService.BuildEnabledWeaponListNode(_specialWeaponAimSnapEnabled, SpecialWeaponNames);
-            }
-
-            if (hasRapidFireList && specialWeaponLogicRoot[RapidFireWeaponListConfigKey] is JsonArray)
-            {
-                specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = _specialWeaponLogicService.BuildEnabledWeaponListNode(_specialWeaponRapidFireEnabled, SpecialWeaponNames);
-            }
-
-            if (hasReleaseFireList && specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] is JsonArray)
-            {
-                specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] = _specialWeaponLogicService.BuildEnabledWeaponListNode(_specialWeaponReleaseFireEnabled, SpecialWeaponNames);
-            }
-
-            if (hasAnyChanges)
-            {
-                SaveJsonObject(configPath, root);
-            }
-        }
-        catch
-        {
-            // Ignore malformed data and keep defaults in UI.
             Array.Clear(_specialWeaponAimSnapEnabled);
             Array.Clear(_specialWeaponRapidFireEnabled);
             Array.Clear(_specialWeaponReleaseFireEnabled);
+            return;
         }
+
+        _specialWeaponLogicService.LoadFromConfig(
+            _configService,
+            configPath,
+            SpecialWeaponLogicConfigKey,
+            AimSnapWeaponListConfigKey,
+            RapidFireWeaponListConfigKey,
+            ReleaseFireWeaponListConfigKey,
+            SpecialWeaponNames,
+            _specialWeaponAimSnapEnabled,
+            _specialWeaponRapidFireEnabled,
+            _specialWeaponReleaseFireEnabled);
     }
 
-    private string? TryReadStringValueFromCurrentConfig(string key)
+    private string? TryReadStringFromCurrentConfig(string key)
     {
-        if (!TryGetCurrentConfigPath(out var configPath))
+        if (!TryResolveCurrentConfigPath(out var configPath))
         {
             return null;
         }
 
-        try
-        {
-            if (!TryLoadJsonObject(configPath, out var root))
-            {
-                return null;
-            }
-
-            var value = root[key]?.GetValue<string>()?.Trim();
-            return string.IsNullOrWhiteSpace(value) ? null : value;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private int? TryReadIntValueFromCurrentConfig(string key)
-    {
-        if (!TryGetCurrentConfigPath(out var configPath))
-        {
-            return null;
-        }
-
-        try
-        {
-            if (!TryLoadJsonObject(configPath, out var root))
-            {
-                return null;
-            }
-
-            return root[key]?.GetValue<int>();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private float? TryReadFloatValueFromCurrentConfig(string key)
-    {
-        if (!TryGetCurrentConfigPath(out var configPath))
-        {
-            return null;
-        }
-
-        try
-        {
-            if (!TryLoadJsonObject(configPath, out var root))
-            {
-                return null;
-            }
-
-            return root[key]?.GetValue<float>();
-        }
-        catch
-        {
-            return null;
-        }
+        return _configService.TryReadString(configPath, key);
     }
 
     private void ClearSelectedModelNameFromCurrentConfig()
     {
-        RemoveStringKeyFromCurrentConfig("model");
-    }
-
-    private void RemoveStringKeyFromCurrentConfig(string key)
-    {
-        if (!TryGetCurrentConfigPath(out var configPath))
+        if (TryResolveCurrentConfigPath(out var configPath))
         {
-            return;
-        }
-
-        try
-        {
-            var root = LoadJsonObjectOrEmpty(configPath);
-            root.Remove(key);
-            SaveJsonObject(configPath, root);
-        }
-        catch
-        {
-            // Keep UI responsive if file IO fails.
+            _configService.TryRemoveKey(configPath, "model");
         }
     }
 
-    private bool TryGetCurrentConfigPath(out string configPath)
-    {
-        configPath = string.Empty;
-        if (_configFiles.Count == 0)
-        {
-            return false;
-        }
-
-        var configIndex = Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1);
-        configPath = _configService.GetConfigPath(_configFiles[configIndex]);
-        return true;
-    }
-
-    private bool TryLoadJsonObject(string path, out JsonObject root) => _configService.TryLoadJsonObject(path, out root);
-
-    private JsonObject LoadJsonObjectOrEmpty(string path) => _configService.LoadJsonObjectOrEmpty(path);
-
-    private void SaveJsonObject(string path, JsonObject root) => _configService.SaveJsonObject(path, root);
+    private bool TryResolveCurrentConfigPath(out string configPath) =>
+        _configContextService.TryResolveCurrentConfigPath(_configFiles, _selectedConfigFileIndex, _configService, out configPath);
 
     private void DrawConfigFileModals()
     {
@@ -908,104 +715,38 @@ public sealed partial class MainWindow : GameWindow
         }
     }
 
-    private static bool TryNormalizeConfigBaseName(string raw, out string baseName, out string error)
-    {
-        baseName = string.Empty;
-        error = string.Empty;
-        var n = raw.Trim();
-        if (n.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-        {
-            n = n[..^5];
-        }
-
-        n = n.Trim();
-        if (n.Length == 0)
-        {
-            error = "名称不能为空";
-            return false;
-        }
-
-        if (n.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        {
-            error = "名称包含非法字符";
-            return false;
-        }
-
-        if (n is "." or "..")
-        {
-            error = "名称无效";
-            return false;
-        }
-
-        baseName = n;
-        return true;
-    }
-
     private bool TryCreateEmptyConfigFile(string rawName, out string error)
     {
-        error = string.Empty;
-        if (!TryNormalizeConfigBaseName(rawName, out var baseName, out var normErr))
+        if (_configFileLifecycleService.TryCreateEmptyConfigFile(
+                rawName,
+                _configService,
+                _specialWeaponLogicService,
+                SpecialWeaponLogicConfigKey,
+                AimSnapWeaponListConfigKey,
+                RapidFireWeaponListConfigKey,
+                ReleaseFireWeaponListConfigKey,
+                out var baseName,
+                out error))
         {
-            error = normErr;
-            return false;
-        }
-
-        try
-        {
-            Directory.CreateDirectory(_configService.ConfigsDirectoryPath);
-            var path = _configService.GetConfigPath(baseName);
-            if (File.Exists(path))
-            {
-                error = "已存在同名配置文件";
-                return false;
-            }
-
-            var root = new JsonObject();
-            var specialWeaponLogicRoot = _specialWeaponLogicService.EnsureRoot(root, SpecialWeaponLogicConfigKey);
-            specialWeaponLogicRoot[AimSnapWeaponListConfigKey] = new JsonArray();
-            specialWeaponLogicRoot[RapidFireWeaponListConfigKey] = new JsonArray();
-            specialWeaponLogicRoot[ReleaseFireWeaponListConfigKey] = new JsonArray();
-
-            SaveJsonObject(path, root);
             ResetConfigUiStateToDefaults();
             RefreshConfigFiles(baseName);
             return true;
         }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
+
+        return false;
     }
 
     private void TryDeleteSelectedConfigFile(string baseName)
     {
-        if (string.IsNullOrWhiteSpace(baseName))
+        _configFileLifecycleService.TryDeleteConfigFile(baseName, _configService);
+        RefreshConfigFiles();
+        if (_configFiles.Count > 0)
         {
-            return;
+            WriteCurrentConfigFileName(_configFiles[_selectedConfigFileIndex]);
         }
-
-        try
+        else
         {
-            var path = _configService.GetConfigPath(baseName);
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-
-            RefreshConfigFiles();
-            if (_configFiles.Count > 0)
-            {
-                WriteCurrentConfigFileName(_configFiles[_selectedConfigFileIndex]);
-            }
-            else
-            {
-                ClearCurrentConfigPointerFile();
-            }
-        }
-        catch
-        {
-            // Ignore delete failures; list refresh will reflect disk state on next scan if needed.
+            ClearCurrentConfigPointerFile();
         }
     }
 
@@ -1390,42 +1131,14 @@ public sealed class ImGuiController : IDisposable
         var mouse = window.MouseState;
         io.AddMousePosEvent(mouse.X, mouse.Y);
         io.AddMouseButtonEvent(0, mouse.IsButtonDown(MouseButton.Left));
-        io.AddMouseButtonEvent(1, mouse.IsButtonDown(MouseButton.Right));
-        io.AddMouseButtonEvent(2, mouse.IsButtonDown(MouseButton.Middle));
-        io.AddMouseWheelEvent(_scrollDelta.X, _scrollDelta.Y);
+        io.AddMouseWheelEvent(0f, _scrollDelta.Y);
         _scrollDelta = Vector2.Zero;
 
         var keyboard = window.KeyboardState;
-        io.AddKeyEvent(ImGuiKey.Tab, keyboard.IsKeyDown(Keys.Tab));
-        io.AddKeyEvent(ImGuiKey.LeftArrow, keyboard.IsKeyDown(Keys.Left));
-        io.AddKeyEvent(ImGuiKey.RightArrow, keyboard.IsKeyDown(Keys.Right));
-        io.AddKeyEvent(ImGuiKey.UpArrow, keyboard.IsKeyDown(Keys.Up));
-        io.AddKeyEvent(ImGuiKey.DownArrow, keyboard.IsKeyDown(Keys.Down));
-        io.AddKeyEvent(ImGuiKey.PageUp, keyboard.IsKeyDown(Keys.PageUp));
-        io.AddKeyEvent(ImGuiKey.PageDown, keyboard.IsKeyDown(Keys.PageDown));
-        io.AddKeyEvent(ImGuiKey.Home, keyboard.IsKeyDown(Keys.Home));
-        io.AddKeyEvent(ImGuiKey.End, keyboard.IsKeyDown(Keys.End));
-        io.AddKeyEvent(ImGuiKey.Insert, keyboard.IsKeyDown(Keys.Insert));
+        // Keep only basic numeric-edit keys.
         io.AddKeyEvent(ImGuiKey.Delete, keyboard.IsKeyDown(Keys.Delete));
         io.AddKeyEvent(ImGuiKey.Backspace, keyboard.IsKeyDown(Keys.Backspace));
-        io.AddKeyEvent(ImGuiKey.Space, keyboard.IsKeyDown(Keys.Space));
         io.AddKeyEvent(ImGuiKey.Enter, keyboard.IsKeyDown(Keys.Enter));
-        io.AddKeyEvent(ImGuiKey.Escape, keyboard.IsKeyDown(Keys.Escape));
-        io.AddKeyEvent(ImGuiKey.A, keyboard.IsKeyDown(Keys.A));
-        io.AddKeyEvent(ImGuiKey.C, keyboard.IsKeyDown(Keys.C));
-        io.AddKeyEvent(ImGuiKey.V, keyboard.IsKeyDown(Keys.V));
-        io.AddKeyEvent(ImGuiKey.X, keyboard.IsKeyDown(Keys.X));
-        io.AddKeyEvent(ImGuiKey.Y, keyboard.IsKeyDown(Keys.Y));
-        io.AddKeyEvent(ImGuiKey.Z, keyboard.IsKeyDown(Keys.Z));
-
-        var ctrl = keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
-        var shift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
-        var alt = keyboard.IsKeyDown(Keys.LeftAlt) || keyboard.IsKeyDown(Keys.RightAlt);
-        var super = keyboard.IsKeyDown(Keys.LeftSuper) || keyboard.IsKeyDown(Keys.RightSuper);
-        io.AddKeyEvent(ImGuiKey.ModCtrl, ctrl);
-        io.AddKeyEvent(ImGuiKey.ModShift, shift);
-        io.AddKeyEvent(ImGuiKey.ModAlt, alt);
-        io.AddKeyEvent(ImGuiKey.ModSuper, super);
     }
 
     private unsafe void RenderDrawData(ImDrawDataPtr drawData)

@@ -104,4 +104,112 @@ internal sealed class ConfigService
     {
         File.WriteAllText(path, root.ToJsonString(IndentedJsonOptions) + Environment.NewLine);
     }
+
+    public string? TryReadString(string path, string key)
+    {
+        try
+        {
+            if (!TryLoadJsonObject(path, out var root))
+            {
+                return null;
+            }
+
+            var value = root[key]?.GetValue<string>()?.Trim();
+            return string.IsNullOrWhiteSpace(value) ? null : value;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public int? TryReadInt(string path, string key)
+    {
+        try
+        {
+            if (!TryLoadJsonObject(path, out var root))
+            {
+                return null;
+            }
+
+            return root[key]?.GetValue<int>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public float? TryReadFloat(string path, string key)
+    {
+        try
+        {
+            if (!TryLoadJsonObject(path, out var root))
+            {
+                return null;
+            }
+
+            return root[key]?.GetValue<float>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public void TryWriteString(string path, string key, string value)
+    {
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(path);
+            root[key] = value;
+            SaveJsonObject(path, root);
+        }
+        catch
+        {
+            // Keep selection changes responsive if file IO fails.
+        }
+    }
+
+    public void TryWriteInt(string path, string key, int value)
+    {
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(path);
+            root[key] = value;
+            SaveJsonObject(path, root);
+        }
+        catch
+        {
+            // Keep selection changes responsive if file IO fails.
+        }
+    }
+
+    public void TryWriteFloat(string path, string key, float value)
+    {
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(path);
+            root[key] = value;
+            SaveJsonObject(path, root);
+        }
+        catch
+        {
+            // Keep selection changes responsive if file IO fails.
+        }
+    }
+
+    public void TryRemoveKey(string path, string key)
+    {
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(path);
+            root.Remove(key);
+            SaveJsonObject(path, root);
+        }
+        catch
+        {
+            // Keep UI responsive if file IO fails.
+        }
+    }
 }
