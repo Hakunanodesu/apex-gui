@@ -4,7 +4,6 @@ public sealed partial class MainWindow
 {
     private readonly object _snapRangePreviewWindowLock = new();
     private System.Windows.Forms.Form? _snapRangePreviewWindow;
-    private Thread? _snapRangePreviewUiThread;
     private bool _snapRangePreviewWindowVisible;
     private bool _snapRangePreviewShuttingDown;
 
@@ -24,7 +23,7 @@ public sealed partial class MainWindow
                 return;
             }
 
-            _snapRangePreviewUiThread = new Thread(() =>
+            var previewWindowThread = new Thread(() =>
             {
                 using var form = new System.Windows.Forms.Form
                 {
@@ -100,7 +99,6 @@ public sealed partial class MainWindow
                     {
                         _snapRangePreviewWindowVisible = false;
                         _snapRangePreviewWindow = null;
-                        _snapRangePreviewUiThread = null;
                     }
                 };
 
@@ -118,8 +116,8 @@ public sealed partial class MainWindow
                 IsBackground = true,
                 Name = "SnapRangePreviewWindowThread"
             };
-            _snapRangePreviewUiThread.SetApartmentState(ApartmentState.STA);
-            _snapRangePreviewUiThread.Start();
+            previewWindowThread.SetApartmentState(ApartmentState.STA);
+            previewWindowThread.Start();
         }
     }
 

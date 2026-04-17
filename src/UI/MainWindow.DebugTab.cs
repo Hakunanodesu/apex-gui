@@ -135,9 +135,9 @@ public sealed partial class MainWindow
         if (_viGEmMappingWorker is null)
         {
             ImGui.Text("状态: 未创建");
-            if (!string.IsNullOrWhiteSpace(_viGEmVirtualGamepadLastError))
+            if (!string.IsNullOrWhiteSpace(_smartCoreMappingState.LastError))
             {
-                ImGui.Text($"错误: {_viGEmVirtualGamepadLastError}");
+                ImGui.Text($"错误: {_smartCoreMappingState.LastError}");
             }
             return;
         }
@@ -148,20 +148,20 @@ public sealed partial class MainWindow
 
         if (ImGui.Button("重新连接"))
         {
-            _viGEmVirtualGamepadLastError = string.Empty;
+            _smartCoreMappingState.LastError = string.Empty;
             _viGEmMappingWorker.ConnectVirtualGamepad();
         }
 
         ImGui.SameLine();
         if (ImGui.Button("断开并释放"))
         {
-            _viGEmVirtualGamepadLastError = string.Empty;
+            _smartCoreMappingState.LastError = string.Empty;
             _viGEmMappingWorker.DisconnectVirtualGamepad();
         }
 
-        if (!string.IsNullOrWhiteSpace(_viGEmVirtualGamepadLastError))
+        if (!string.IsNullOrWhiteSpace(_smartCoreMappingState.LastError))
         {
-            ImGui.Text($"错误: {_viGEmVirtualGamepadLastError}");
+            ImGui.Text($"错误: {_smartCoreMappingState.LastError}");
         }
     }
 
