@@ -45,6 +45,35 @@ public sealed partial class MainWindow
 
         ImGui.Separator();
         DrawOnnxDmlEpTab();
+
+        ImGui.Separator();
+        DrawDebugGamepadCombo();
+
+        ImGui.Separator();
+        DrawViGEmVirtualGamepadPanel();
+    }
+
+    private void DrawDebugGamepadCombo()
+    {
+        var gamepads = GetConnectedGamepadOptions();
+        var hasGamepads = gamepads.Length > 0;
+        _debugSelectedGamepadIndex = hasGamepads
+            ? (_debugSelectedGamepadIndex >= 0 && _debugSelectedGamepadIndex < gamepads.Length ? _debugSelectedGamepadIndex : 0)
+            : -1;
+
+        ImGui.Text("输入设备(SDL3)");
+        ImGui.SameLine();
+        ImGui.TextDisabled(hasGamepads ? "已就绪" : "未检测到手柄");
+
+        var style = ImGui.GetStyle();
+        var refreshButtonWidth = ImGui.CalcTextSize("刷新").X + style.FramePadding.X * 2f;
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - refreshButtonWidth - style.ItemSpacing.X);
+        ImGui.Combo("##DebugInputDeviceCombo", ref _debugSelectedGamepadIndex, gamepads, gamepads.Length);
+        ImGui.SameLine();
+        if (ImGui.Button("刷新##DebugInputDeviceRefresh"))
+        {
+            RefreshDebugInputDevices();
+        }
     }
 
     private void DrawOnnxDmlEpTab()
@@ -96,6 +125,44 @@ public sealed partial class MainWindow
         ImGui.Text($"推理耗时 P99: {_onnxSnapshot.P99InferenceMs:0.00} ms");
         ImGui.Text($"检测框数量: {_onnxSnapshot.DetectionCount}");
         ImGui.Text($"输出摘要: {_onnxSnapshot.OutputSummary}");
+    }
+
+    private void DrawViGEmVirtualGamepadPanel()
+    {
+        ImGui.Text("虚拟手柄(ViGEm)");
+        ImGui.Separator();
+
+        if (_viGEmMappingWorker is null)
+        {
+            ImGui.Text("状态: 未创建");
+            if (!string.IsNullOrWhiteSpace(_viGEmVirtualGamepadLastError))
+            {
+                ImGui.Text($"错误: {_viGEmVirtualGamepadLastError}");
+            }
+            return;
+        }
+
+        ImGui.Text($"状态: {_viGEmMappingWorker.Status}");
+        ImGui.SameLine();
+        ImGui.TextDisabled(_viGEmMappingWorker.IsConnected ? "已连接" : "未连接");
+
+        if (ImGui.Button("重新连接"))
+        {
+            _viGEmVirtualGamepadLastError = string.Empty;
+            _viGEmMappingWorker.ConnectVirtualGamepad();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("断开并释放"))
+        {
+            _viGEmVirtualGamepadLastError = string.Empty;
+            _viGEmMappingWorker.DisconnectVirtualGamepad();
+        }
+
+        if (!string.IsNullOrWhiteSpace(_viGEmVirtualGamepadLastError))
+        {
+            ImGui.Text($"错误: {_viGEmVirtualGamepadLastError}");
+        }
     }
 
     // Debug 页面模型选择必须保持独立：

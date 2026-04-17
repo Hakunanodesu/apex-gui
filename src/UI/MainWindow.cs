@@ -11,6 +11,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Common.Input;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
+using Keys = OpenTK.Windowing.GraphicsLibraryFramework.Keys;
 using SDL3;
 using StbImageSharp;
 using Vortice.Direct3D;
@@ -79,9 +80,14 @@ public sealed partial class MainWindow : GameWindow
     private float _snapHipfireStrengthFactor = DefaultSnapHipfireStrengthFactor;
     private float _snapHeight = DefaultSnapHeight;
     private int _snapInnerInterpolationTypeIndex;
-    private int _selectedGamepadIndex;
+    private int _homeSelectedGamepadIndex;
+    private int _debugSelectedGamepadIndex;
     private OpenTK.Mathematics.Vector2i _lastNormalClientSize;
-
+    private SdlGamepadWorker? _sdlGamepadWorker;
+    private ViGEmMappingWorker? _viGEmMappingWorker;
+    private string _viGEmVirtualGamepadLastError = string.Empty;
+    private (uint InstanceId, string Name)[] _cachedConnectedGamepads = Array.Empty<(uint InstanceId, string Name)>();
+    private string[] _cachedGamepadOptions = Array.Empty<string>();
     internal static string WindowStateFilePath => Path.Combine(Environment.CurrentDirectory, WindowStateFileName);
 
     internal static bool TryLoadWindowState(out WindowStateSnapshot snapshot)
@@ -157,12 +163,19 @@ public sealed partial class MainWindow : GameWindow
     {
         base.OnLoad();
         SDL.InitSubSystem(SDL.InitFlags.Gamepad);
+        _sdlGamepadWorker = new SdlGamepadWorker();
+        _viGEmMappingWorker = new ViGEmMappingWorker();
+        _viGEmMappingWorker.SetSdlGamepadWorker(_sdlGamepadWorker);
         _controller = new ImGuiController(ClientSize.X, ClientSize.Y);
         VSync = VSyncMode.Off;
         RefreshDpiScale();
         RefreshOnnxModels();
         RefreshConfigFiles();
+        RefreshHomeInputDevices();
+        RefreshDebugInputDevices();
         _lastNormalClientSize = ClientSize;
+
+        InitDebugVirtualGamepad();
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
@@ -193,6 +206,8 @@ public sealed partial class MainWindow : GameWindow
             _onnxSnapshot = _onnxWorker.GetSnapshot();
             _onnxStatus = _onnxSnapshot.Status;
         }
+
+        MirrorSelectedGamepadToVirtualGamepad();
 
         _controller.Update(this, (float)args.Time, _dpiScale);
         DrawUi();
@@ -267,14 +282,14 @@ public sealed partial class MainWindow : GameWindow
             ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
             if (ImGui.BeginTable("##DependencyStatusSubTable", 3, ImGuiTableFlags.SizingStretchProp))
             {
-                ImGui.TableSetupColumn("##DepName", ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("ViGemBus").X);
+                ImGui.TableSetupColumn("##DepName", ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("ViGemBus 驱动").X);
                 ImGui.TableSetupColumn("##DepState", ImGuiTableColumnFlags.WidthFixed, baseTextWidth * 3f);
                 ImGui.TableSetupColumn("##DepAction", ImGuiTableColumnFlags.WidthStretch);
 
                 ImGui.TableNextRow();
                 ImGui.TableSetColumnIndex(0);
                 ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted("ViGemBus");
+                ImGui.TextUnformatted("ViGemBus 驱动");
                 ImGui.TableSetColumnIndex(1);
                 ImGui.AlignTextToFramePadding();
                 ImGui.TextUnformatted(vigemReady ? "已就绪" : "未就绪");
@@ -293,11 +308,17 @@ public sealed partial class MainWindow : GameWindow
                 ImGui.AlignTextToFramePadding();
                 ImGui.TextUnformatted(hasGamepads ? "已就绪" : "未就绪");
                 ImGui.TableSetColumnIndex(2);
-                _selectedGamepadIndex = hasGamepads
-                    ? (_selectedGamepadIndex >= 0 && _selectedGamepadIndex < gamepads.Length ? _selectedGamepadIndex : 0)
+                _homeSelectedGamepadIndex = hasGamepads
+                    ? (_homeSelectedGamepadIndex >= 0 && _homeSelectedGamepadIndex < gamepads.Length ? _homeSelectedGamepadIndex : 0)
                     : -1;
+                var inputRefreshButtonWidth = baseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
                 ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - reserveWidth);
-                ImGui.Combo("##InputDeviceCombo", ref _selectedGamepadIndex, gamepads, gamepads.Length);
+                ImGui.Combo("##InputDeviceCombo", ref _homeSelectedGamepadIndex, gamepads, gamepads.Length);
+                ImGui.SameLine();
+                if (ImGui.Button("刷新##HomeInputDeviceRefresh", new Vector2(inputRefreshButtonWidth, 0f)))
+                {
+                    RefreshHomeInputDevices();
+                }
 
                 ImGui.EndTable();
             }
@@ -345,7 +366,21 @@ public sealed partial class MainWindow : GameWindow
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("智慧核心");
             ImGui.TableSetColumnIndex(1);
-            ImGui.Checkbox("##SmartCoreEnabled", ref _smartCoreEnabled);
+            var smartCoreDependenciesReady = vigemReady && hasGamepads;
+            if (!smartCoreDependenciesReady)
+            {
+                _smartCoreEnabled = false;
+            }
+
+            ImGui.BeginDisabled(!smartCoreDependenciesReady);
+            ImGui.Checkbox("##SmartCoreEnabledCheckbox", ref _smartCoreEnabled);
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            ImGui.BeginDisabled(!_smartCoreEnabled);
+            if (ImGui.Button("预览##SmartCorePreviewButton"))
+            {
+            }
+            ImGui.EndDisabled();
 
             ImGui.EndTable();
         }
@@ -437,6 +472,15 @@ public sealed partial class MainWindow : GameWindow
                     TryWriteIntValueToCurrentConfig("snapOuterRange", _snapOuterRange);
                     TryWriteIntValueToCurrentConfig("snapInnerRange", _snapInnerRange);
                 }
+
+                ImGui.TableSetColumnIndex(5);
+                var snapRangePreviewWindowOpen = IsSnapRangePreviewWindowOpen();
+                ImGui.BeginDisabled(snapRangePreviewWindowOpen);
+                if (ImGui.Button("范围预览##SnapRangePreviewWindowButton", new Vector2(snapExtraInputWidth, 0f)))
+                {
+                    OpenSnapRangePreviewWindow();
+                }
+                ImGui.EndDisabled();
 
                 // Row 2: strengths
                 ImGui.TableNextRow();
@@ -1687,6 +1731,12 @@ public sealed partial class MainWindow : GameWindow
 
     protected override void OnUnload()
     {
+        CloseSnapRangePreviewWindow();
+
+        _viGEmMappingWorker?.Dispose();
+        _viGEmMappingWorker = null;
+        _sdlGamepadWorker?.Dispose();
+        _sdlGamepadWorker = null;
         StopOnnxInference("已释放");
         StopDxgiCapture("已释放");
         if (_dxgiPreviewTexture != 0)
@@ -1699,6 +1749,74 @@ public sealed partial class MainWindow : GameWindow
         SaveWindowState();
         SDL.QuitSubSystem(SDL.InitFlags.Gamepad);
         base.OnUnload();
+    }
+    private void InitDebugVirtualGamepad()
+    {
+        try
+        {
+            _viGEmMappingWorker?.ConnectVirtualGamepad();
+        }
+        catch (Exception ex)
+        {
+            _viGEmVirtualGamepadLastError = $"{ex.GetType().Name}: {ex.Message}";
+        }
+    }
+
+    private void MirrorSelectedGamepadToVirtualGamepad()
+    {
+        if (_viGEmMappingWorker is null || !_viGEmMappingWorker.IsConnected)
+        {
+            _sdlGamepadWorker?.SetSelectedGamepad(null);
+            return;
+        }
+
+        var gamepads = _cachedConnectedGamepads;
+        if (gamepads.Length <= 0)
+        {
+            _sdlGamepadWorker?.SetSelectedGamepad(null);
+            return;
+        }
+
+        if (_debugSelectedGamepadIndex < 0 || _debugSelectedGamepadIndex >= gamepads.Length)
+        {
+            _debugSelectedGamepadIndex = 0;
+        }
+
+        var selected = gamepads[_debugSelectedGamepadIndex];
+        _sdlGamepadWorker?.SetSelectedGamepad(selected.InstanceId);
+        var mappingError = _viGEmMappingWorker?.GetLastError();
+        if (!string.IsNullOrWhiteSpace(mappingError))
+        {
+            _viGEmVirtualGamepadLastError = mappingError;
+        }
+        else if (_viGEmVirtualGamepadLastError.StartsWith("SDL ", StringComparison.OrdinalIgnoreCase))
+        {
+            _viGEmVirtualGamepadLastError = string.Empty;
+        }
+    }
+
+    private void RefreshHomeInputDevices()
+    {
+        RefreshInputDevicesCore(ref _homeSelectedGamepadIndex, shouldResetVirtualMappingHandle: false, forceRefresh: true);
+    }
+
+    private void RefreshDebugInputDevices()
+    {
+        RefreshInputDevicesCore(ref _debugSelectedGamepadIndex, shouldResetVirtualMappingHandle: true, forceRefresh: true);
+    }
+
+    private void RefreshInputDevicesCore(ref int selectedIndex, bool shouldResetVirtualMappingHandle, bool forceRefresh)
+    {
+        UpdateConnectedGamepadCache(forceRefresh);
+        var hasGamepads = _cachedGamepadOptions.Length > 0;
+        selectedIndex = hasGamepads
+            ? (selectedIndex >= 0 && selectedIndex < _cachedGamepadOptions.Length ? selectedIndex : 0)
+            : -1;
+        if (shouldResetVirtualMappingHandle)
+        {
+            _sdlGamepadWorker?.SetSelectedGamepad(null);
+            _viGEmVirtualGamepadLastError = string.Empty;
+        }
     }
 
     private void RefreshDpiScale()
@@ -1741,34 +1859,32 @@ public sealed partial class MainWindow : GameWindow
         }
     }
 
-    private static string[] GetConnectedGamepadOptions()
+    private string[] GetConnectedGamepadOptions()
     {
-        if ((SDL.WasInit(SDL.InitFlags.Gamepad) & SDL.InitFlags.Gamepad) == 0)
-        {
-            if (!SDL.InitSubSystem(SDL.InitFlags.Gamepad))
-            {
-                return Array.Empty<string>();
-            }
-        }
-
-        var gamepads = SDL.GetGamepads(out var count);
-        if (gamepads is null || count <= 0)
+        if (_cachedGamepadOptions.Length == 0)
         {
             return Array.Empty<string>();
         }
 
-        var options = new List<string>(count);
-        for (var i = 0; i < count; i++)
+        return _cachedGamepadOptions;
+    }
+
+    private void UpdateConnectedGamepadCache(bool forceRefresh = false)
+    {
+        _cachedConnectedGamepads = _sdlGamepadWorker?.GetConnectedGamepads(forceRefresh) ?? Array.Empty<(uint InstanceId, string Name)>();
+        if (_cachedConnectedGamepads.Length == 0)
         {
-            var instanceId = gamepads[i];
-            var name = SDL.GetGamepadNameForID(instanceId);
-            if (!string.IsNullOrWhiteSpace(name))
-            {
-                options.Add(name);
-            }
+            _cachedGamepadOptions = Array.Empty<string>();
+            return;
         }
 
-        return options.ToArray();
+        var options = new string[_cachedConnectedGamepads.Length];
+        for (var i = 0; i < _cachedConnectedGamepads.Length; i++)
+        {
+            options[i] = _cachedConnectedGamepads[i].Name;
+        }
+
+        _cachedGamepadOptions = options;
     }
 
     private int GetDisplayHeightOrWindowHeight()
