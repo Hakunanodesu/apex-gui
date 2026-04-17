@@ -1770,6 +1770,12 @@ public sealed partial class MainWindow : GameWindow
             return;
         }
 
+        if (!_smartCoreEnabled)
+        {
+            _sdlGamepadWorker?.SetSelectedGamepad(null);
+            return;
+        }
+
         var gamepads = _cachedConnectedGamepads;
         if (gamepads.Length <= 0)
         {
@@ -1777,12 +1783,12 @@ public sealed partial class MainWindow : GameWindow
             return;
         }
 
-        if (_debugSelectedGamepadIndex < 0 || _debugSelectedGamepadIndex >= gamepads.Length)
+        if (_homeSelectedGamepadIndex < 0 || _homeSelectedGamepadIndex >= gamepads.Length)
         {
-            _debugSelectedGamepadIndex = 0;
+            _homeSelectedGamepadIndex = 0;
         }
 
-        var selected = gamepads[_debugSelectedGamepadIndex];
+        var selected = gamepads[_homeSelectedGamepadIndex];
         _sdlGamepadWorker?.SetSelectedGamepad(selected.InstanceId);
         var mappingError = _viGEmMappingWorker?.GetLastError();
         if (!string.IsNullOrWhiteSpace(mappingError))
