@@ -85,6 +85,28 @@ internal readonly struct OnnxDebugProbe
     }
 }
 
+internal readonly struct OnnxDebugBox
+{
+    public readonly int InputWidth;
+    public readonly int InputHeight;
+    public readonly float X;
+    public readonly float Y;
+    public readonly float W;
+    public readonly float H;
+    public readonly float Score;
+
+    public OnnxDebugBox(int inputWidth, int inputHeight, float x, float y, float w, float h, float score)
+    {
+        InputWidth = inputWidth;
+        InputHeight = inputHeight;
+        X = x;
+        Y = y;
+        W = w;
+        H = h;
+        Score = score;
+    }
+}
+
 internal sealed class OnnxDmlWorker : IDisposable
 {
     private readonly object _sync = new();
@@ -99,6 +121,7 @@ internal sealed class OnnxDmlWorker : IDisposable
     private int _latestFrameId;
     private int _lastProcessedFrameId;
     private OnnxDebugProbe _latestProbe;
+    private OnnxDebugBox[] _latestBoxes = Array.Empty<OnnxDebugBox>();
 
     private readonly List<double> _windowSamples = new(256);
     private DateTime _windowStartUtc = DateTime.UtcNow;
@@ -163,6 +186,16 @@ internal sealed class OnnxDmlWorker : IDisposable
         }
     }
 
+    public OnnxDebugBox[] GetDebugBoxes()
+    {
+        lock (_sync)
+        {
+            var copy = new OnnxDebugBox[_latestBoxes.Length];
+            Array.Copy(_latestBoxes, copy, _latestBoxes.Length);
+            return copy;
+        }
+    }
+
     private void WorkerMain()
     {
         try
@@ -218,10 +251,12 @@ internal sealed class OnnxDmlWorker : IDisposable
                     _model.ConfThreshold,
                     _model.IouThreshold,
                     _model.AllowedClasses,
-                    out var probe);
+                    out var probe,
+                    out var boxes);
                 lock (_sync)
                 {
                     _latestProbe = probe;
+                    _latestBoxes = boxes;
                 }
 
                 PushInferenceSample(sw.Elapsed.TotalMilliseconds, detectionCount, outputSummary);
@@ -375,9 +410,11 @@ internal sealed class OnnxDmlWorker : IDisposable
         float confThres,
         float iouThres,
         HashSet<int> allowedClasses,
-        out OnnxDebugProbe probe)
+        out OnnxDebugProbe probe,
+        out OnnxDebugBox[] boxes)
     {
         probe = default;
+        boxes = Array.Empty<OnnxDebugBox>();
         foreach (var output in outputs)
         {
             Tensor<float>? tensor;
@@ -397,7 +434,7 @@ internal sealed class OnnxDmlWorker : IDisposable
 
             var dims = tensor.Dimensions.ToArray();
             var values = tensor.ToArray();
-            if (TryParseDetections(values, dims, inputWidth, inputHeight, confThres, iouThres, allowedClasses, out var count, out probe))
+            if (TryParseDetections(values, dims, inputWidth, inputHeight, confThres, iouThres, allowedClasses, out var count, out probe, out boxes))
             {
                 return count;
             }
@@ -415,10 +452,12 @@ internal sealed class OnnxDmlWorker : IDisposable
         float iouThres,
         HashSet<int> allowedClasses,
         out int count,
-        out OnnxDebugProbe probe)
+        out OnnxDebugProbe probe,
+        out OnnxDebugBox[] boxes)
     {
         count = 0;
         probe = default;
+        boxes = Array.Empty<OnnxDebugBox>();
         if (dims.Length != 3)
         {
             return false;
@@ -444,8 +483,7 @@ internal sealed class OnnxDmlWorker : IDisposable
             return false;
         }
 
-        var boxes = new List<(float x, float y, float w, float h, float score)>();
-        var bestScore = float.MinValue;
+        var candidateBoxes = new List<(float x, float y, float w, float h, float score, float obj, float classScore)>();
         for (var i = 0; i < rows; i++)
         {
             int baseIndex;
@@ -489,38 +527,24 @@ internal sealed class OnnxDmlWorker : IDisposable
                 continue;
             }
 
-            if (score > bestScore)
-            {
-                bestScore = score;
-                probe = new OnnxDebugProbe(
-                    true,
-                    inputWidth,
-                    inputHeight,
-                    Read(0),
-                    Read(1),
-                    Read(2),
-                    Read(3),
-                    obj,
-                    bestClassScore,
-                    score);
-            }
-
-            boxes.Add((Read(0), Read(1), Math.Abs(Read(2)), Math.Abs(Read(3)), score));
+            candidateBoxes.Add((Read(0), Read(1), Math.Abs(Read(2)), Math.Abs(Read(3)), score, obj, bestClassScore));
         }
 
-        if (boxes.Count == 0)
+        if (candidateBoxes.Count == 0)
         {
             return true;
         }
 
-        boxes.Sort((a, b) => b.score.CompareTo(a.score));
-        var kept = new List<(float x, float y, float w, float h, float score)>();
-        foreach (var box in boxes)
+        candidateBoxes.Sort((a, b) => b.score.CompareTo(a.score));
+        var kept = new List<(float x, float y, float w, float h, float score, float obj, float classScore)>();
+        foreach (var box in candidateBoxes)
         {
             var suppressed = false;
             foreach (var keptBox in kept)
             {
-                if (ComputeIoU(box, keptBox) > iouThres)
+                if (ComputeIoU(
+                        (box.x, box.y, box.w, box.h, box.score),
+                        (keptBox.x, keptBox.y, keptBox.w, keptBox.h, keptBox.score)) > iouThres)
                 {
                     suppressed = true;
                     break;
@@ -534,6 +558,19 @@ internal sealed class OnnxDmlWorker : IDisposable
         }
 
         count = kept.Count;
+        var primary = kept[0];
+        probe = new OnnxDebugProbe(
+            true,
+            inputWidth,
+            inputHeight,
+            primary.x,
+            primary.y,
+            primary.w,
+            primary.h,
+            primary.obj,
+            primary.classScore,
+            primary.score);
+        boxes = kept.Select(box => new OnnxDebugBox(inputWidth, inputHeight, box.x, box.y, box.w, box.h, box.score)).ToArray();
         return true;
     }
 

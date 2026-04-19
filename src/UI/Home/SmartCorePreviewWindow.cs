@@ -2,8 +2,27 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Threading;
 
+internal sealed class SmartCorePreviewForm : System.Windows.Forms.Form
+{
+    public SmartCorePreviewForm()
+    {
+        SetStyle(
+            System.Windows.Forms.ControlStyles.UserPaint |
+            System.Windows.Forms.ControlStyles.AllPaintingInWmPaint |
+            System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer,
+            true);
+        UpdateStyles();
+    }
+
+    protected override void OnPaintBackground(System.Windows.Forms.PaintEventArgs e)
+    {
+        // Skip the default background erase to reduce visible flicker between frames.
+    }
+}
+
 public sealed partial class MainWindow
 {
+    private const int SmartCorePreviewIntervalMs = 1000 / 60;
     private readonly object _smartCorePreviewWindowLock = new();
     private System.Windows.Forms.Form? _smartCorePreviewWindow;
     private bool _smartCorePreviewShuttingDown;
@@ -26,7 +45,7 @@ public sealed partial class MainWindow
             var previewWindowThread = new Thread(() =>
             {
                 var initialSize = Math.Max(1, _homeViewState.SnapOuterRange);
-                using var form = new System.Windows.Forms.Form
+                using var form = new SmartCorePreviewForm
                 {
                     Text = "智慧核心预览",
                     StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
@@ -51,8 +70,9 @@ public sealed partial class MainWindow
                 var frameWidth = 0;
                 var frameHeight = 0;
                 string? frameError = null;
+                System.Drawing.Bitmap? cachedBitmap = null;
 
-                var refreshTimer = new System.Windows.Forms.Timer { Interval = 50 };
+                var refreshTimer = new System.Windows.Forms.Timer { Interval = SmartCorePreviewIntervalMs };
                 refreshTimer.Tick += (_, _) =>
                 {
                     var targetSize = Math.Max(1, _homeViewState.SnapOuterRange);
@@ -65,9 +85,10 @@ public sealed partial class MainWindow
                     }
 
                     var worker = _dxgiWorker;
+                    var hasNewFrame = false;
                     if (worker is not null)
                     {
-                        worker.TryCopyLatestFrame(ref frameBuffer, ref lastFrameId, out frameWidth, out frameHeight, out frameError);
+                        hasNewFrame = worker.TryCopyLatestFrame(ref frameBuffer, ref lastFrameId, out frameWidth, out frameHeight, out frameError);
                     }
                     else
                     {
@@ -75,7 +96,10 @@ public sealed partial class MainWindow
                         frameHeight = 0;
                     }
 
-                    form.Invalidate();
+                    if (hasNewFrame || worker is null)
+                    {
+                        form.Invalidate();
+                    }
                 };
 
                 form.Paint += (_, e) =>
@@ -104,8 +128,13 @@ public sealed partial class MainWindow
                         drawWidth,
                         drawHeight);
 
-                    using var bitmap = new System.Drawing.Bitmap(frameWidth, frameHeight, PixelFormat.Format32bppArgb);
-                    var bitmapData = bitmap.LockBits(
+                    if (cachedBitmap is null || cachedBitmap.Width != frameWidth || cachedBitmap.Height != frameHeight)
+                    {
+                        cachedBitmap?.Dispose();
+                        cachedBitmap = new System.Drawing.Bitmap(frameWidth, frameHeight, PixelFormat.Format32bppArgb);
+                    }
+
+                    var bitmapData = cachedBitmap.LockBits(
                         new System.Drawing.Rectangle(0, 0, frameWidth, frameHeight),
                         ImageLockMode.WriteOnly,
                         PixelFormat.Format32bppArgb);
@@ -115,46 +144,38 @@ public sealed partial class MainWindow
                     }
                     finally
                     {
-                        bitmap.UnlockBits(bitmapData);
+                        cachedBitmap.UnlockBits(bitmapData);
                     }
 
-                    e.Graphics.DrawImage(bitmap, drawRect);
+                    e.Graphics.DrawImage(cachedBitmap, drawRect);
 
-                    var probe = _onnxWorker?.GetDebugProbe() ?? default;
-                    if (probe.HasValue && probe.InputWidth > 0 && probe.InputHeight > 0)
+                    var boxes = _onnxWorker?.GetDebugBoxes() ?? Array.Empty<OnnxDebugBox>();
+                    if (boxes.Length > 0)
                     {
-                        var x1 = probe.Raw0 - probe.Raw2 * 0.5f;
-                        var y1 = probe.Raw1 - probe.Raw3 * 0.5f;
-                        var x2 = probe.Raw0 + probe.Raw2 * 0.5f;
-                        var y2 = probe.Raw1 + probe.Raw3 * 0.5f;
-
-                        var minX = Math.Clamp(MathF.Min(x1, x2), 0f, probe.InputWidth);
-                        var minY = Math.Clamp(MathF.Min(y1, y2), 0f, probe.InputHeight);
-                        var maxX = Math.Clamp(MathF.Max(x1, x2), 0f, probe.InputWidth);
-                        var maxY = Math.Clamp(MathF.Max(y1, y2), 0f, probe.InputHeight);
-
-                        var overlayRect = new System.Drawing.RectangleF(
-                            drawRect.Left + minX / probe.InputWidth * drawRect.Width,
-                            drawRect.Top + minY / probe.InputHeight * drawRect.Height,
-                            (maxX - minX) / probe.InputWidth * drawRect.Width,
-                            (maxY - minY) / probe.InputHeight * drawRect.Height);
-
-                        if (overlayRect.Width > 1f && overlayRect.Height > 1f)
+                        using var boxPen = new System.Drawing.Pen(System.Drawing.Color.Red, 2f);
+                        for (var i = 0; i < boxes.Length; i++)
                         {
-                            using var boxPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(0, 216, 255), 2f);
-                            using var labelBrush = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(0, 216, 255));
-                            using var textBrush = new System.Drawing.SolidBrush(System.Drawing.Color.Black);
-                            e.Graphics.DrawRectangle(boxPen, overlayRect.X, overlayRect.Y, overlayRect.Width, overlayRect.Height);
+                            var box = boxes[i];
+                            var x1 = box.X - box.W * 0.5f;
+                            var y1 = box.Y - box.H * 0.5f;
+                            var x2 = box.X + box.W * 0.5f;
+                            var y2 = box.Y + box.H * 0.5f;
 
-                            const string label = "target";
-                            var textSize = e.Graphics.MeasureString(label, form.Font);
-                            var labelRect = new System.Drawing.RectangleF(
-                                overlayRect.X,
-                                Math.Max(drawRect.Top, overlayRect.Y - textSize.Height - 4f),
-                                textSize.Width + 8f,
-                                textSize.Height + 2f);
-                            e.Graphics.FillRectangle(labelBrush, labelRect);
-                            e.Graphics.DrawString(label, form.Font, textBrush, labelRect.X + 4f, labelRect.Y + 1f);
+                            var minX = Math.Clamp(MathF.Min(x1, x2), 0f, frameWidth);
+                            var minY = Math.Clamp(MathF.Min(y1, y2), 0f, frameHeight);
+                            var maxX = Math.Clamp(MathF.Max(x1, x2), 0f, frameWidth);
+                            var maxY = Math.Clamp(MathF.Max(y1, y2), 0f, frameHeight);
+
+                            var overlayRect = new System.Drawing.RectangleF(
+                                drawRect.Left + minX / frameWidth * drawRect.Width,
+                                drawRect.Top + minY / frameHeight * drawRect.Height,
+                                (maxX - minX) / frameWidth * drawRect.Width,
+                                (maxY - minY) / frameHeight * drawRect.Height);
+
+                            if (overlayRect.Width > 1f && overlayRect.Height > 1f)
+                            {
+                                e.Graphics.DrawRectangle(boxPen, overlayRect.X, overlayRect.Y, overlayRect.Width, overlayRect.Height);
+                            }
                         }
                     }
                 };
@@ -172,6 +193,7 @@ public sealed partial class MainWindow
                 {
                     refreshTimer.Stop();
                     refreshTimer.Dispose();
+                    cachedBitmap?.Dispose();
                     lock (_smartCorePreviewWindowLock)
                     {
                         _smartCorePreviewWindow = null;
@@ -205,6 +227,14 @@ public sealed partial class MainWindow
                 _smartCorePreviewShuttingDown = true;
                 _smartCorePreviewWindow.BeginInvoke(new Action(() => _smartCorePreviewWindow.Close()));
             }
+        }
+    }
+
+    private bool IsSmartCorePreviewWindowOpen()
+    {
+        lock (_smartCorePreviewWindowLock)
+        {
+            return _smartCorePreviewWindow is not null && !_smartCorePreviewWindow.IsDisposed && _smartCorePreviewWindow.Visible;
         }
     }
 }

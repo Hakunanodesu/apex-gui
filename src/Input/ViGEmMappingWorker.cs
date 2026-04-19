@@ -14,6 +14,9 @@ internal sealed class ViGEmMappingWorker : IDisposable
     private bool _isConnected;
     private string _status = "未初始化";
     private string? _lastError;
+    private short _aimAssistRightX;
+    private short _aimAssistRightY;
+    private bool _aimAssistEnabled;
 
     public ViGEmMappingWorker()
     {
@@ -122,16 +125,32 @@ internal sealed class ViGEmMappingWorker : IDisposable
         }
     }
 
+    public void SetAimAssistOverride(short rightX, short rightY, bool enabled)
+    {
+        lock (_sync)
+        {
+            _aimAssistRightX = rightX;
+            _aimAssistRightY = rightY;
+            _aimAssistEnabled = enabled;
+        }
+    }
+
     private void WorkerMain()
     {
         while (_running)
         {
             SdlGamepadWorker? sdlWorker;
             bool isConnected;
+            short aimAssistRightX;
+            short aimAssistRightY;
+            bool aimAssistEnabled;
             lock (_sync)
             {
                 sdlWorker = _sdlGamepadWorker;
                 isConnected = _isConnected;
+                aimAssistRightX = _aimAssistRightX;
+                aimAssistRightY = _aimAssistRightY;
+                aimAssistEnabled = _aimAssistEnabled;
             }
 
             if (sdlWorker is null || !isConnected)
@@ -157,8 +176,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
             if (!TrySubmitState(
                     input.LeftX,
                     InvertStickY(input.LeftY),
-                    input.RightX,
-                    InvertStickY(input.RightY),
+                    CombineStickAxis(input.RightX, aimAssistEnabled ? aimAssistRightX : (short)0),
+                    InvertStickY(CombineStickAxis(input.RightY, aimAssistEnabled ? aimAssistRightY : (short)0)),
                     ToXboxTrigger(input.LeftTrigger),
                     ToXboxTrigger(input.RightTrigger),
                     input.A,
@@ -267,6 +286,12 @@ internal sealed class ViGEmMappingWorker : IDisposable
     {
         var clamped = Math.Clamp((int)raw, 0, short.MaxValue);
         return (byte)(clamped * byte.MaxValue / short.MaxValue);
+    }
+
+    private static short CombineStickAxis(short baseValue, short offset)
+    {
+        var combined = (int)baseValue + offset;
+        return (short)Math.Clamp(combined, short.MinValue, short.MaxValue);
     }
 
     private static short InvertStickY(short raw)

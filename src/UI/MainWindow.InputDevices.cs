@@ -10,6 +10,7 @@ public sealed partial class MainWindow
             _smartCoreMappingState);
 
         SyncSmartCoreVisionPipeline();
+        UpdateSmartCoreAimAssist();
 
         if (_smartCoreMappingState.EffectiveSelectedIndex >= 0)
         {

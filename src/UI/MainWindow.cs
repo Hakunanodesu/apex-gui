@@ -30,8 +30,8 @@ public sealed partial class MainWindow : GameWindow
 
     private readonly List<OnnxModelConfig> _onnxModels = new();
     private int _onnxTopSelectedModelIndex = -1;
-    private static readonly string[] HomeSnapModeOptions = { "开火吸附", "瞄准吸附" };
-    private static readonly string[] SnapInnerInterpolationTypeOptions = { "线性插值", "二次插值" };
+    private static readonly string[] HomeSnapModeOptions = { "Fire Snap", "Aim Snap" };
+    private static readonly string[] SnapInnerInterpolationTypeOptions = { "Linear", "Quadratic" };
     private static readonly string[] SpecialWeaponNames =
     {
         "30-30",
@@ -64,6 +64,7 @@ public sealed partial class MainWindow : GameWindow
     private readonly ConfigSession _configSession;
     private readonly InputDevicesFacade _inputDevicesFacade = new();
     private readonly SmartCoreFacade _smartCoreFacade = new();
+    private readonly SmartCoreAimAssistService _smartCoreAimAssistService = new();
     private readonly SmartCoreMappingState _smartCoreMappingState = new();
     private static readonly WindowStateService WindowStateService = new();
     private (uint InstanceId, string Name)[] _cachedConnectedGamepads = Array.Empty<(uint InstanceId, string Name)>();
@@ -162,14 +163,6 @@ public sealed partial class MainWindow : GameWindow
                 ImGui.EndTabItem();
             }
 
-#if DEBUG
-            if (ImGui.BeginTabItem("调试"))
-            {
-                DrawDxgiTab();
-                ImGui.EndTabItem();
-            }
-#endif
-
             ImGui.EndTabBar();
         }
 
@@ -257,7 +250,7 @@ public sealed partial class MainWindow : GameWindow
         {
             ImGui.BeginDisabled();
             ImGui.SetNextItemWidth(comboWidth);
-            ImGui.Combo(id, ref _onnxTopSelectedModelIndex, "无可用模型\0");
+            ImGui.Combo(id, ref _onnxTopSelectedModelIndex, "閺冪姴褰查悽銊δ侀崹濯?");
             ImGui.EndDisabled();
             return;
         }
@@ -516,11 +509,11 @@ public sealed partial class MainWindow : GameWindow
     {
         if (_configAddModalOpenRequested)
         {
-            ImGui.OpenPopup("请输入新配置名称");
+            ImGui.OpenPopup("鐠囩柉绶崗銉︽煀闁板秶鐤嗛崥宥囆?);
             _configAddModalOpenRequested = false;
         }
 
-        if (ImGui.BeginPopupModal("请输入新配置名称", ref _configAddModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("鐠囩柉绶崗銉︽煀闁板秶鐤嗛崥宥囆?, ref _configAddModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.InputText("##AddConfigNameInput", ref _addConfigNameBuffer, 256);
             if (!string.IsNullOrEmpty(_configAddModalError))
@@ -529,7 +522,7 @@ public sealed partial class MainWindow : GameWindow
                 ImGui.TextUnformatted(_configAddModalError);
             }
 
-            if (ImGui.Button("创建"))
+            if (ImGui.Button("閸掓稑缂?))
             {
                 if (TryCreateEmptyConfigFile(_addConfigNameBuffer, out var err))
                 {
@@ -544,7 +537,7 @@ public sealed partial class MainWindow : GameWindow
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("取消"))
+            if (ImGui.Button("閸欐牗绉?))
             {
                 _configAddModalError = string.Empty;
                 _configAddModalOpen = false;
@@ -556,16 +549,16 @@ public sealed partial class MainWindow : GameWindow
 
         if (_configDeleteModalOpenRequested)
         {
-            ImGui.OpenPopup("删除配置确认");
+            ImGui.OpenPopup("閸掔娀娅庨柊宥囩枂绾喛顓?);
             _configDeleteModalOpenRequested = false;
         }
 
-        if (ImGui.BeginPopupModal("删除配置确认", ref _configDeleteModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("閸掔娀娅庨柊宥囩枂绾喛顓?, ref _configDeleteModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             var name = _pendingDeleteConfigBaseName ?? string.Empty;
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted($"确定删除配置文件 {name} 吗？此操作不可撤销。");
-            if (ImGui.Button("确定"))
+            ImGui.TextUnformatted($"绾喖鐣鹃崚鐘绘珟闁板秶鐤嗛弬鍥︽ {name} 閸氭绱靛銈嗘惙娴ｆ粈绗夐崣顖涙寵闁库偓閵?);
+            if (ImGui.Button("绾喖鐣?))
             {
                 TryDeleteSelectedConfigFile(name);
                 _pendingDeleteConfigBaseName = null;
@@ -574,7 +567,7 @@ public sealed partial class MainWindow : GameWindow
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("取消"))
+            if (ImGui.Button("閸欐牗绉?))
             {
                 _pendingDeleteConfigBaseName = null;
                 _configDeleteModalOpen = false;
@@ -657,8 +650,8 @@ public sealed partial class MainWindow : GameWindow
         _viGEmMappingWorker = null;
         _sdlGamepadWorker?.Dispose();
         _sdlGamepadWorker = null;
-        StopOnnxInference("已释放");
-        StopDxgiCapture("已释放");
+        StopOnnxInference("Disposed");
+        StopDxgiCapture("Disposed");
         if (_dxgiPreviewTexture != 0)
         {
             GL.DeleteTexture(_dxgiPreviewTexture);
@@ -793,3 +786,4 @@ internal sealed class WindowStateSnapshot
     public int Height { get; init; }
     public bool IsMaximized { get; init; }
 }
+

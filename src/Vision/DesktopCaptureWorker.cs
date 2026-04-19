@@ -24,6 +24,7 @@ internal readonly struct CaptureTelemetry
 
 internal sealed class DesktopCaptureWorker : IDisposable
 {
+    private const double TargetCaptureIntervalMs = 1000.0 / 60.0;
     private readonly object _sync = new();
     private readonly Thread _thread;
     private bool _running = true;
@@ -109,9 +110,19 @@ internal sealed class DesktopCaptureWorker : IDisposable
         {
             using var duplicator = new DxgiDesktopDuplicator();
             var timer = Stopwatch.StartNew();
+            var frameBudgetTimer = Stopwatch.StartNew();
 
             while (_running)
             {
+                var remainingMs = TargetCaptureIntervalMs - frameBudgetTimer.Elapsed.TotalMilliseconds;
+                if (remainingMs > 1.0)
+                {
+                    Thread.Sleep((int)remainingMs);
+                    continue;
+                }
+
+                frameBudgetTimer.Restart();
+
                 int requestedWidth;
                 int requestedHeight;
                 lock (_sync)

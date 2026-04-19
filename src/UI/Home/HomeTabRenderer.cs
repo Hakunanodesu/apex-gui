@@ -158,7 +158,8 @@ public sealed partial class MainWindow
         _smartCoreMappingState.RequestedEnabled = requestedSmartCoreEnabled;
         ImGui.EndDisabled();
         ImGui.SameLine();
-        ImGui.BeginDisabled(!_smartCoreMappingState.RequestedEnabled);
+        var smartCorePreviewWindowOpen = IsSmartCorePreviewWindowOpen();
+        ImGui.BeginDisabled(!_smartCoreMappingState.RequestedEnabled || smartCorePreviewWindowOpen);
         if (ImGui.Button("预览##SmartCorePreviewButton"))
         {
             OpenSmartCorePreviewWindow();
