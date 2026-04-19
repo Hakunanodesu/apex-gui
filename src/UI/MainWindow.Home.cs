@@ -678,6 +678,11 @@ public sealed partial class MainWindow
     private bool _snapRangePreviewWindowVisible;
     private bool _snapRangePreviewShuttingDown;
 
+    private void UpdateSmartCorePreviewCaptureDemand(bool enabled)
+    {
+        _dxgiWorker?.SetPreviewFrameCacheEnabled(enabled);
+    }
+
     private void OpenSmartCorePreviewWindow()
     {
         lock (_smartCorePreviewWindowLock)
@@ -690,6 +695,7 @@ public sealed partial class MainWindow
                     _smartCorePreviewWindow.Activate();
                     _smartCorePreviewWindow.BringToFront();
                 }));
+                UpdateSmartCorePreviewCaptureDemand(true);
                 return;
             }
 
@@ -698,7 +704,7 @@ public sealed partial class MainWindow
                 var initialSize = Math.Max(1, _homeViewState.SnapOuterRange);
                 using var form = new SmartCorePreviewForm
                 {
-                    Text = "鏅烘収鏍稿績棰勮",
+                    Text = string.Empty,
                     StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
                     ClientSize = new System.Drawing.Size(initialSize, initialSize),
                     TopMost = true,
@@ -714,6 +720,12 @@ public sealed partial class MainWindow
                     form.MinimumSize = form.Size;
                     form.MaximumSize = form.Size;
                     form.TopMost = true;
+                    UpdateSmartCorePreviewCaptureDemand(true);
+                };
+
+                form.VisibleChanged += (_, _) =>
+                {
+                    UpdateSmartCorePreviewCaptureDemand(form.Visible);
                 };
 
                 var frameBuffer = Array.Empty<byte>();
@@ -726,6 +738,11 @@ public sealed partial class MainWindow
                 var refreshTimer = new System.Windows.Forms.Timer { Interval = SmartCorePreviewIntervalMs };
                 refreshTimer.Tick += (_, _) =>
                 {
+                    if (!form.Visible)
+                    {
+                        return;
+                    }
+
                     var targetSize = Math.Max(1, _homeViewState.SnapOuterRange);
                     var expectedClientSize = new System.Drawing.Size(targetSize, targetSize);
                     if (form.ClientSize != expectedClientSize)
@@ -842,6 +859,7 @@ public sealed partial class MainWindow
 
                 form.FormClosed += (_, _) =>
                 {
+                    UpdateSmartCorePreviewCaptureDemand(false);
                     refreshTimer.Stop();
                     refreshTimer.Dispose();
                     cachedBitmap?.Dispose();
@@ -876,6 +894,7 @@ public sealed partial class MainWindow
             if (_smartCorePreviewWindow is not null && !_smartCorePreviewWindow.IsDisposed)
             {
                 _smartCorePreviewShuttingDown = true;
+                UpdateSmartCorePreviewCaptureDemand(false);
                 _smartCorePreviewWindow.BeginInvoke(new Action(() => _smartCorePreviewWindow.Close()));
             }
         }

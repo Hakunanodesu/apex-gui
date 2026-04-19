@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Diagnostics;
 using ImGuiNET;
 using OpenTK.Graphics.OpenGL4;
@@ -133,7 +133,7 @@ public sealed partial class MainWindow : GameWindow
 
         if (ImGui.BeginTabBar("RootTabs"))
         {
-            if (ImGui.BeginTabItem("涓婚〉"))
+            if (ImGui.BeginTabItem("主页"))
             {
                 DrawHomeTab();
                 ImGui.EndTabItem();
@@ -226,7 +226,7 @@ public sealed partial class MainWindow : GameWindow
         {
             ImGui.BeginDisabled();
             ImGui.SetNextItemWidth(comboWidth);
-            ImGui.Combo(id, ref _onnxTopSelectedModelIndex, "闂佸搫鍟版慨纾嬨亹閺屻儲鍋ㄩ柕濞㈢繝绶氬畷瑙勫垔?");
+            ImGui.Combo(id, ref _onnxTopSelectedModelIndex, "闂備礁鎼崯鐗堟叏绾惧浜归柡灞诲劜閸嬨劑鏌曟繛銏㈢節缁舵艾鐣风憴鍕灁?");
             ImGui.EndDisabled();
             return;
         }
@@ -493,11 +493,11 @@ public sealed partial class MainWindow : GameWindow
     {
         if (_configAddModalOpenRequested)
         {
-            ImGui.OpenPopup("闁荤姴娲ㄩ弻澶屾椤撱垹绀傞柕澶涢檮閻撯偓闂備焦婢樼粔鍫曟偪閸℃稑瑙︾€广儱娉?);
+            ImGui.OpenPopup("闂佽崵濮村ú銊╁蓟婢跺本顐芥い鎾卞灩缁€鍌炴煏婢舵盯妾柣鎾亾闂傚倷鐒﹀妯肩矓閸洘鍋柛鈩冪☉鐟欙妇鈧箍鍎卞▔?);
             _configAddModalOpenRequested = false;
         }
 
-        if (ImGui.BeginPopupModal("闁荤姴娲ㄩ弻澶屾椤撱垹绀傞柕澶涢檮閻撯偓闂備焦婢樼粔鍫曟偪閸℃稑瑙︾€广儱娉?, ref _configAddModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("闂佽崵濮村ú銊╁蓟婢跺本顐芥い鎾卞灩缁€鍌炴煏婢舵盯妾柣鎾亾闂傚倷鐒﹀妯肩矓閸洘鍋柛鈩冪☉鐟欙妇鈧箍鍎卞▔?, ref _configAddModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.InputText("##AddConfigNameInput", ref _addConfigNameBuffer, 256);
             if (!string.IsNullOrEmpty(_configAddModalError))
@@ -506,7 +506,7 @@ public sealed partial class MainWindow : GameWindow
                 ImGui.TextUnformatted(_configAddModalError);
             }
 
-            if (ImGui.Button("闂佸憡甯楃粙鎴犵磽?))
+            if (ImGui.Button("闂備礁鎲＄敮妤冪矙閹寸姷纾?))
             {
                 if (TryCreateEmptyConfigFile(_addConfigNameBuffer, out var err))
                 {
@@ -521,7 +521,7 @@ public sealed partial class MainWindow : GameWindow
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("闂佸憡鐟﹂悧妤冪矓?))
+            if (ImGui.Button("闂備礁鎲￠悷锕傛偋濡ゅ啰鐭?))
             {
                 _configAddModalError = string.Empty;
                 _configAddModalOpen = false;
@@ -533,16 +533,16 @@ public sealed partial class MainWindow : GameWindow
 
         if (_configDeleteModalOpenRequested)
         {
-            ImGui.OpenPopup("闂佸憡甯炴繛鈧繛鍛叄閺屽﹤顓奸崶鈺傜€紒缁㈠弾閸犳盯顢?);
+            ImGui.OpenPopup("闂備礁鎲＄敮鐐寸箾閳ь剚绻涢崨顓㈠弰闁哄苯锕ら濂稿炊閳哄倻鈧厾绱掔紒銏犲季闁哥姵鐩、?);
             _configDeleteModalOpenRequested = false;
         }
 
-        if (ImGui.BeginPopupModal("闂佸憡甯炴繛鈧繛鍛叄閺屽﹤顓奸崶鈺傜€紒缁㈠弾閸犳盯顢?, ref _configDeleteModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("闂備礁鎲＄敮鐐寸箾閳ь剚绻涢崨顓㈠弰闁哄苯锕ら濂稿炊閳哄倻鈧厾绱掔紒銏犲季闁哥姵鐩、?, ref _configDeleteModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             var name = _pendingDeleteConfigBaseName ?? string.Empty;
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted($"缂佺虎鍙庨崰鏍偩妤ｅ啫绀嗛柣妯肩帛閻濈喖姊洪弶璺ㄐら柣銈呮瀵剟宕堕敂绛嬪仺 {name} 闂佸憡纰嶉〃鎰闂堟侗娼伴柕鍫濇閹瑥霉閿濆棛鐭嗙紒妤€顦靛畷锝夘敍濞戞瑥顕梻浣哥氨閸嬫捇鏌?);
-            if (ImGui.Button("缂佺虎鍙庨崰鏍偩?))
+            ImGui.TextUnformatted($"缂備胶铏庨崣搴ㄥ窗閺嶎厽鍋╁Δ锝呭暙缁€鍡涙煟濡偐甯涢柣婵堝枛濮婃椽寮剁捄銊愩倝鏌ｉ妶鍛棦鐎殿噮鍓熷畷鍫曟晜缁涘浠?{name} 闂備礁鎲＄喊宥夈€冮幇顔筋潟闂傚牊渚楀浼存煏閸繃顥為柟顖涚懃闇夐柨婵嗘閻棛绱掑Δ鈧ˇ闈涚暦閿濆鏁嶆繛鎴炵懃椤曨亪姊绘担鍝ユ皑闁稿鎹囬弻?);
+            if (ImGui.Button("缂備胶铏庨崣搴ㄥ窗閺嶎厽鍋?))
             {
                 TryDeleteSelectedConfigFile(name);
                 _pendingDeleteConfigBaseName = null;
@@ -551,7 +551,7 @@ public sealed partial class MainWindow : GameWindow
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("闂佸憡鐟﹂悧妤冪矓?))
+            if (ImGui.Button("闂備礁鎲￠悷锕傛偋濡ゅ啰鐭?))
             {
                 _pendingDeleteConfigBaseName = null;
                 _configDeleteModalOpen = false;
@@ -804,4 +804,5 @@ public sealed partial class MainWindow : GameWindow
         _smartCoreMappingState.LastError = snapshot?.LastError ?? string.Empty;
     }
 }
+
 

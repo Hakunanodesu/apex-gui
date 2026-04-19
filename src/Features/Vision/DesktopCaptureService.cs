@@ -32,6 +32,8 @@ internal sealed class DesktopCaptureService : IDisposable
     private int _latestWidth;
     private int _latestHeight;
     private int _latestFrameId;
+    private int _captureFrameId;
+    private bool _previewFrameCacheEnabled;
     private string? _lastError;
     private OnnxService? _frameConsumer;
 
@@ -113,6 +115,21 @@ internal sealed class DesktopCaptureService : IDisposable
         }
     }
 
+    public void SetPreviewFrameCacheEnabled(bool enabled)
+    {
+        lock (_sync)
+        {
+            _previewFrameCacheEnabled = enabled;
+            if (!enabled)
+            {
+                _latestFrame = Array.Empty<byte>();
+                _latestWidth = 0;
+                _latestHeight = 0;
+                _latestFrameId = 0;
+            }
+        }
+    }
+
     private void CaptureThreadMain()
     {
         try
@@ -159,17 +176,21 @@ internal sealed class DesktopCaptureService : IDisposable
                         _captureMsSum += elapsedMs;
                         _captureMsMax = Math.Max(_captureMsMax, elapsedMs);
                         _pendingCaptureMs.Enqueue(elapsedMs);
-                        if (_latestFrame.Length != frameData.Length)
-                        {
-                            _latestFrame = new byte[frameData.Length];
-                        }
-
-                        System.Buffer.BlockCopy(frameData, 0, _latestFrame, 0, frameData.Length);
-                        _latestWidth = width;
-                        _latestHeight = height;
-                        _latestFrameId++;
-                        frameId = _latestFrameId;
+                        _captureFrameId++;
+                        frameId = _captureFrameId;
                         frameConsumer = _frameConsumer;
+                        if (_previewFrameCacheEnabled)
+                        {
+                            if (_latestFrame.Length != frameData.Length)
+                            {
+                                _latestFrame = new byte[frameData.Length];
+                            }
+
+                            System.Buffer.BlockCopy(frameData, 0, _latestFrame, 0, frameData.Length);
+                            _latestWidth = width;
+                            _latestHeight = height;
+                            _latestFrameId++;
+                        }
                     }
                     else if (!string.IsNullOrWhiteSpace(error))
                     {

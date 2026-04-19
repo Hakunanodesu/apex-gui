@@ -169,7 +169,7 @@ internal sealed class SmartCoreActivationEvaluator
 
     public bool IsActive(in SmartCoreAimAssistContext context)
     {
-        if (!context.IsEnabled || !context.IsMappingActive || context.Boxes is null || context.Boxes.Length == 0)
+        if (!context.IsEnabled || context.Boxes is null || context.Boxes.Length == 0)
         {
             return false;
         }

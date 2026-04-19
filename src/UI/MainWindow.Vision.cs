@@ -69,6 +69,7 @@ public sealed partial class MainWindow
             StopVisionPipeline();
             _dxgiWorker = new DesktopCaptureService();
             _dxgiWorker.SetCaptureRegion(config.CaptureWidth, config.CaptureHeight);
+            _dxgiWorker.SetPreviewFrameCacheEnabled(IsSmartCorePreviewWindowOpen());
             _onnxWorker = new OnnxService(model);
             _onnxWorker.SetDetectionConsumer(_viGEmMappingWorker);
             _dxgiWorker.SetFrameConsumer(_onnxWorker);
@@ -82,6 +83,7 @@ public sealed partial class MainWindow
 
     private void StopVisionPipeline()
     {
+        _dxgiWorker?.SetPreviewFrameCacheEnabled(false);
         _dxgiWorker?.SetFrameConsumer(null);
         _onnxWorker?.Dispose();
         _onnxWorker = null;

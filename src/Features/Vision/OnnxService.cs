@@ -115,14 +115,17 @@ internal sealed class OnnxService : IDisposable
     private readonly OnnxModelConfig _model;
 
     private bool _running = true;
-    private byte[] _latestFrame = Array.Empty<byte>();
-    private int _latestFrameWidth;
-    private int _latestFrameHeight;
-    private int _latestFrameId;
+    private readonly byte[][] _frameBuffers = new[] { Array.Empty<byte>(), Array.Empty<byte>() };
+    private int _pendingBufferIndex = -1;
+    private int _processingBufferIndex = -1;
+    private int _pendingFrameWidth;
+    private int _pendingFrameHeight;
+    private int _pendingFrameId;
     private int _lastProcessedFrameId;
     private ViGEmMappingWorker? _detectionConsumer;
     private OnnxDebugProbe _latestProbe;
     private OnnxDebugBox[] _latestBoxes = Array.Empty<OnnxDebugBox>();
+    private float[] _preprocessBuffer = Array.Empty<float>();
 
     private readonly List<double> _windowSamples = new(256);
     private DateTime _windowStartUtc = DateTime.UtcNow;
@@ -157,15 +160,17 @@ internal sealed class OnnxService : IDisposable
                 return;
             }
 
-            if (_latestFrame.Length != frameData.Length)
+            var targetBufferIndex = _processingBufferIndex == 0 ? 1 : 0;
+            if (_frameBuffers[targetBufferIndex].Length != frameData.Length)
             {
-                _latestFrame = new byte[frameData.Length];
+                _frameBuffers[targetBufferIndex] = new byte[frameData.Length];
             }
 
-            System.Buffer.BlockCopy(frameData, 0, _latestFrame, 0, frameData.Length);
-            _latestFrameWidth = width;
-            _latestFrameHeight = height;
-            _latestFrameId = frameId;
+            System.Buffer.BlockCopy(frameData, 0, _frameBuffers[targetBufferIndex], 0, frameData.Length);
+            _pendingBufferIndex = targetBufferIndex;
+            _pendingFrameWidth = width;
+            _pendingFrameHeight = height;
+            _pendingFrameId = frameId;
         }
 
         _frameArrived.Set();
@@ -231,23 +236,25 @@ internal sealed class OnnxService : IDisposable
                 int frameWidth;
                 int frameHeight;
                 int frameId;
+                int bufferIndex;
                 lock (_sync)
                 {
-                    if (_latestFrameId == 0 || _latestFrameId == _lastProcessedFrameId)
+                    if (_pendingFrameId == 0 || _pendingFrameId == _lastProcessedFrameId || _pendingBufferIndex < 0)
                     {
                         continue;
                     }
 
-                    frame = new byte[_latestFrame.Length];
-                    System.Buffer.BlockCopy(_latestFrame, 0, frame, 0, _latestFrame.Length);
-                    frameWidth = _latestFrameWidth;
-                    frameHeight = _latestFrameHeight;
-                    frameId = _latestFrameId;
+                    bufferIndex = _pendingBufferIndex;
+                    frame = _frameBuffers[bufferIndex];
+                    frameWidth = _pendingFrameWidth;
+                    frameHeight = _pendingFrameHeight;
+                    frameId = _pendingFrameId;
                     _lastProcessedFrameId = frameId;
+                    _processingBufferIndex = bufferIndex;
                 }
 
                 var sw = Stopwatch.StartNew();
-                var inputData = Preprocess(frame, frameWidth, frameHeight, _model.InputWidth, _model.InputHeight, layout);
+                var inputData = Preprocess(frame, frameWidth, frameHeight, _model.InputWidth, _model.InputHeight, layout, ref _preprocessBuffer);
                 var inputTensor = new DenseTensor<float>(inputData, inputDims);
                 using var outputs = session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, inputTensor) });
                 sw.Stop();
@@ -273,6 +280,14 @@ internal sealed class OnnxService : IDisposable
                 detectionConsumer?.SetAimAssistDetections(detectionState);
 
                 PushInferenceSample(sw.Elapsed.TotalMilliseconds, detectionCount, outputSummary);
+
+                lock (_sync)
+                {
+                    if (_processingBufferIndex == bufferIndex)
+                    {
+                        _processingBufferIndex = -1;
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -362,9 +377,15 @@ internal sealed class OnnxService : IDisposable
         return "NHWC";
     }
 
-    private static float[] Preprocess(byte[] bgra, int srcW, int srcH, int dstW, int dstH, string layout)
+    private static float[] Preprocess(byte[] bgra, int srcW, int srcH, int dstW, int dstH, string layout, ref float[] buffer)
     {
-        var data = new float[dstW * dstH * 3];
+        var requiredLength = dstW * dstH * 3;
+        if (buffer.Length != requiredLength)
+        {
+            buffer = new float[requiredLength];
+        }
+
+        var data = buffer;
         for (var y = 0; y < dstH; y++)
         {
             var sy = y * srcH / dstH;
