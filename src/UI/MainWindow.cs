@@ -28,7 +28,13 @@ public sealed partial class MainWindow : GameWindow
     private readonly List<OnnxModelConfig> _onnxModels = new();
     private int _onnxTopSelectedModelIndex = -1;
     private static readonly string[] HomeSnapModeOptions = { "开火吸附", "瞄准 + 开火吸附" };
-    private static readonly string[] SnapInnerInterpolationTypeOptions = { "Linear", "Quadratic" };
+    private static readonly string[] SnapInnerInterpolationTypeOptions =
+    {
+        "Linear",
+        "Quadratic Ease-In",
+        "Quadratic Ease-Out",
+        "Quadratic Ease-In-Out"
+    };
     private const string SpecialWeaponLogicConfigKey = "specialWeaponLogic";
     private const string AimSnapWeaponListConfigKey = "aimSnapWeapons";
     private const string RapidFireWeaponListConfigKey = "rapidFireWeapons";
@@ -186,23 +192,18 @@ public sealed partial class MainWindow : GameWindow
         var interpolationTypeIndexForPreview = _homeViewState.SnapInnerInterpolationTypeIndex >= 0 && _homeViewState.SnapInnerInterpolationTypeIndex < SnapInnerInterpolationTypeOptions.Length
             ? _homeViewState.SnapInnerInterpolationTypeIndex
             : 0;
-        if (interpolationTypeIndexForPreview == 0)
+        const int interpolationSegments = 24;
+        for (var i = 0; i < interpolationSegments; i++)
         {
-            drawList.AddLine(lineStart, lineEnd, lineColor, 2.0f);
-        }
-        else
-        {
-            const int quadraticSegments = 24;
-            for (var i = 0; i < quadraticSegments; i++)
-            {
-                var t0 = i / (float)quadraticSegments;
-                var t1 = (i + 1) / (float)quadraticSegments;
-                var x0 = innerRangeForPreview * t0;
-                var x1 = innerRangeForPreview * t1;
-                var y0 = startStrengthForPreview + (innerStrengthForPreview - startStrengthForPreview) * t0 * t0;
-                var y1 = startStrengthForPreview + (innerStrengthForPreview - startStrengthForPreview) * t1 * t1;
-                drawList.AddLine(MapToPlot(x0, y0), MapToPlot(x1, y1), lineColor, 2.0f);
-            }
+            var t0 = i / (float)interpolationSegments;
+            var t1 = (i + 1) / (float)interpolationSegments;
+            var curveT0 = SnapInterpolation.EvaluateNormalized(t0, interpolationTypeIndexForPreview);
+            var curveT1 = SnapInterpolation.EvaluateNormalized(t1, interpolationTypeIndexForPreview);
+            var x0 = innerRangeForPreview * t0;
+            var x1 = innerRangeForPreview * t1;
+            var y0 = startStrengthForPreview + (innerStrengthForPreview - startStrengthForPreview) * curveT0;
+            var y1 = startStrengthForPreview + (innerStrengthForPreview - startStrengthForPreview) * curveT1;
+            drawList.AddLine(MapToPlot(x0, y0), MapToPlot(x1, y1), lineColor, 2.0f);
         }
 
         drawList.AddCircleFilled(highlightPoint, 4.0f, pointColor);

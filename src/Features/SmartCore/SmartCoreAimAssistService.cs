@@ -256,7 +256,7 @@ internal sealed class SmartCoreStickMapper
         if (distance <= innerRadiusModel)
         {
             var t = innerRadiusModel <= 0.001f ? 1f : Math.Clamp(distance / innerRadiusModel, 0f, 1f);
-            var curveT = context.SnapInnerInterpolationTypeIndex == 1 ? t * t : t;
+            var curveT = SnapInterpolation.EvaluateNormalized(t, context.SnapInnerInterpolationTypeIndex);
             strength = Lerp(startStrength, innerStrength, curveT);
         }
         else

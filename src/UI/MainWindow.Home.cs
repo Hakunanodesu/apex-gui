@@ -383,8 +383,13 @@ public sealed partial class MainWindow
                 PushAimAssistConfig();
             }
 
-            // Row 4: interpolation
-            ImGui.TableNextRow();
+            ImGui.EndTable();
+        }
+
+        if (ImGui.BeginTable("##SnapInterpolationRow", 2, ImGuiTableFlags.SizingStretchProp))
+        {
+            ImGui.TableSetupColumn("##SnapInterpolationLabel", ImGuiTableColumnFlags.WidthFixed, snapLabelWidth);
+            ImGui.TableSetupColumn("##SnapInterpolationInput", ImGuiTableColumnFlags.WidthStretch);
             ImGui.TableNextRow();
             _homeViewState.SnapInnerInterpolationTypeIndex = _homeViewState.SnapInnerInterpolationTypeIndex >= 0 && _homeViewState.SnapInnerInterpolationTypeIndex < SnapInnerInterpolationTypeOptions.Length
                 ? _homeViewState.SnapInnerInterpolationTypeIndex
@@ -393,7 +398,8 @@ public sealed partial class MainWindow
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("内圈插值类型");
             ImGui.TableSetColumnIndex(1);
-            ImGui.SetNextItemWidth(snapStrengthInputWidth);
+            var interpolationComboWidth = MathF.Max(90f, ImGui.GetContentRegionAvail().X - metrics.ReserveWidth);
+            ImGui.SetNextItemWidth(interpolationComboWidth);
             var selectedSnapInnerInterpolationLabel = SnapInnerInterpolationTypeOptions[_homeViewState.SnapInnerInterpolationTypeIndex];
             if (ImGui.BeginCombo("##SnapInnerInterpolationTypeCombo", selectedSnapInnerInterpolationLabel))
             {
