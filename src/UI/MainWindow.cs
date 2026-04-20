@@ -33,6 +33,8 @@ public sealed partial class MainWindow : GameWindow
     private const string AimSnapWeaponListConfigKey = "aimSnapWeapons";
     private const string RapidFireWeaponListConfigKey = "rapidFireWeapons";
     private const string ReleaseFireWeaponListConfigKey = "releaseFireWeapons";
+    private const string AimBindingConfigKey = "aimBinding";
+    private const string FireBindingConfigKey = "fireBinding";
     private readonly HomeViewState _homeViewState = new();
     private readonly string[] _specialWeaponNames;
     private bool[] _specialWeaponAimSnapEnabled;
@@ -386,10 +388,15 @@ public sealed partial class MainWindow : GameWindow
             DefaultSnapHipfireStrengthFactor,
             DefaultSnapHeight,
             HomeSnapModeOptions,
-            SnapInnerInterpolationTypeOptions);
+            SnapInnerInterpolationTypeOptions,
+            GamepadBindingCatalog.Options,
+            GamepadBindingCatalog.DefaultAimIndex,
+            GamepadBindingCatalog.DefaultFireIndex);
         if (!selectionResult.HasConfig)
         {
             _homeViewState.SnapModeIndex = -1;
+            _homeViewState.AimBindingIndex = GamepadBindingCatalog.DefaultAimIndex;
+            _homeViewState.FireBindingIndex = GamepadBindingCatalog.DefaultFireIndex;
             _onnxTopSelectedModelIndex = -1;
             PushAimAssistConfig();
             SyncSmartCoreVisionPipeline();
@@ -397,6 +404,8 @@ public sealed partial class MainWindow : GameWindow
         }
 
         _homeViewState.SnapModeIndex = selectionResult.SnapModeIndex;
+        _homeViewState.AimBindingIndex = selectionResult.AimBindingIndex;
+        _homeViewState.FireBindingIndex = selectionResult.FireBindingIndex;
         ApplySpecialWeaponLogicFromCurrentConfig();
         _onnxTopSelectedModelIndex = selectionResult.ModelIndex;
         _homeViewState.ApplySnapConfig(selectionResult.SnapConfig);
@@ -412,6 +421,8 @@ public sealed partial class MainWindow : GameWindow
         _onnxTopSelectedModelIndex = -1;
         _homeViewState.ResetSnapSettings(
             0,
+            GamepadBindingCatalog.DefaultAimIndex,
+            GamepadBindingCatalog.DefaultFireIndex,
             DefaultSnapOuterRange,
             DefaultSnapInnerRange,
             DefaultSnapOuterStrength,
@@ -783,6 +794,8 @@ public sealed partial class MainWindow : GameWindow
             _homeViewState.SnapHipfireStrengthFactor,
             _homeViewState.SnapHeight,
             _homeViewState.SnapInnerInterpolationTypeIndex,
+            _homeViewState.AimBindingIndex,
+            _homeViewState.FireBindingIndex,
             BuildEnabledWeaponNameList(_specialWeaponAimSnapEnabled),
             BuildEnabledWeaponNameList(_specialWeaponRapidFireEnabled),
             BuildEnabledWeaponNameList(_specialWeaponReleaseFireEnabled));

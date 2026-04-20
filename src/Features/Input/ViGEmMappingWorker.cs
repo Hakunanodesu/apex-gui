@@ -11,6 +11,29 @@ internal readonly record struct ViGEmMappingSnapshot(
     uint? SelectedInstanceId,
     string? LastError);
 
+internal readonly record struct ControllerOutputState(
+    short LeftX,
+    short LeftY,
+    short RightX,
+    short RightY,
+    byte LeftTrigger,
+    byte RightTrigger,
+    bool A,
+    bool B,
+    bool X,
+    bool Y,
+    bool Back,
+    bool Start,
+    bool Guide,
+    bool LeftShoulder,
+    bool RightShoulder,
+    bool LeftThumb,
+    bool RightThumb,
+    bool DpadUp,
+    bool DpadDown,
+    bool DpadLeft,
+    bool DpadRight);
+
 internal sealed class ViGEmMappingWorker : IDisposable
 {
     private const double TargetLoopIntervalMs = 1000.0 / 500.0;
@@ -188,6 +211,11 @@ internal sealed class ViGEmMappingWorker : IDisposable
     {
         lock (_sync)
         {
+            if (AreEquivalentConfig(_aimAssistConfigState, state))
+            {
+                return;
+            }
+
             _aimAssistConfigState = state;
         }
     }
@@ -218,6 +246,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
         var rapidLastToggleAt = DateTime.UtcNow;
         var releasePrevPressed = false;
         DateTime? releasePulseUntil = null;
+        ControllerOutputState? lastSubmittedState = null;
         while (_running)
         {
             WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetLoopIntervalMs);
@@ -241,6 +270,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
             if (sdlWorker is null || !isConnected || !requestedEnabled || !hasSelectedGamepad)
             {
+                lastSubmittedState = null;
                 lock (_sync)
                 {
                     _isMappingActive = false;
@@ -259,6 +289,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
                     }
                 }
 
+                lastSubmittedState = null;
                 continue;
             }
 
@@ -266,14 +297,94 @@ internal sealed class ViGEmMappingWorker : IDisposable
             var isAimSnapOverrideWeapon = ContainsWeaponName(aimAssistConfigState.AimSnapWeapons, recognizedWeaponName);
             var isRapidFireWeapon = ContainsWeaponName(aimAssistConfigState.RapidFireWeapons, recognizedWeaponName);
             var isReleaseFireWeapon = ContainsWeaponName(aimAssistConfigState.ReleaseFireWeapons, recognizedWeaponName);
-            var rightTriggerPressed = input.RightTrigger > 0;
+            var fireBindingIndex = aimAssistConfigState.FireBindingIndex;
+            var firePressed = GamepadBindingCatalog.IsPressed(fireBindingIndex, input);
+
+            short mappedLeftTrigger = input.LeftTrigger;
             short mappedRightTrigger = input.RightTrigger;
+            var mappedA = input.A;
+            var mappedB = input.B;
+            var mappedX = input.X;
+            var mappedY = input.Y;
+            var mappedBack = input.Back;
+            var mappedStart = input.Start;
+            var mappedGuide = input.Guide;
+            var mappedLeftShoulder = input.LeftShoulder;
+            var mappedRightShoulder = input.RightShoulder;
+            var mappedLeftThumb = input.LeftThumb;
+            var mappedRightThumb = input.RightThumb;
+            var mappedDpadUp = input.DpadUp;
+            var mappedDpadDown = input.DpadDown;
+            var mappedDpadLeft = input.DpadLeft;
+            var mappedDpadRight = input.DpadRight;
+
+            short ResolveFireBindingAnalogValue()
+            {
+                return GamepadBindingCatalog.IsTriggerBinding(fireBindingIndex)
+                    ? GamepadBindingCatalog.GetTriggerValue(fireBindingIndex, input)
+                    : short.MaxValue;
+            }
+
+            void SetFireBindingPressed(bool pressed, short analogValueWhenPressed = short.MaxValue)
+            {
+                switch (fireBindingIndex)
+                {
+                    case 0:
+                        mappedLeftTrigger = pressed ? analogValueWhenPressed : (short)0;
+                        break;
+                    case 1:
+                        mappedRightTrigger = pressed ? analogValueWhenPressed : (short)0;
+                        break;
+                    case 2:
+                        mappedLeftShoulder = pressed;
+                        break;
+                    case 3:
+                        mappedRightShoulder = pressed;
+                        break;
+                    case 4:
+                        mappedA = pressed;
+                        break;
+                    case 5:
+                        mappedB = pressed;
+                        break;
+                    case 6:
+                        mappedX = pressed;
+                        break;
+                    case 7:
+                        mappedY = pressed;
+                        break;
+                    case 8:
+                        mappedLeftThumb = pressed;
+                        break;
+                    case 9:
+                        mappedRightThumb = pressed;
+                        break;
+                    case 10:
+                        mappedDpadUp = pressed;
+                        break;
+                    case 11:
+                        mappedDpadDown = pressed;
+                        break;
+                    case 12:
+                        mappedDpadLeft = pressed;
+                        break;
+                    case 13:
+                        mappedDpadRight = pressed;
+                        break;
+                    case 14:
+                        mappedBack = pressed;
+                        break;
+                    case 15:
+                        mappedStart = pressed;
+                        break;
+                }
+            }
 
             if (isReleaseFireWeapon)
             {
-                if (rightTriggerPressed)
+                if (firePressed)
                 {
-                    mappedRightTrigger = 0;
+                    SetFireBindingPressed(false);
                     releasePrevPressed = true;
                     releasePulseUntil = null;
                 }
@@ -287,11 +398,11 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
                     if (releasePulseUntil.HasValue && DateTime.UtcNow < releasePulseUntil.Value)
                     {
-                        mappedRightTrigger = short.MaxValue;
+                        SetFireBindingPressed(true, short.MaxValue);
                     }
                     else
                     {
-                        mappedRightTrigger = 0;
+                        SetFireBindingPressed(false);
                         releasePulseUntil = null;
                     }
                 }
@@ -302,7 +413,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 releasePulseUntil = null;
             }
 
-            if (isRapidFireWeapon && rightTriggerPressed && !isReleaseFireWeapon)
+            if (isRapidFireWeapon && firePressed && !isReleaseFireWeapon)
             {
                 var now = DateTime.UtcNow;
                 var elapsed = now - rapidLastToggleAt;
@@ -317,7 +428,14 @@ internal sealed class ViGEmMappingWorker : IDisposable
                     rapidLastToggleAt = rapidLastToggleAt.AddTicks(rapidFireHalfPeriod.Ticks * steps);
                 }
 
-                mappedRightTrigger = rapidHigh ? input.RightTrigger : (short)0;
+                if (rapidHigh)
+                {
+                    SetFireBindingPressed(true, ResolveFireBindingAnalogValue());
+                }
+                else
+                {
+                    SetFireBindingPressed(false);
+                }
             }
             else
             {
@@ -338,41 +456,78 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 aimAssistConfigState.SnapHipfireStrengthFactor,
                 aimAssistConfigState.SnapHeight,
                 aimAssistConfigState.SnapInnerInterpolationTypeIndex,
+                aimAssistConfigState.AimBindingIndex,
+                aimAssistConfigState.FireBindingIndex,
                 isAimSnapOverrideWeapon,
                 input,
                 aimAssistDetectionState.Boxes));
 
+            var outputState = new ControllerOutputState(
+                input.LeftX,
+                InvertStickY(input.LeftY),
+                CombineStickAxis(input.RightX, aimAssistResult.IsActive ? aimAssistResult.RightX : (short)0),
+                InvertStickY(CombineStickAxis(input.RightY, aimAssistResult.IsActive ? aimAssistResult.RightY : (short)0)),
+                ToXboxTrigger(mappedLeftTrigger),
+                ToXboxTrigger(mappedRightTrigger),
+                mappedA,
+                mappedB,
+                mappedX,
+                mappedY,
+                mappedBack,
+                mappedStart,
+                mappedGuide,
+                mappedLeftShoulder,
+                mappedRightShoulder,
+                mappedLeftThumb,
+                mappedRightThumb,
+                mappedDpadUp,
+                mappedDpadDown,
+                mappedDpadLeft,
+                mappedDpadRight);
+
+            if (lastSubmittedState.HasValue && lastSubmittedState.Value.Equals(outputState))
+            {
+                lock (_sync)
+                {
+                    _isMappingActive = true;
+                    _lastError = null;
+                }
+                continue;
+            }
+
             if (!TrySubmitState(
-                    input.LeftX,
-                    InvertStickY(input.LeftY),
-                    CombineStickAxis(input.RightX, aimAssistResult.IsActive ? aimAssistResult.RightX : (short)0),
-                    InvertStickY(CombineStickAxis(input.RightY, aimAssistResult.IsActive ? aimAssistResult.RightY : (short)0)),
-                    ToXboxTrigger(input.LeftTrigger),
-                    ToXboxTrigger(mappedRightTrigger),
-                    input.A,
-                    input.B,
-                    input.X,
-                    input.Y,
-                    input.Back,
-                    input.Start,
-                    input.Guide,
-                    input.LeftShoulder,
-                    input.RightShoulder,
-                    input.LeftThumb,
-                    input.RightThumb,
-                    input.DpadUp,
-                    input.DpadDown,
-                    input.DpadLeft,
-                    input.DpadRight,
+                    outputState.LeftX,
+                    outputState.LeftY,
+                    outputState.RightX,
+                    outputState.RightY,
+                    outputState.LeftTrigger,
+                    outputState.RightTrigger,
+                    outputState.A,
+                    outputState.B,
+                    outputState.X,
+                    outputState.Y,
+                    outputState.Back,
+                    outputState.Start,
+                    outputState.Guide,
+                    outputState.LeftShoulder,
+                    outputState.RightShoulder,
+                    outputState.LeftThumb,
+                    outputState.RightThumb,
+                    outputState.DpadUp,
+                    outputState.DpadDown,
+                    outputState.DpadLeft,
+                    outputState.DpadRight,
                     out var mapError))
             {
                 lock (_sync)
                 {
                     _lastError = mapError;
                 }
+                lastSubmittedState = null;
             }
             else
             {
+                lastSubmittedState = outputState;
                 lock (_sync)
                 {
                     _isMappingActive = true;
@@ -531,6 +686,50 @@ internal sealed class ViGEmMappingWorker : IDisposable
         }
 
         return false;
+    }
+
+    private static bool AreEquivalentConfig(in SmartCoreAimAssistConfigState a, in SmartCoreAimAssistConfigState b)
+    {
+        return a.IsEnabled == b.IsEnabled &&
+               a.IsMappingActive == b.IsMappingActive &&
+               a.SnapModeIndex == b.SnapModeIndex &&
+               a.SnapOuterRange == b.SnapOuterRange &&
+               a.SnapInnerRange == b.SnapInnerRange &&
+               a.SnapOuterStrength.Equals(b.SnapOuterStrength) &&
+               a.SnapInnerStrength.Equals(b.SnapInnerStrength) &&
+               a.SnapStartStrength.Equals(b.SnapStartStrength) &&
+               a.SnapVerticalStrengthFactor.Equals(b.SnapVerticalStrengthFactor) &&
+               a.SnapHipfireStrengthFactor.Equals(b.SnapHipfireStrengthFactor) &&
+               a.SnapHeight.Equals(b.SnapHeight) &&
+               a.SnapInnerInterpolationTypeIndex == b.SnapInnerInterpolationTypeIndex &&
+               a.AimBindingIndex == b.AimBindingIndex &&
+               a.FireBindingIndex == b.FireBindingIndex &&
+               AreSameList(a.AimSnapWeapons, b.AimSnapWeapons) &&
+               AreSameList(a.RapidFireWeapons, b.RapidFireWeapons) &&
+               AreSameList(a.ReleaseFireWeapons, b.ReleaseFireWeapons);
+    }
+
+    private static bool AreSameList(IReadOnlyList<string>? a, IReadOnlyList<string>? b)
+    {
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        if (a is null || b is null || a.Count != b.Count)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Count; i++)
+        {
+            if (!string.Equals(a[i], b[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void WaitForNextTick(Stopwatch loopTimer, ref double nextLoopAtMs, double intervalMs)

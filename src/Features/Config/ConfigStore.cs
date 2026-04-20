@@ -19,9 +19,11 @@ internal readonly record struct ConfigSelectionResult(
     bool HasConfig,
     int SnapModeIndex,
     int ModelIndex,
+    int AimBindingIndex,
+    int FireBindingIndex,
     SnapConfigState SnapConfig)
 {
-    public static ConfigSelectionResult Empty => new(false, -1, -1, new SnapConfigState());
+    public static ConfigSelectionResult Empty => new(false, -1, -1, GamepadBindingCatalog.DefaultAimIndex, GamepadBindingCatalog.DefaultFireIndex, new SnapConfigState());
 }
 
 internal sealed class ConfigStore
@@ -76,7 +78,10 @@ internal sealed class ConfigStore
         float defaultHipfireStrengthFactor,
         float defaultHeight,
         IReadOnlyList<string> snapModeOptions,
-        IReadOnlyList<string> interpolationOptions)
+        IReadOnlyList<string> interpolationOptions,
+        IReadOnlyList<string> bindingOptions,
+        int defaultAimBindingIndex,
+        int defaultFireBindingIndex)
     {
         if (!TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
         {
@@ -87,6 +92,14 @@ internal sealed class ConfigStore
             _repository.TryReadString(configPath, "snap"),
             snapModeOptions,
             0);
+        var aimBindingIndex = ResolveOptionIndex(
+            _repository.TryReadString(configPath, "aimBinding"),
+            bindingOptions,
+            defaultAimBindingIndex);
+        var fireBindingIndex = ResolveOptionIndex(
+            _repository.TryReadString(configPath, "fireBinding"),
+            bindingOptions,
+            defaultFireBindingIndex);
         var modelIndex = onnxModels.Count == 0
             ? -1
             : ResolveModelIndex(_repository.TryReadString(configPath, "model"), onnxModels);
@@ -107,7 +120,7 @@ internal sealed class ConfigStore
             defaultHeight,
             interpolationOptions);
 
-        return new ConfigSelectionResult(true, snapModeIndex, modelIndex, snapConfig);
+        return new ConfigSelectionResult(true, snapModeIndex, modelIndex, aimBindingIndex, fireBindingIndex, snapConfig);
     }
 
     public bool TryResolvePath(IReadOnlyList<string> configFiles, int selectedConfigFileIndex, out string configPath)

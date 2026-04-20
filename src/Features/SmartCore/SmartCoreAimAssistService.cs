@@ -39,6 +39,8 @@ internal readonly struct SmartCoreAimAssistConfigState
     public readonly float SnapHipfireStrengthFactor;
     public readonly float SnapHeight;
     public readonly int SnapInnerInterpolationTypeIndex;
+    public readonly int AimBindingIndex;
+    public readonly int FireBindingIndex;
     public readonly string[] AimSnapWeapons;
     public readonly string[] RapidFireWeapons;
     public readonly string[] ReleaseFireWeapons;
@@ -56,6 +58,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         float snapHipfireStrengthFactor,
         float snapHeight,
         int snapInnerInterpolationTypeIndex,
+        int aimBindingIndex,
+        int fireBindingIndex,
         string[] aimSnapWeapons,
         string[] rapidFireWeapons,
         string[] releaseFireWeapons)
@@ -72,6 +76,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         SnapHipfireStrengthFactor = snapHipfireStrengthFactor;
         SnapHeight = snapHeight;
         SnapInnerInterpolationTypeIndex = snapInnerInterpolationTypeIndex;
+        AimBindingIndex = aimBindingIndex;
+        FireBindingIndex = fireBindingIndex;
         AimSnapWeapons = aimSnapWeapons;
         RapidFireWeapons = rapidFireWeapons;
         ReleaseFireWeapons = releaseFireWeapons;
@@ -90,6 +96,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         0f,
         0f,
         0,
+        GamepadBindingCatalog.DefaultAimIndex,
+        GamepadBindingCatalog.DefaultFireIndex,
         Array.Empty<string>(),
         Array.Empty<string>(),
         Array.Empty<string>());
@@ -109,6 +117,8 @@ internal readonly struct SmartCoreAimAssistContext
     public readonly float SnapHipfireStrengthFactor;
     public readonly float SnapHeight;
     public readonly int SnapInnerInterpolationTypeIndex;
+    public readonly int AimBindingIndex;
+    public readonly int FireBindingIndex;
     public readonly bool IsAimSnapOverrideWeapon;
     public readonly SdlGamepadInputSnapshot Input;
     public readonly OnnxDebugBox[] Boxes;
@@ -126,6 +136,8 @@ internal readonly struct SmartCoreAimAssistContext
         float snapHipfireStrengthFactor,
         float snapHeight,
         int snapInnerInterpolationTypeIndex,
+        int aimBindingIndex,
+        int fireBindingIndex,
         bool isAimSnapOverrideWeapon,
         SdlGamepadInputSnapshot input,
         OnnxDebugBox[] boxes)
@@ -142,6 +154,8 @@ internal readonly struct SmartCoreAimAssistContext
         SnapHipfireStrengthFactor = snapHipfireStrengthFactor;
         SnapHeight = snapHeight;
         SnapInnerInterpolationTypeIndex = snapInnerInterpolationTypeIndex;
+        AimBindingIndex = aimBindingIndex;
+        FireBindingIndex = fireBindingIndex;
         IsAimSnapOverrideWeapon = isAimSnapOverrideWeapon;
         Input = input;
         Boxes = boxes;
@@ -180,7 +194,6 @@ internal sealed class SmartCoreActivationEvaluator
 {
     private const int FireSnapModeIndex = 0;
     private const int AimAndFireSnapModeIndex = 1;
-    private const short TriggerPressedThreshold = short.MaxValue / 4;
 
     public bool IsActive(in SmartCoreAimAssistContext context)
     {
@@ -191,16 +204,16 @@ internal sealed class SmartCoreActivationEvaluator
 
         if (context.IsAimSnapOverrideWeapon)
         {
-            return context.Input.RightTrigger >= TriggerPressedThreshold ||
-                   context.Input.LeftTrigger >= TriggerPressedThreshold;
+            return GamepadBindingCatalog.IsPressed(context.FireBindingIndex, context.Input) ||
+                   GamepadBindingCatalog.IsPressed(context.AimBindingIndex, context.Input);
         }
 
         return context.SnapModeIndex switch
         {
-            FireSnapModeIndex => context.Input.RightTrigger >= TriggerPressedThreshold,
+            FireSnapModeIndex => GamepadBindingCatalog.IsPressed(context.FireBindingIndex, context.Input),
             AimAndFireSnapModeIndex =>
-                context.Input.LeftTrigger >= TriggerPressedThreshold ||
-                context.Input.RightTrigger >= TriggerPressedThreshold,
+                GamepadBindingCatalog.IsPressed(context.AimBindingIndex, context.Input) ||
+                GamepadBindingCatalog.IsPressed(context.FireBindingIndex, context.Input),
             _ => false
         };
     }

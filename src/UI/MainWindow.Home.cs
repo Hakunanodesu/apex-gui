@@ -216,6 +216,7 @@ public sealed partial class MainWindow
 
         DrawSnapSettingsSection(metrics, topPanelStyle);
         DrawSnapCurveSection(topPanelStyle);
+        DrawKeyBindingSection(metrics.ReserveWidth);
         DrawSnapModeSection(metrics.ReserveWidth);
         DrawSpecialWeaponLogicSection(topPanelStyle);
 
@@ -430,6 +431,86 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(1);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         DrawSnapCurvePreview();
+    }
+
+    private void DrawKeyBindingSection(float reserveWidth)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextRow();
+
+        ImGui.TableSetColumnIndex(0);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("按键绑定");
+
+        ImGui.TableSetColumnIndex(1);
+        var style = ImGui.GetStyle();
+        var availableWidth = MathF.Max(0f, ImGui.GetContentRegionAvail().X - reserveWidth);
+        var labelWidth = MathF.Max(ImGui.CalcTextSize("瞄准").X, ImGui.CalcTextSize("开火").X);
+        var comboWidth = MathF.Max(90f, availableWidth - labelWidth - style.ItemSpacing.X);
+        _homeViewState.AimBindingIndex = _homeViewState.AimBindingIndex >= 0 && _homeViewState.AimBindingIndex < GamepadBindingCatalog.Options.Length
+            ? _homeViewState.AimBindingIndex
+            : GamepadBindingCatalog.DefaultAimIndex;
+        _homeViewState.FireBindingIndex = _homeViewState.FireBindingIndex >= 0 && _homeViewState.FireBindingIndex < GamepadBindingCatalog.Options.Length
+            ? _homeViewState.FireBindingIndex
+            : GamepadBindingCatalog.DefaultFireIndex;
+        var disableBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.Options.Length == 0;
+
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("瞄准");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(comboWidth);
+        var selectedAimLabel = GamepadBindingCatalog.Options[_homeViewState.AimBindingIndex];
+        ImGui.BeginDisabled(disableBindingSelection);
+        if (ImGui.BeginCombo("##HomeAimBindingCombo", selectedAimLabel))
+        {
+            for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
+            {
+                var isSelected = i == _homeViewState.AimBindingIndex;
+                if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
+                {
+                    _homeViewState.AimBindingIndex = i;
+                    TryWriteStringToCurrentConfig(AimBindingConfigKey, GamepadBindingCatalog.Options[i]);
+                    PushAimAssistConfig();
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+        ImGui.EndDisabled();
+
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + style.ItemSpacing.Y);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("开火");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(comboWidth);
+        var selectedFireLabel = GamepadBindingCatalog.Options[_homeViewState.FireBindingIndex];
+        ImGui.BeginDisabled(disableBindingSelection);
+        if (ImGui.BeginCombo("##HomeFireBindingCombo", selectedFireLabel))
+        {
+            for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
+            {
+                var isSelected = i == _homeViewState.FireBindingIndex;
+                if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
+                {
+                    _homeViewState.FireBindingIndex = i;
+                    TryWriteStringToCurrentConfig(FireBindingConfigKey, GamepadBindingCatalog.Options[i]);
+                    PushAimAssistConfig();
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+        ImGui.EndDisabled();
     }
 
     private void DrawSnapModeSection(float reserveWidth)
@@ -1202,6 +1283,8 @@ internal sealed class SmartCorePreviewForm : System.Windows.Forms.Form
 internal sealed class HomeViewState
 {
     public int SnapModeIndex { get; set; } = -1;
+    public int AimBindingIndex { get; set; } = GamepadBindingCatalog.DefaultAimIndex;
+    public int FireBindingIndex { get; set; } = GamepadBindingCatalog.DefaultFireIndex;
     public int SnapOuterRange { get; set; } = 1;
     public float SnapOuterStrength { get; set; }
     public int SnapInnerRange { get; set; } = 1;
@@ -1234,6 +1317,8 @@ internal sealed class HomeViewState
 
     public void ResetSnapSettings(
         int snapModeIndex,
+        int aimBindingIndex,
+        int fireBindingIndex,
         int outerRange,
         int innerRange,
         float outerStrength,
@@ -1245,6 +1330,8 @@ internal sealed class HomeViewState
         int interpolationTypeIndex)
     {
         SnapModeIndex = snapModeIndex;
+        AimBindingIndex = aimBindingIndex;
+        FireBindingIndex = fireBindingIndex;
         SnapOuterRange = outerRange;
         SnapInnerRange = innerRange;
         SnapOuterStrength = outerStrength;
