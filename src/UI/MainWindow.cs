@@ -49,6 +49,7 @@ public sealed partial class MainWindow : GameWindow
     private readonly List<string> _configFiles = new();
     private int _selectedConfigFileIndex;
     private int _homeSelectedGamepadIndex;
+    private uint? _homeSelectedGamepadInstanceId;
     private OpenTK.Mathematics.Vector2i _lastNormalClientSize;
     private SdlGamepadWorker? _sdlGamepadWorker;
     private ViGEmMappingWorker? _viGEmMappingWorker;
@@ -59,11 +60,14 @@ public sealed partial class MainWindow : GameWindow
     private static readonly WindowStateService WindowStateService = new();
     private (uint InstanceId, string Name)[] _cachedConnectedGamepads = Array.Empty<(uint InstanceId, string Name)>();
     private string[] _cachedGamepadOptions = Array.Empty<string>();
+    private static uint? _startupSelectedGamepadInstanceId;
     internal static string WindowStateFilePath => Path.Combine(Environment.CurrentDirectory, WindowStateFileName);
 
     internal static bool TryLoadWindowState(out WindowStateSnapshot snapshot)
     {
-        return WindowStateService.TryLoad(WindowStateFilePath, out snapshot);
+        var loaded = WindowStateService.TryLoad(WindowStateFilePath, out snapshot);
+        _startupSelectedGamepadInstanceId = loaded ? snapshot.SelectedGamepadInstanceId : null;
+        return loaded;
     }
 
     public MainWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings)
@@ -80,6 +84,7 @@ public sealed partial class MainWindow : GameWindow
     {
         base.OnLoad();
         SDL.InitSubSystem(SDL.InitFlags.Gamepad);
+        _homeSelectedGamepadInstanceId = _startupSelectedGamepadInstanceId;
         _sdlGamepadWorker = new SdlGamepadWorker();
         _viGEmMappingWorker = new ViGEmMappingWorker();
         _viGEmMappingWorker.SetSdlGamepadWorker(_sdlGamepadWorker);
@@ -753,7 +758,8 @@ public sealed partial class MainWindow : GameWindow
             {
                 Width = Math.Max(400, size.X),
                 Height = Math.Max(300, size.Y),
-                IsMaximized = WindowState == WindowState.Maximized
+                IsMaximized = WindowState == WindowState.Maximized,
+                SelectedGamepadInstanceId = _homeSelectedGamepadInstanceId
             };
             WindowStateService.Save(WindowStateFilePath, snapshot);
         }
@@ -771,8 +777,33 @@ public sealed partial class MainWindow : GameWindow
             selectedInstanceId = _cachedConnectedGamepads[_homeSelectedGamepadIndex].InstanceId;
         }
 
+        _homeSelectedGamepadInstanceId = selectedInstanceId;
         _viGEmMappingWorker?.SetSelectedGamepad(selectedInstanceId);
         RefreshSmartCoreState();
+    }
+
+    private void ResolveSelectedGamepadIndexFromInstanceId()
+    {
+        if (_cachedConnectedGamepads.Length == 0)
+        {
+            _homeSelectedGamepadIndex = -1;
+            return;
+        }
+
+        if (_homeSelectedGamepadInstanceId.HasValue)
+        {
+            for (var i = 0; i < _cachedConnectedGamepads.Length; i++)
+            {
+                if (_cachedConnectedGamepads[i].InstanceId == _homeSelectedGamepadInstanceId.Value)
+                {
+                    _homeSelectedGamepadIndex = i;
+                    return;
+                }
+            }
+        }
+
+        _homeSelectedGamepadIndex = 0;
+        _homeSelectedGamepadInstanceId = _cachedConnectedGamepads[0].InstanceId;
     }
 
     private void PushAimAssistConfig()

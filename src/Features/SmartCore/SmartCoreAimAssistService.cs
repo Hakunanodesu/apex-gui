@@ -264,7 +264,8 @@ internal sealed class SmartCoreStickMapper
             strength = outerStrength;
         }
 
-        if (!context.Input.LeftThumb)
+        var isAiming = GamepadBindingCatalog.IsPressed(context.AimBindingIndex, context.Input);
+        if (!isAiming)
         {
             strength *= Math.Clamp(context.SnapHipfireStrengthFactor, 0f, 1f);
         }

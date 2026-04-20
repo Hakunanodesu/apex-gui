@@ -37,6 +37,7 @@ internal readonly record struct ControllerOutputState(
 internal sealed class ViGEmMappingWorker : IDisposable
 {
     private const double TargetLoopIntervalMs = 1000.0 / 500.0;
+    private static readonly TimeSpan SdlInputFailureGrace = TimeSpan.FromSeconds(1);
     private const int TriggerTimingUnitMs = 20;
     private const int ReleaseToFirePulseMs = 100;
     private readonly object _sync = new();
@@ -246,6 +247,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
         var rapidLastToggleAt = DateTime.UtcNow;
         var releasePrevPressed = false;
         DateTime? releasePulseUntil = null;
+        DateTime? sdlInputFailureSinceUtc = null;
         ControllerOutputState? lastSubmittedState = null;
         while (_running)
         {
@@ -270,6 +272,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
             if (sdlWorker is null || !isConnected || !requestedEnabled || !hasSelectedGamepad)
             {
+                sdlInputFailureSinceUtc = null;
                 lastSubmittedState = null;
                 lock (_sync)
                 {
@@ -280,11 +283,19 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
             if (!sdlWorker.TryGetLatestInput(out var input, out var sdlError))
             {
-                if (!string.IsNullOrWhiteSpace(sdlError))
+                var now = DateTime.UtcNow;
+                sdlInputFailureSinceUtc ??= now;
+                var inGraceWindow = (now - sdlInputFailureSinceUtc.Value) < SdlInputFailureGrace;
+                if (inGraceWindow)
                 {
-                    lock (_sync)
+                    continue;
+                }
+
+                lock (_sync)
+                {
+                    _isMappingActive = false;
+                    if (!string.IsNullOrWhiteSpace(sdlError))
                     {
-                        _isMappingActive = false;
                         _lastError = sdlError;
                     }
                 }
@@ -292,6 +303,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 lastSubmittedState = null;
                 continue;
             }
+
+            sdlInputFailureSinceUtc = null;
 
             var recognizedWeaponName = weaponRecognitionState.WeaponName;
             var isAimSnapOverrideWeapon = ContainsWeaponName(aimAssistConfigState.AimSnapWeapons, recognizedWeaponName);

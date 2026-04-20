@@ -42,12 +42,19 @@ internal sealed class WindowStateService
             var isMaximized = values.TryGetValue("IsMaximized", out var maximizedRaw)
                 && bool.TryParse(maximizedRaw, out var parsedMaximized)
                 && parsedMaximized;
+            uint? selectedGamepadInstanceId = null;
+            if (values.TryGetValue("SelectedGamepadInstanceId", out var selectedInstanceIdRaw)
+                && uint.TryParse(selectedInstanceIdRaw, out var parsedInstanceId))
+            {
+                selectedGamepadInstanceId = parsedInstanceId;
+            }
 
             snapshot = new WindowStateSnapshot
             {
                 Width = width,
                 Height = height,
-                IsMaximized = isMaximized
+                IsMaximized = isMaximized,
+                SelectedGamepadInstanceId = selectedGamepadInstanceId
             };
             return true;
         }
@@ -64,7 +71,8 @@ internal sealed class WindowStateService
             "[WindowState]",
             $"Width={snapshot.Width}",
             $"Height={snapshot.Height}",
-            $"IsMaximized={snapshot.IsMaximized}") + Environment.NewLine;
+            $"IsMaximized={snapshot.IsMaximized}",
+            $"SelectedGamepadInstanceId={(snapshot.SelectedGamepadInstanceId.HasValue ? snapshot.SelectedGamepadInstanceId.Value.ToString() : string.Empty)}") + Environment.NewLine;
         File.WriteAllText(filePath, content);
     }
 }
@@ -74,4 +82,5 @@ internal sealed class WindowStateSnapshot
     public int Width { get; init; }
     public int Height { get; init; }
     public bool IsMaximized { get; init; }
+    public uint? SelectedGamepadInstanceId { get; init; }
 }

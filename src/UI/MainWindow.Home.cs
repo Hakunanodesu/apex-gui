@@ -97,9 +97,6 @@ public sealed partial class MainWindow
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted(hasGamepads ? "已就绪" : "未就绪");
         ImGui.TableSetColumnIndex(2);
-        _homeSelectedGamepadIndex = hasGamepads
-            ? (_homeSelectedGamepadIndex >= 0 && _homeSelectedGamepadIndex < gamepads.Length ? _homeSelectedGamepadIndex : 0)
-            : -1;
         var gamepadIndexBeforeUi = _homeSelectedGamepadIndex;
         var inputRefreshButtonWidth = metrics.BaseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
         ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - metrics.ReserveWidth);
@@ -636,7 +633,8 @@ public sealed partial class MainWindow
     private void RefreshInputDevicesCore(ref int selectedIndex, bool forceRefresh)
     {
         UpdateConnectedGamepadCache(forceRefresh);
-        selectedIndex = _gamepadService.NormalizeSelectedIndex(selectedIndex, _cachedGamepadOptions.Length);
+        ResolveSelectedGamepadIndexFromInstanceId();
+        selectedIndex = _homeSelectedGamepadIndex;
     }
 
     private string[] GetConnectedGamepadOptions()
