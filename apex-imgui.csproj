@@ -3,6 +3,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.18362.0</TargetFramework>
+    <ApplicationIcon>Assets\Icons\3mz_ds_ver.ico</ApplicationIcon>
     <Version>5.0.0</Version>
     <RootNamespace>apex_imgui</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
