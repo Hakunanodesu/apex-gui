@@ -1,190 +1,43 @@
-# apex-egui
+﻿# apex-imgui
 
-一个基于 `egui/eframe` 的 Windows 桌面工具：通过 **Windows 窗口捕获** 获取《Apex Legends》画面，在本机用 **ONNX Runtime + DirectML** 做目标检测，再把“修正后的右摇杆输入”写入 **ViGEm 虚拟 XBox 360 手柄**，实现“智慧核心”模式下的辅助控制。项目同时支持按 HUD 区域做**武器识别**，用于“根据枪械自动切换连点”等辅助功能。
+`apex-imgui` 是一个 Windows 桌面工具，提供可视化界面，用于加载模型、管理配置，并进行相关输入映射与联动功能。
 
-当前程序版本与 Release 对照：`Cargo.toml` 中的 `version`（例如 `4.1.1`）；更新检查请求 [Hakunanodesu/apex-gui](https://github.com/Hakunanodesu/apex-gui/releases) 的 Releases（API：`https://api.github.com/repos/Hakunanodesu/apex-gui/releases`）。
+## 功能简介
 
-> 说明：本文只写“介绍与使用”，不包含任何编译/构建内容。
+- 图形化操作界面，开箱即用
+- 支持模型加载与切换（ONNX）
+- 支持多套配置文件管理
+- 内置武器模板资源，无需手动导入
+- 自动记忆窗口状态与当前配置
 
----
+## 系统要求
 
-## 功能概览
+- Windows 10/11 64 位
+- 建议使用支持 DirectML 的显卡驱动
 
-- **智慧核心（核心功能）**
-  - 捕获游戏窗口画面（窗口标题完全匹配：`Apex Legends`）。
-  - 使用 `models/*.onnx` 推理得到检测框。
-  - 在满足触发条件时，对右摇杆注入修正量（支持“仅开火 / 瞄准和开火”两种激活方式，以及腰射系数、垂直系数、瞄准高度等参数）。
-- **输入链路**
-  - 读取物理手柄：**Xbox** 走 Windows **XInput**（约定 **用户索引 0** 留给 ViGEm 虚拟 Xbox 360，程序在 **1～3** 号槽查找物理手柄）；**DualSense / DualShock 4** 走 **HIDAPI** 读 HID 报告（索尼 VID + 常见 PID / 产品名识别）。
-  - 输出虚拟手柄：`ViGEmBus`（Xbox360 Wired）。
-- **武器识别（用于连点/特殊枪械策略）**
-  - 从右下角 HUD ROI 生成 Sobel 特征图，与编译期嵌入的模板做 SSIM 匹配，得到武器名（无后缀模板名或 `empty`）。
-- **辅助功能**
-  - 连点：关闭/始终/半按/全按/根据枪械自动切换。
-  - 特殊枪械：可设定“强制瞄准和开火”、“松手开火一次”等策略。
-  - 启动时检查 GitHub Release 更新、推理预览窗口（显示捕获/推理/匹配延迟与结果）；调试构建下可向控制台输出手柄状态辅助排查。
+## 下载与运行
 
----
+1. 打开本仓库的 **Releases** 页面下载最新版本。
+2. 解压后运行 `apex-imgui.exe`。
+3. 首次启动如果被系统拦截，请在 Windows 安全提示中选择允许运行。
 
-## 使用前置条件（运行环境）
+## 使用前准备
 
-- **Windows**：仅支持 Windows（使用 `winapi`、`windows-capture`、DirectML、ViGEm）。
-- **ViGEmBus Driver**：需要安装并可用（UI 的 `?` 帮助窗口会检测）。
-- **物理手柄**：在「设定 → 输入设备」中选择与实际设备一致的类型——**Xbox**（XInput，且勿占用 0 号玩家位）、**DualSense** 或 **DualShock 4 (Beta)**（HID）；`?` 窗口中的「输入设备」行会反映当前选择是否检测到设备。
-- **游戏窗口**：必须已启动《Apex Legends》，且窗口标题为 **`Apex Legends`**（完全匹配）；否则智慧核心不会启动。
-- **模型文件**：`models/` 目录下需要存在至少一个 `.onnx` 模型，且可选同名 `.json` 用于推理参数。
+- `Models` 目录：放置模型文件（`.onnx`）及同名配置文件（`.json`）
+  - 示例：`apexlegends.onnx` 与 `apexlegends.json`
+- `Configs` 目录：放置你的使用配置（`.json`）
+- 武器模板已内嵌到程序中，分发目录无需额外模板文件
 
----
+## 常见问题
 
-## 快速上手（面向用户）
+- 启动失败或闪退：
+  - 检查是否缺少必要运行环境或显卡驱动过旧
+  - 尝试以管理员身份运行
+- 模型未显示：
+  - 确认 `.onnx` 与 `.json` 同名且都在 `Models` 目录
+- 配置未生效：
+  - 确认配置文件是有效 JSON，且位于 `Configs` 目录
 
-### 1) 准备文件
+## 免责声明
 
-确认程序工作目录下存在以下内容（与仓库结构一致）：
-
-- `configs/`：至少一个 `*.json` 配置文件（例如 `configs/apex_1080p_dse.json`）。
-- `models/`：至少一个 `*.onnx` 模型文件（例如 `models/apexlegends.onnx`）。
-- `configs/.current`：可选，用于记住上次选择的配置/模型（程序会自动维护）。
-
-> `gun_templates/` 在普通使用下不是必需项：运行时的武器模板来自**编译期嵌入**。该目录更多用于维护模板素材；**连点白名单与「辅助功能」里特殊枪械列表**也在构建时从该目录生成（经 `build.rs` 写入 Cargo `OUT_DIR`），与嵌入模板一致。
-
-### 2) 启动程序并选择配置/模型
-
-- 第一行选择 **配置**（来自 `configs/*.json`）。
-- 第二行选择 **模型**（来自 `models/*.onnx`）。
-- 选择变化会写入 `configs/.current`，下次启动自动回忆。
-
-### 3) 设置参数（窗口中部 “设定” 区）
-
-- **吸附相关**
-  - **吸附方式**：
-    - `仅开火`：右扳机按下时才生效。
-    - `瞄准和开火`：右扳机按下时生效；同时在开镜（左扳机）按下时也可生效。
-  - **吸附曲线设定**：外/内圈直径与强度、起始强度、腰射系数、垂直系数、瞄准高度系数等。
-  - **预览**：打开一个置顶预览窗，用同心圆直观显示当前外圈与内圈直径。
-- **输入设备**
-  - 当前仅实现 **手柄**（“键鼠”入口被显式标注为未实现）。
-  - **设备选择**：`Xbox`、`DualSense`、`DualShock 4 (Beta)`（与配置项 `input_device` 一致，会持久化到 JSON）。
-- **辅助功能**
-  - **连点触发方式**：选择连点模式；若为“根据枪械自动切换”，会基于武器识别结果与白名单自动启停连点。
-  - **特殊枪械设定**：对特定武器可勾选“开镜吸附/松手开火”等策略（并互斥处理）。
-  - **检查更新 / ?**：检查 GitHub Release，或打开就绪状态帮助面板。
-
-### 4) 填写许可证并启动“智慧核心”
-
-- 底部有 **许可证** 输入框与 **智慧核心** 按钮。
-- 当许可证无效时，点击智慧核心会在左侧提示 **“许可证错误”**。
-- 许可证通过后点击 **智慧核心**：
-  - 若 **ViGEmBus / 输入设备（当前所选手柄类型）/ 游戏窗口** 任一未就绪，会自动弹出 `?` 帮助窗口提示对应项。
-
-### 5) 推理预览（可选）
-
-智慧核心运行后，右下角会出现另一个 **预览** 按钮（推理预览窗口）：
-
-- 展示捕获画面（正方形 ROI）与检测框、检测数量/阈值效果。
-- 展示延迟统计（截图耗时、预处理耗时、推理耗时、武器匹配耗时等）。
-- 展示武器识别结果与相似度（若启用“根据枪械自动切换”相关链路）。
-
----
-
-## 目录结构与文件职责
-
-- `src/main.rs`
-  - UI 与交互入口（配置/模型选择、参数编辑、帮助与预览窗口、许可证与智慧核心开关）。
-- `src/modules/mapping_state_machine.rs`
-  - “智慧核心”状态机：按顺序启动/停止 **捕获 → 推理 →（可选）武器识别 → 读物理手柄 → 写虚拟手柄**，并做错误检测与清理。
-- `src/modules/screen_capture_thread.rs`
-  - 使用 `windows-capture` 捕获 **`Apex Legends` 窗口**；输出中心正方形 ROI（CHW RGB）供推理，按需输出右下角武器 ROI（HWC RGB）供武器识别。
-- `src/modules/enemy_det_thread.rs`
-  - 使用 `ort`（ONNX Runtime）+ `DirectML` 推理；读取 `models/<name>.onnx` 与同名 `models/<name>.json`（可选）作为推理配置。
-- `src/modules/weapon_rec_thread.rs`
-  - 右下角 ROI → 灰度 → 缩放到统一尺寸 → Sobel → SSIM 与模板匹配；输出当前武器名或 `empty`。
-- `src/modules/gamepad_reading_thread.rs`
-  - **XInput**（Xbox）或 **HIDAPI**（DualSense / DualShock 4）读取物理手柄并映射到 `XGamepad`；调试构建下可打印状态行辅助排查。
-- `src/modules/gamepad_mapping_thread.rs`
-  - 把原始手柄状态 + 检测结果（+ 可选武器识别）综合后输出到 ViGEm 虚拟手柄；包含连点与“松手开火”等策略。
-- `configs/`
-  - `*.json`：用户配置文件（参数持久化）。
-  - `.current`：当前选中配置/模型（程序自动读写）。
-- `models/`
-  - `*.onnx`：检测模型。
-  - `*.json`：与模型同名的推理配置（见下文）。
-- `gun_templates/`
-  - 武器模板图片素材（供构建阶段嵌入；普通使用无需改动）。
-- `plans/`
-  - 开发计划与实现笔记（非使用重点）。
-
----
-
-## 配置文件说明（`configs/*.json`）
-
-配置结构由 `src/utils.rs::ConfigFile` 定义，典型字段如下（以 `configs/apex_1080p_dse.json` 为例）：
-
-- **`assist_curve`**
-  - `outer_diameter` / `inner_diameter`：外/内圈直径（像素）。
-  - `outer_strength` / `inner_strength`：外圈/内圈强度（0~1）。
-  - `deadzone`：起始吸附强度（0~1）。
-  - `hipfire`：腰射系数（0~1，用于未按左扳机时的乘数）。
-  - `assist_output_ema_alpha`：右摇杆辅助输出的 EMA 平滑系数（0~1，越低越平滑）。
-  - `inner_ramp_mode`：内圈插值曲线类型，支持 `"linear"` / `"square"`。
-- **`aa_activate_mode`**
-  - `仅开火` 或 `瞄准和开火`。
-- **`use_controller`**
-  - 是否与界面一致选择「手柄」；为 `false` 时为「键鼠（未实现）」选项的持久化值。
-- **`input_device`**
-  - 手柄类型字符串，与界面下拉一致：`Xbox`、`DualSense`、`DualShock 4 (Beta)`（旧配置缺省则视为 `Xbox`）。
-- **`vertical_strength_coefficient`**：垂直方向系数（0~1）。
-- **`aim_height_coefficient`**：瞄准高度系数（0~1，影响取框中心的 y 偏移）。
-- **`rapid_fire_mode`**
-  - `不启用连点` / `根据枪械自动切换` / `半按扳机连点` / `完全按下扳机连点` / `始终连点`。
-- **`special_weapons_aim_and_fire`**：对哪些武器强制启用“瞄准和开火”。
-- **`special_weapons_release_to_fire`**：对哪些武器启用“松手开火一次”。
-- **`license_code`**：许可证（会被保存到配置文件；程序只在校验通过时才在输入框回显）。
-
----
-
-## 模型说明（`models/*.onnx` 与同名 `models/*.json`）
-
-程序会读取模型同名 JSON 作为推理配置（例如 `models/apexlegends.onnx` 对应 `models/apexlegends.json`）：
-
-- **`size`**：推理输入尺寸（例如 320）。
-- **`conf_thres`**：置信度阈值。
-- **`iou_thres`**：NMS 的 IoU 阈值。
-- **`classes`**：类别白名单字符串（如 `"0"` 或 `"0,1,2"`）。
-
-UI 侧还会读取该 JSON 的 `size` 用来约束**外圈直径**的下限（避免圈太小导致推理/裁剪异常）。
-
----
-
-## 常见问题（排错）
-
-### 智慧核心无法启动 / 自动弹出 `?` 帮助窗口
-
-按帮助窗口三项逐个检查：
-
-- **ViGEmBus 未就绪**
-  - 需要安装 ViGEm Bus Driver（帮助窗里提供下载按钮）。
-- **输入设备 未就绪**
-  - 确认「设定 → 输入设备」中的类型与实际手柄一致。
-  - **Xbox**：ViGEm 虚拟手柄通常占用 XInput **0 号**，物理手柄应出现在 **1～3 号**；若系统把物理手柄排在 0 号，可能导致检测失败，可尝试先确保虚拟手柄已插入再连接实体手柄，或调整连接顺序。
-  - **DualSense / DualShock 4**：需能被系统枚举为 HID；优先使用有线或稳定配对，并排除被其他独占软件占用导致无法打开设备的情况。
-- **游戏窗口未就绪**
-  - 必须先启动《Apex Legends》并保持窗口标题为 `Apex Legends`。
-
-### 模型下拉框没有内容 / 推理不工作
-
-- 确认 `models/` 下存在 `.onnx` 文件（不区分大小写后缀）。
-- 如有同名 `models/<name>.json`，格式需为合法 JSON；否则会回退默认推理参数。
-
-### “根据枪械自动切换”没有效果
-
-- 该模式依赖武器识别链路：需要在智慧核心运行时能正确捕获右下角 HUD ROI，并成功与嵌入模板匹配。
-- 若识别结果长期为 `empty`，通常是 HUD 显示异常、分辨率/缩放导致 ROI 偏移，或模板不匹配当前 HUD 样式。
-
----
-
-## 版本与更新
-
-- 程序启动后会在后台检查 GitHub Release。
-- 检测到更新时，会在主界面“辅助功能”按钮右侧显示 **“有更新可用”** 链接，点击打开 Release 页面。
-
+本项目仅供学习与技术研究使用，请遵守你所在地区的法律法规及相关软件服务条款。
