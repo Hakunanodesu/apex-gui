@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Vortice.Direct3D11;
 using Vortice.DXGI;
 
@@ -39,7 +39,7 @@ internal static class RuntimePerformance
             using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
             dxgiDevice.SetGPUThreadPriority(priority).CheckError();
             dxgiDevice.GetGPUThreadPriority(out var actual).CheckError();
-            _dxgiGpuPriorityStatus = $"已设置 ({actual})";
+            _dxgiGpuPriorityStatus = $"已设置({actual})";
         }
         catch (Exception ex)
         {

@@ -1,4 +1,4 @@
-internal static class GamepadBindingCatalog
+﻿internal static class GamepadBindingCatalog
 {
     private const short TriggerPressedThreshold = short.MaxValue / 4;
 

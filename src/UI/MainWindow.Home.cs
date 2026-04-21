@@ -1,8 +1,5 @@
-ï»¿using ImGuiNET;
+using ImGuiNET;
 using System.Numerics;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
-using System.Threading;
 
 public sealed partial class MainWindow
 {
@@ -28,7 +25,7 @@ public sealed partial class MainWindow
         RefreshSmartCoreState();
 
         var topPanelStyle = ImGui.GetStyle();
-        var baseTextWidth = ImGui.CalcTextSize("ä¸€").X;
+        var baseTextWidth = ImGui.CalcTextSize("Ò»").X;
         var addButtonWidth = baseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
         var deleteButtonWidth = baseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
         var reserveWidth = addButtonWidth + deleteButtonWidth + topPanelStyle.ItemSpacing.X * 2f;
@@ -68,10 +65,10 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ä¾èµ–çŠ¶æ€");
+        ImGui.TextUnformatted("ÒÀÀµ×´Ì¬");
         ImGui.TableSetColumnIndex(1);
 
-        var vigemActionLabel = vigemReady ? "é‡æ–°å®‰è£…" : "å®‰è£…";
+        var vigemActionLabel = vigemReady ? "ÖØÐÂ°²×°" : "°²×°";
         var gamepads = GetConnectedGamepadOptions();
         var hasGamepads = gamepads.Length > 0;
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
@@ -81,17 +78,17 @@ public sealed partial class MainWindow
             return;
         }
 
-        ImGui.TableSetupColumn("##DepName", ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("ViGemBus é©±åŠ¨").X);
+        ImGui.TableSetupColumn("##DepName", ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("ViGemBus Çý¶¯").X);
         ImGui.TableSetupColumn("##DepState", ImGuiTableColumnFlags.WidthFixed, metrics.BaseTextWidth * 3f);
         ImGui.TableSetupColumn("##DepAction", ImGuiTableColumnFlags.WidthStretch);
 
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ViGemBus é©±åŠ¨");
+        ImGui.TextUnformatted("ViGemBus Çý¶¯");
         ImGui.TableSetColumnIndex(1);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted(vigemReady ? "å·²å°±ç»ª" : "æœªå°±ç»ª");
+        ImGui.TextUnformatted(vigemReady ? "ÒÑ¾ÍÐ÷" : "Î´¾ÍÐ÷");
         ImGui.TableSetColumnIndex(2);
         if (ImGui.Button(vigemActionLabel))
         {
@@ -102,10 +99,10 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("è¾“å…¥è®¾å¤‡");
+        ImGui.TextUnformatted("ÊäÈëÉè±¸");
         ImGui.TableSetColumnIndex(1);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted(hasGamepads ? "å·²å°±ç»ª" : "æœªå°±ç»ª");
+        ImGui.TextUnformatted(hasGamepads ? "ÒÑ¾ÍÐ÷" : "Î´¾ÍÐ÷");
         ImGui.TableSetColumnIndex(2);
         var gamepadIndexBeforeUi = _homeSelectedGamepadIndex;
         var inputRefreshButtonWidth = metrics.BaseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
@@ -116,7 +113,7 @@ public sealed partial class MainWindow
             ApplySelectedGamepadSelection();
         }
         ImGui.SameLine();
-        if (ImGui.Button("åˆ·æ–°##HomeInputDeviceRefresh", new Vector2(inputRefreshButtonWidth, 0f)))
+        if (ImGui.Button("Ë¢ÐÂ##HomeInputDeviceRefresh", new Vector2(inputRefreshButtonWidth, 0f)))
         {
             RefreshHomeInputDevices();
         }
@@ -132,14 +129,14 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(0);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("é…ç½®é€‰æ‹©");
+        ImGui.TextUnformatted("ÅäÖÃÑ¡Ôñ");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         var configComboWidth = ImGui.GetContentRegionAvail().X - metrics.ReserveWidth;
         ImGui.BeginDisabled(disableConfigSelection);
         DrawConfigFileCombo("##TopConfigCombo", configComboWidth);
         ImGui.SameLine();
-        if (ImGui.Button("æ·»åŠ ", new Vector2(metrics.AddButtonWidth, 0f)))
+        if (ImGui.Button("Ìí¼Ó", new Vector2(metrics.AddButtonWidth, 0f)))
         {
             _homeViewState.OpenAddModal();
         }
@@ -147,7 +144,7 @@ public sealed partial class MainWindow
         ImGui.SameLine();
         if (_configFiles.Count > 0)
         {
-            if (ImGui.Button("åˆ é™¤", new Vector2(metrics.DeleteButtonWidth, 0f)))
+            if (ImGui.Button("É¾³ý", new Vector2(metrics.DeleteButtonWidth, 0f)))
             {
                 _homeViewState.OpenDeleteModal(_configFiles[Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1)]);
             }
@@ -155,7 +152,7 @@ public sealed partial class MainWindow
         else
         {
             ImGui.BeginDisabled();
-            ImGui.Button("åˆ é™¤", new Vector2(metrics.DeleteButtonWidth, 0f));
+            ImGui.Button("É¾³ý", new Vector2(metrics.DeleteButtonWidth, 0f));
             ImGui.EndDisabled();
         }
         ImGui.EndDisabled();
@@ -167,7 +164,7 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("æ™ºæ…§æ ¸å¿ƒ");
+        ImGui.TextUnformatted("ÖÇ»ÛºËÐÄ");
         ImGui.TableSetColumnIndex(1);
         ImGui.BeginDisabled(!_smartCoreMappingState.IsDependenciesReady);
         var requestedSmartCoreEnabled = _smartCoreMappingState.RequestedEnabled;
@@ -187,7 +184,7 @@ public sealed partial class MainWindow
         ImGui.SameLine();
         var smartCorePreviewWindowOpen = IsSmartCorePreviewWindowOpen();
         ImGui.BeginDisabled(!_smartCoreMappingState.RequestedEnabled || smartCorePreviewWindowOpen);
-        if (ImGui.Button("é¢„è§ˆ##SmartCorePreviewButton"))
+        if (ImGui.Button("Ô¤ÀÀ##SmartCorePreviewButton"))
         {
             OpenSmartCorePreviewWindow();
         }
@@ -209,13 +206,13 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("é€‰æ‹©æ¨¡åž‹");
+        ImGui.TextUnformatted("Ñ¡ÔñÄ£ÐÍ");
         ImGui.TableSetColumnIndex(1);
         var modelComboWidth = ImGui.GetContentRegionAvail().X - metrics.ReserveWidth;
         ImGui.BeginDisabled(_smartCoreMappingState.IsEnabled);
         DrawHomeModelCombo("##HomeModelCombo", modelComboWidth);
         ImGui.SameLine();
-        if (ImGui.Button("åˆ·æ–°", new Vector2(refreshButtonWidth, 0f)))
+        if (ImGui.Button("Ë¢ÐÂ", new Vector2(refreshButtonWidth, 0f)))
         {
             RefreshOnnxModels();
         }
@@ -236,7 +233,7 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å¸é™„å‚æ•°è®¾å®š");
+        ImGui.TextUnformatted("Îü¸½²ÎÊýÉè¶¨");
         ImGui.TableSetColumnIndex(1);
 
         var selectedModelSize = _onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count
@@ -300,7 +297,7 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å†…åœˆèŒƒå›´");
+        ImGui.TextUnformatted("ÄÚÈ¦·¶Î§");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetNextItemWidth(layout.RangeInputWidth);
         var snapInnerRange = _homeViewState.SnapInnerRange;
@@ -313,7 +310,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(2);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å¤–åœˆèŒƒå›´");
+        ImGui.TextUnformatted("ÍâÈ¦·¶Î§");
         ImGui.TableSetColumnIndex(3);
         ImGui.SetNextItemWidth(layout.RangeInputWidth);
         var snapOuterRange = _homeViewState.SnapOuterRange;
@@ -330,7 +327,7 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(5);
         var snapRangePreviewWindowOpen = IsSnapRangePreviewWindowOpen();
         ImGui.BeginDisabled(snapRangePreviewWindowOpen);
-        if (ImGui.Button("èŒƒå›´é¢„è§ˆ##SnapRangePreviewWindowButton", new Vector2(layout.ExtraInputWidth, 0f)))
+        if (ImGui.Button("·¶Î§Ô¤ÀÀ##SnapRangePreviewWindowButton", new Vector2(layout.ExtraInputWidth, 0f)))
         {
             OpenSnapRangePreviewWindow();
         }
@@ -344,7 +341,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å†…åœˆå¼ºåº¦");
+        ImGui.TextUnformatted("ÄÚÈ¦Ç¿¶È");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetNextItemWidth(layout.StrengthInputWidth);
         DrawClampedConfigFloatInput(
@@ -357,7 +354,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(2);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å¤–åœˆå¼ºåº¦");
+        ImGui.TextUnformatted("ÍâÈ¦Ç¿¶È");
         ImGui.TableSetColumnIndex(3);
         ImGui.SetNextItemWidth(layout.StrengthInputWidth);
         DrawClampedConfigFloatInput(
@@ -370,7 +367,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(4);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("èµ·å§‹å¼ºåº¦");
+        ImGui.TextUnformatted("ÆðÊ¼Ç¿¶È");
         ImGui.TableSetColumnIndex(5);
         ImGui.SetNextItemWidth(layout.ExtraInputWidth);
         DrawClampedConfigFloatInput(
@@ -389,7 +386,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("è…°å°„å¼ºåº¦ç³»æ•°");
+        ImGui.TextUnformatted("ÑüÉäÇ¿¶ÈÏµÊý");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetNextItemWidth(layout.ExtraInputWidth);
         DrawClampedConfigFloatInput(
@@ -402,7 +399,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(2);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("åž‚ç›´å¼ºåº¦ç³»æ•°");
+        ImGui.TextUnformatted("´¹Ö±Ç¿¶ÈÏµÊý");
         ImGui.TableSetColumnIndex(3);
         ImGui.SetNextItemWidth(layout.ExtraInputWidth);
         DrawClampedConfigFloatInput(
@@ -415,7 +412,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(4);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å¸é™„é«˜åº¦");
+        ImGui.TextUnformatted("Îü¸½¸ß¶È");
         ImGui.TableSetColumnIndex(5);
         ImGui.SetNextItemWidth(layout.ExtraInputWidth);
         DrawClampedConfigFloatInput(
@@ -444,7 +441,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å†…åœˆæ’å€¼ç±»åž‹");
+        ImGui.TextUnformatted("ÄÚÈ¦²åÖµÀàÐÍ");
 
         ImGui.TableSetColumnIndex(1);
         var interpolationComboWidth = MathF.Max(90f, ImGui.GetContentRegionAvail().X - reserveWidth);
@@ -501,7 +498,7 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(0);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å¸é™„æ›²çº¿é¢„è§ˆ");
+        ImGui.TextUnformatted("Îü¸½ÇúÏßÔ¤ÀÀ");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         DrawSnapCurvePreview();
@@ -514,12 +511,12 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("æŒ‰é”®ç»‘å®š");
+        ImGui.TextUnformatted("°´¼ü°ó¶¨");
 
         ImGui.TableSetColumnIndex(1);
         var style = ImGui.GetStyle();
         var availableWidth = MathF.Max(0f, ImGui.GetContentRegionAvail().X - reserveWidth);
-        var labelWidth = MathF.Max(ImGui.CalcTextSize("çž„å‡†").X, ImGui.CalcTextSize("å¼€ç«").X);
+        var labelWidth = MathF.Max(ImGui.CalcTextSize("Ãé×¼").X, ImGui.CalcTextSize("¿ª»ð").X);
         var comboWidth = MathF.Max(90f, availableWidth - labelWidth - style.ItemSpacing.X);
         _homeViewState.AimBindingIndex = _homeViewState.AimBindingIndex >= 0 && _homeViewState.AimBindingIndex < GamepadBindingCatalog.Options.Length
             ? _homeViewState.AimBindingIndex
@@ -530,7 +527,7 @@ public sealed partial class MainWindow
         var disableBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.Options.Length == 0;
 
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("çž„å‡†");
+        ImGui.TextUnformatted("Ãé×¼");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(comboWidth);
         var selectedAimLabel = GamepadBindingCatalog.Options[_homeViewState.AimBindingIndex];
@@ -559,7 +556,7 @@ public sealed partial class MainWindow
 
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() + style.ItemSpacing.Y);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å¼€ç«");
+        ImGui.TextUnformatted("¿ª»ð");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(comboWidth);
         var selectedFireLabel = GamepadBindingCatalog.Options[_homeViewState.FireBindingIndex];
@@ -594,7 +591,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("å¼€å¯å¸é™„æ–¹å¼");
+        ImGui.TextUnformatted("¿ªÆôÎü¸½·½Ê½");
         ImGui.TableSetColumnIndex(1);
         _homeViewState.SnapModeIndex = _homeViewState.SnapModeIndex >= 0 && _homeViewState.SnapModeIndex < HomeSnapModeOptions.Length ? _homeViewState.SnapModeIndex : 0;
         var selectedSnapModeLabel = HomeSnapModeOptions[_homeViewState.SnapModeIndex];
@@ -631,7 +628,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ç‰¹æ®Šæ­¦å™¨é€»è¾‘");
+        ImGui.TextUnformatted("ÌØÊâÎäÆ÷Âß¼­");
         ImGui.TableSetColumnIndex(1);
         ImGui.BeginDisabled(_configFiles.Count == 0);
         var (weaponNameColumnWidth, aimSnapColumnWidth, rapidFireColumnWidth, releaseFireColumnWidth) = MeasureSpecialWeaponColumnWidths();
@@ -642,10 +639,10 @@ public sealed partial class MainWindow
                 4,
                 ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.BordersOuter | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX))
         {
-            ImGui.TableSetupColumn("æ­¦å™¨å", ImGuiTableColumnFlags.WidthFixed, weaponNameColumnWidth);
-            ImGui.TableSetupColumn("çž„å‡†å¸é™„", ImGuiTableColumnFlags.WidthFixed, aimSnapColumnWidth);
-            ImGui.TableSetupColumn("å¼€ç«è¿žç‚¹", ImGuiTableColumnFlags.WidthFixed, rapidFireColumnWidth);
-            ImGui.TableSetupColumn("æ¾æ‰‹å¼€ç«", ImGuiTableColumnFlags.WidthFixed, releaseFireColumnWidth);
+            ImGui.TableSetupColumn("ÎäÆ÷Ãû", ImGuiTableColumnFlags.WidthFixed, weaponNameColumnWidth);
+            ImGui.TableSetupColumn("Ãé×¼Îü¸½", ImGuiTableColumnFlags.WidthFixed, aimSnapColumnWidth);
+            ImGui.TableSetupColumn("¿ª»ðÁ¬µã", ImGuiTableColumnFlags.WidthFixed, rapidFireColumnWidth);
+            ImGui.TableSetupColumn("ËÉÊÖ¿ª»ð", ImGuiTableColumnFlags.WidthFixed, releaseFireColumnWidth);
             ImGui.TableHeadersRow();
 
             for (var i = 0; i < _specialWeaponNames.Length; i++)
@@ -669,15 +666,15 @@ public sealed partial class MainWindow
     private (float WeaponNameColumnWidth, float AimSnapColumnWidth, float RapidFireColumnWidth, float ReleaseFireColumnWidth)
         MeasureSpecialWeaponColumnWidths()
     {
-        var weaponNameColumnWidth = ImGui.CalcTextSize("æ­¦å™¨å").X;
+        var weaponNameColumnWidth = ImGui.CalcTextSize("ÎäÆ÷Ãû").X;
         for (var i = 0; i < _specialWeaponNames.Length; i++)
         {
             weaponNameColumnWidth = MathF.Max(weaponNameColumnWidth, ImGui.CalcTextSize(_specialWeaponNames[i]).X);
         }
 
-        var aimSnapColumnWidth = ImGui.CalcTextSize("çž„å‡†å¸é™„").X;
-        var rapidFireColumnWidth = ImGui.CalcTextSize("å¼€ç«è¿žç‚¹").X;
-        var releaseFireColumnWidth = ImGui.CalcTextSize("æ¾æ‰‹å¼€ç«").X;
+        var aimSnapColumnWidth = ImGui.CalcTextSize("Ãé×¼Îü¸½").X;
+        var rapidFireColumnWidth = ImGui.CalcTextSize("¿ª»ðÁ¬µã").X;
+        var releaseFireColumnWidth = ImGui.CalcTextSize("ËÉÊÖ¿ª»ð").X;
         var style = ImGui.GetStyle();
         var cellPadding = style.CellPadding.X * 2f;
         return (
@@ -732,735 +729,6 @@ public sealed partial class MainWindow
         _cachedGamepadOptions = _gamepadService.BuildGamepadOptions(_cachedConnectedGamepads);
     }
 
-    private void DrawConfigFileModals()
-    {
-        RenderAddConfigModal();
-        RenderDeleteConfigModal();
-    }
-
-    private void RenderAddConfigModal()
-    {
-        var isAddModalOpen = _homeViewState.IsAddModalOpen;
-        var addNameBuffer = _homeViewState.AddNameBuffer;
-        if (_homeViewState.IsAddModalOpenRequested)
-        {
-            ImGui.OpenPopup("è¯·è¾“å…¥æ–°é…ç½®åç§°");
-            _homeViewState.IsAddModalOpenRequested = false;
-        }
-
-        if (ImGui.BeginPopupModal("è¯·è¾“å…¥æ–°é…ç½®åç§°", ref isAddModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.InputText("##AddConfigNameInput", ref addNameBuffer, 256);
-            _homeViewState.AddNameBuffer = addNameBuffer;
-            if (!string.IsNullOrEmpty(_homeViewState.AddError))
-            {
-                ImGui.AlignTextToFramePadding();
-                ImGui.TextUnformatted(_homeViewState.AddError);
-            }
-
-            if (ImGui.Button("åˆ›å»º"))
-            {
-                if (TryCreateEmptyConfigFile(_homeViewState.AddNameBuffer, out var err))
-                {
-                    _homeViewState.CloseAddModal();
-                    ImGui.CloseCurrentPopup();
-                }
-                else
-                {
-                    _homeViewState.AddError = err;
-                }
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button("å–æ¶ˆ"))
-            {
-                _homeViewState.CloseAddModal();
-                ImGui.CloseCurrentPopup();
-            }
-
-            ImGui.EndPopup();
-        }
-
-        _homeViewState.IsAddModalOpen = isAddModalOpen;
-    }
-
-    private void RenderDeleteConfigModal()
-    {
-        var isDeleteModalOpen = _homeViewState.IsDeleteModalOpen;
-        if (_homeViewState.IsDeleteModalOpenRequested)
-        {
-            ImGui.OpenPopup("åˆ é™¤é…ç½®ç¡®è®¤");
-            _homeViewState.IsDeleteModalOpenRequested = false;
-        }
-
-        if (ImGui.BeginPopupModal("åˆ é™¤é…ç½®ç¡®è®¤", ref isDeleteModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            var name = _homeViewState.PendingDeleteConfigBaseName ?? string.Empty;
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted($"ç¡®å®šåˆ é™¤é…ç½®æ–‡ä»¶ {name} å—ï¼Ÿæ­¤æ“ä½œä¸å¯æ’¤é”€ã€‚");
-            if (ImGui.Button("ç¡®å®š"))
-            {
-                TryDeleteSelectedConfigFile(name);
-                _homeViewState.CloseDeleteModal();
-                ImGui.CloseCurrentPopup();
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button("å–æ¶ˆ"))
-            {
-                _homeViewState.CloseDeleteModal();
-                ImGui.CloseCurrentPopup();
-            }
-
-            ImGui.EndPopup();
-        }
-
-        _homeViewState.IsDeleteModalOpen = isDeleteModalOpen;
-    }
-
-    private bool TryCreateEmptyConfigFile(string rawName, out string error)
-    {
-        if (_configRepository.TryCreateEmptyConfigFile(
-                rawName,
-                SpecialWeaponLogicConfigKey,
-                AimSnapWeaponListConfigKey,
-                RapidFireWeaponListConfigKey,
-                ReleaseFireWeaponListConfigKey,
-                out var baseName,
-                out error))
-        {
-            ResetConfigUiStateToDefaults();
-            RefreshConfigFiles(baseName);
-            return true;
-        }
-
-        return false;
-    }
-
-    private void TryDeleteSelectedConfigFile(string baseName)
-    {
-        _configRepository.TryDeleteConfigFile(baseName);
-        RefreshConfigFiles();
-        if (_configFiles.Count > 0)
-        {
-            WriteCurrentConfigFileName(_configFiles[_selectedConfigFileIndex]);
-        }
-        else
-        {
-            _configRepository.ClearCurrentConfigPointerFile();
-        }
-    }
-
-    private const int SmartCorePreviewIntervalMs = 1000 / 60;
-    private readonly object _smartCorePreviewWindowLock = new();
-    private System.Windows.Forms.Form? _smartCorePreviewWindow;
-    private bool _smartCorePreviewShuttingDown;
-    private readonly object _snapRangePreviewWindowLock = new();
-    private System.Windows.Forms.Form? _snapRangePreviewWindow;
-    private bool _snapRangePreviewWindowVisible;
-    private bool _snapRangePreviewShuttingDown;
-
-    private void UpdateSmartCorePreviewCaptureDemand(bool enabled)
-    {
-        _dxgiWorker?.SetPreviewFrameCacheEnabled(enabled);
-    }
-
-    private void OpenSmartCorePreviewWindow()
-    {
-        lock (_smartCorePreviewWindowLock)
-        {
-            if (_smartCorePreviewWindow is not null && !_smartCorePreviewWindow.IsDisposed)
-            {
-                _smartCorePreviewWindow.BeginInvoke(new Action(() =>
-                {
-                    _smartCorePreviewWindow.Show();
-                    _smartCorePreviewWindow.Activate();
-                    _smartCorePreviewWindow.BringToFront();
-                }));
-                UpdateSmartCorePreviewCaptureDemand(true);
-                return;
-            }
-
-            var previewWindowThread = new Thread(() =>
-            {
-                const int WeaponPreviewGapPx = 0;
-                const int WeaponPreviewPaddingPx = 0;
-                var initialSize = Math.Max(1, _homeViewState.SnapOuterRange);
-                var initialWeaponImageHeight = Math.Max(1, WeaponTemplateCatalog.TemplateHeight);
-                var initialMetricsHeight = Math.Max(1, (System.Drawing.SystemFonts.MessageBoxFont?.Height ?? 12) * 5);
-                var initialWeaponSectionHeight = initialWeaponImageHeight + WeaponPreviewPaddingPx * 2 + initialMetricsHeight;
-                using var form = new SmartCorePreviewForm
-                {
-                    Text = string.Empty,
-                    StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
-                    ClientSize = new System.Drawing.Size(initialSize, initialSize + WeaponPreviewGapPx + initialWeaponSectionHeight),
-                    TopMost = true,
-                    FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle,
-                    MaximizeBox = false,
-                    MinimizeBox = false
-                };
-                form.SizeGripStyle = System.Windows.Forms.SizeGripStyle.Hide;
-                form.BackColor = System.Drawing.Color.FromArgb(18, 20, 24);
-                form.ShowInTaskbar = false;
-                form.Shown += (_, _) =>
-                {
-                    form.MinimumSize = form.Size;
-                    form.MaximumSize = form.Size;
-                    form.TopMost = true;
-                    UpdateSmartCorePreviewCaptureDemand(true);
-                };
-
-                form.VisibleChanged += (_, _) =>
-                {
-                    UpdateSmartCorePreviewCaptureDemand(form.Visible);
-                };
-
-                var frameBuffer = Array.Empty<byte>();
-                var lastFrameId = 0;
-                var frameWidth = 0;
-                var frameHeight = 0;
-                string? frameError = null;
-                System.Drawing.Bitmap? cachedBitmap = null;
-                var sobelBuffer = Array.Empty<byte>();
-                var lastSobelFrameId = 0;
-                var sobelWidth = 0;
-                var sobelHeight = 0;
-                System.Drawing.Bitmap? cachedSobelBitmap = null;
-                var captureLatencySamples = new List<double>(256);
-                var statsWindowStartUtc = DateTime.UtcNow;
-                var captureSampleCount = 0;
-                var captureLatencySumMs = 0.0;
-                var displayCaptureFps = 0.0;
-                var displayCaptureAvgMs = 0.0;
-                var displayOnnxAvgMs = 0.0;
-                var displayWeaponSimilarity = 0.0f;
-                var displayWeaponName = WeaponTemplateCatalog.EmptyHandName;
-
-                var refreshTimer = new System.Windows.Forms.Timer { Interval = SmartCorePreviewIntervalMs };
-                refreshTimer.Tick += (_, _) =>
-                {
-                    if (!form.Visible)
-                    {
-                        return;
-                    }
-
-                    var targetSize = Math.Max(1, _homeViewState.SnapOuterRange);
-                    var weaponImageHeight = Math.Max(1, WeaponTemplateCatalog.TemplateHeight);
-                    var metricsHeight = Math.Max(1, form.Font.Height * 5);
-                    var weaponSectionHeight = weaponImageHeight + WeaponPreviewPaddingPx * 2 + metricsHeight;
-                    var expectedClientSize = new System.Drawing.Size(targetSize, targetSize + WeaponPreviewGapPx + weaponSectionHeight);
-                    if (form.ClientSize != expectedClientSize)
-                    {
-                        form.ClientSize = expectedClientSize;
-                        form.MinimumSize = form.Size;
-                        form.MaximumSize = form.Size;
-                    }
-
-                    var worker = _dxgiWorker;
-                    var hasNewFrame = false;
-                    if (worker is not null)
-                    {
-                        hasNewFrame = worker.TryCopyLatestFrame(ref frameBuffer, ref lastFrameId, out frameWidth, out frameHeight, out frameError);
-                        captureLatencySamples.Clear();
-                        worker.DrainCaptureSamples(captureLatencySamples);
-                        if (captureLatencySamples.Count > 0)
-                        {
-                            captureSampleCount += captureLatencySamples.Count;
-                            for (var i = 0; i < captureLatencySamples.Count; i++)
-                            {
-                                captureLatencySumMs += captureLatencySamples[i];
-                            }
-                        }
-                    }
-                    else
-                    {
-                        frameWidth = 0;
-                        frameHeight = 0;
-                    }
-
-                    var hasNewSobel = false;
-                    var weaponWorker = _weaponRecWorker;
-                    if (weaponWorker is not null)
-                    {
-                        hasNewSobel = weaponWorker.TryCopyLatestSobel(ref sobelBuffer, ref lastSobelFrameId, out sobelWidth, out sobelHeight);
-                    }
-                    else
-                    {
-                        sobelWidth = 0;
-                        sobelHeight = 0;
-                    }
-
-                    var statsUpdated = false;
-                    var statsElapsed = DateTime.UtcNow - statsWindowStartUtc;
-                    if (statsElapsed.TotalSeconds >= 1.0)
-                    {
-                        var elapsedSeconds = Math.Max(0.001, statsElapsed.TotalSeconds);
-                        displayCaptureFps = captureSampleCount / elapsedSeconds;
-                        displayCaptureAvgMs = captureSampleCount > 0 ? captureLatencySumMs / captureSampleCount : 0.0;
-                        displayOnnxAvgMs = _onnxWorker?.GetSnapshot().AvgInferenceMs ?? 0.0;
-                        var weaponResult = _weaponRecWorker?.GetLatestResult() ?? WeaponRecognitionResultState.Empty;
-                        displayWeaponSimilarity = weaponResult.Similarity;
-                        displayWeaponName = weaponResult.WeaponName;
-                        captureSampleCount = 0;
-                        captureLatencySumMs = 0.0;
-                        statsWindowStartUtc = DateTime.UtcNow;
-                        statsUpdated = true;
-                    }
-
-                    if (hasNewFrame || hasNewSobel || worker is null || statsUpdated)
-                    {
-                        form.Invalidate();
-                    }
-                };
-
-                form.Paint += (_, e) =>
-                {
-                    e.Graphics.Clear(System.Drawing.Color.FromArgb(18, 20, 24));
-                    e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                    e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-                    e.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
-
-                    var mainSize = Math.Max(1, _homeViewState.SnapOuterRange);
-                    var mainRect = new System.Drawing.Rectangle(0, 0, mainSize, mainSize);
-                    if (frameWidth <= 0 || frameHeight <= 0 || frameBuffer.Length != frameWidth * frameHeight * 4)
-                    {
-                        var statusText = string.IsNullOrWhiteSpace(frameError) ? "ç»›å¤Šç·ŸéŽ¹æ›¡å¹é¢å©šæ½°..." : $"éŽ¹æ›¡å¹é–¿æ¬’î‡¤: {frameError}";
-                        using var statusBrush = new System.Drawing.SolidBrush(System.Drawing.Color.Gainsboro);
-                        e.Graphics.DrawString(statusText, form.Font, statusBrush, new System.Drawing.PointF(mainRect.X + 12f, mainRect.Y + 12f));
-                    }
-                    else
-                    {
-                        var scale = Math.Min(mainRect.Width / (float)frameWidth, mainRect.Height / (float)frameHeight);
-                        scale = Math.Max(scale, 1f);
-                        var drawWidth = Math.Max(1, (int)MathF.Round(frameWidth * scale));
-                        var drawHeight = Math.Max(1, (int)MathF.Round(frameHeight * scale));
-                        var drawRect = new System.Drawing.Rectangle(
-                            mainRect.X + (mainRect.Width - drawWidth) / 2,
-                            mainRect.Y + (mainRect.Height - drawHeight) / 2,
-                            drawWidth,
-                            drawHeight);
-
-                        if (cachedBitmap is null || cachedBitmap.Width != frameWidth || cachedBitmap.Height != frameHeight)
-                        {
-                            cachedBitmap?.Dispose();
-                            cachedBitmap = new System.Drawing.Bitmap(frameWidth, frameHeight, PixelFormat.Format32bppArgb);
-                        }
-
-                        var bitmapData = cachedBitmap.LockBits(
-                            new System.Drawing.Rectangle(0, 0, frameWidth, frameHeight),
-                            ImageLockMode.WriteOnly,
-                            PixelFormat.Format32bppArgb);
-                        try
-                        {
-                            Marshal.Copy(frameBuffer, 0, bitmapData.Scan0, frameBuffer.Length);
-                        }
-                        finally
-                        {
-                            cachedBitmap.UnlockBits(bitmapData);
-                        }
-
-                        e.Graphics.DrawImage(cachedBitmap, drawRect);
-
-                        var boxes = _onnxWorker?.GetDebugBoxes() ?? Array.Empty<OnnxDebugBox>();
-                        if (boxes.Length > 0)
-                        {
-                            using var boxPen = new System.Drawing.Pen(System.Drawing.Color.Red, 2f);
-                            for (var i = 0; i < boxes.Length; i++)
-                            {
-                                var box = boxes[i];
-                                var x1 = box.X - box.W * 0.5f;
-                                var y1 = box.Y - box.H * 0.5f;
-                                var x2 = box.X + box.W * 0.5f;
-                                var y2 = box.Y + box.H * 0.5f;
-
-                                var minX = Math.Clamp(MathF.Min(x1, x2), 0f, frameWidth);
-                                var minY = Math.Clamp(MathF.Min(y1, y2), 0f, frameHeight);
-                                var maxX = Math.Clamp(MathF.Max(x1, x2), 0f, frameWidth);
-                                var maxY = Math.Clamp(MathF.Max(y1, y2), 0f, frameHeight);
-
-                                var overlayRect = new System.Drawing.RectangleF(
-                                    drawRect.Left + minX / frameWidth * drawRect.Width,
-                                    drawRect.Top + minY / frameHeight * drawRect.Height,
-                                    (maxX - minX) / frameWidth * drawRect.Width,
-                                    (maxY - minY) / frameHeight * drawRect.Height);
-
-                                if (overlayRect.Width > 1f && overlayRect.Height > 1f)
-                                {
-                                    e.Graphics.DrawRectangle(boxPen, overlayRect.X, overlayRect.Y, overlayRect.Width, overlayRect.Height);
-                                }
-                            }
-                        }
-                    }
-
-                    var sobelSectionRect = new System.Drawing.Rectangle(
-                        0,
-                        mainRect.Bottom + WeaponPreviewGapPx,
-                        form.ClientSize.Width,
-                        Math.Max(1, form.ClientSize.Height - (mainRect.Bottom + WeaponPreviewGapPx)));
-
-                    if (sobelWidth > 0 && sobelHeight > 0 && sobelBuffer.Length == sobelWidth * sobelHeight)
-                    {
-                        if (cachedSobelBitmap is null || cachedSobelBitmap.Width != sobelWidth || cachedSobelBitmap.Height != sobelHeight)
-                        {
-                            cachedSobelBitmap?.Dispose();
-                            cachedSobelBitmap = new System.Drawing.Bitmap(sobelWidth, sobelHeight, PixelFormat.Format32bppArgb);
-                        }
-
-                        var rgba = new byte[sobelWidth * sobelHeight * 4];
-                        for (var i = 0; i < sobelBuffer.Length; i++)
-                        {
-                            var g = sobelBuffer[i];
-                            var dst = i * 4;
-                            rgba[dst + 0] = g;
-                            rgba[dst + 1] = g;
-                            rgba[dst + 2] = g;
-                            rgba[dst + 3] = 255;
-                        }
-
-                        var sobelBitmapData = cachedSobelBitmap.LockBits(
-                            new System.Drawing.Rectangle(0, 0, sobelWidth, sobelHeight),
-                            ImageLockMode.WriteOnly,
-                            PixelFormat.Format32bppArgb);
-                        try
-                        {
-                            Marshal.Copy(rgba, 0, sobelBitmapData.Scan0, rgba.Length);
-                        }
-                        finally
-                        {
-                            cachedSobelBitmap.UnlockBits(sobelBitmapData);
-                        }
-
-                        var sobelDrawW = sobelWidth;
-                        var sobelDrawH = sobelHeight;
-                        var sobelDrawRect = new System.Drawing.Rectangle(
-                            sobelSectionRect.X + WeaponPreviewPaddingPx,
-                            sobelSectionRect.Y + WeaponPreviewPaddingPx,
-                            sobelDrawW,
-                            sobelDrawH);
-                        e.Graphics.DrawImage(cachedSobelBitmap, sobelDrawRect);
-                    }
-                    else
-                    {
-                        using var statusBrush = new System.Drawing.SolidBrush(System.Drawing.Color.Gainsboro);
-                        e.Graphics.DrawString(
-                            "Weapon Sobel: waiting...",
-                            form.Font,
-                            statusBrush,
-                            new System.Drawing.PointF(sobelSectionRect.X + 12f, sobelSectionRect.Y + 10f));
-                    }
-
-                    using var metricsBrush = new System.Drawing.SolidBrush(System.Drawing.Color.Gainsboro);
-                    var metricsX = sobelSectionRect.X + 2f;
-                    var metricsY = sobelSectionRect.Y + Math.Max(1, WeaponTemplateCatalog.TemplateHeight);
-                    var lineHeight = form.Font.GetHeight(e.Graphics);
-                    e.Graphics.DrawString($"Capture FPS: {displayCaptureFps:F1}", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY));
-                    e.Graphics.DrawString($"Capture Avg: {displayCaptureAvgMs:F2} ms", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY + lineHeight));
-                    e.Graphics.DrawString($"ONNX Avg: {displayOnnxAvgMs:F2} ms", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY + lineHeight * 2f));
-                    e.Graphics.DrawString($"Similarity: {displayWeaponSimilarity:F3}", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY + lineHeight * 3f));
-                    e.Graphics.DrawString($"Weapon: {displayWeaponName}", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY + lineHeight * 4f));
-                };
-
-                form.FormClosing += (_, e) =>
-                {
-                    if (!_smartCorePreviewShuttingDown && e.CloseReason == System.Windows.Forms.CloseReason.UserClosing)
-                    {
-                        e.Cancel = true;
-                        form.Hide();
-                    }
-                };
-
-                form.FormClosed += (_, _) =>
-                {
-                    UpdateSmartCorePreviewCaptureDemand(false);
-                    refreshTimer.Stop();
-                    refreshTimer.Dispose();
-                    cachedBitmap?.Dispose();
-                    cachedSobelBitmap?.Dispose();
-                    lock (_smartCorePreviewWindowLock)
-                    {
-                        _smartCorePreviewWindow = null;
-                    }
-                };
-
-                lock (_smartCorePreviewWindowLock)
-                {
-                    _smartCorePreviewWindow = form;
-                }
-
-                refreshTimer.Start();
-                form.Show();
-                System.Windows.Forms.Application.Run(form);
-            })
-            {
-                IsBackground = true,
-                Name = "SmartCorePreviewWindowThread"
-            };
-            previewWindowThread.SetApartmentState(ApartmentState.STA);
-            previewWindowThread.Start();
-        }
-    }
-
-    private void CloseSmartCorePreviewWindow()
-    {
-        lock (_smartCorePreviewWindowLock)
-        {
-            if (_smartCorePreviewWindow is not null && !_smartCorePreviewWindow.IsDisposed)
-            {
-                _smartCorePreviewShuttingDown = true;
-                UpdateSmartCorePreviewCaptureDemand(false);
-                _smartCorePreviewWindow.BeginInvoke(new Action(() => _smartCorePreviewWindow.Close()));
-            }
-        }
-    }
-
-    private bool IsSmartCorePreviewWindowOpen()
-    {
-        lock (_smartCorePreviewWindowLock)
-        {
-            return _smartCorePreviewWindow is not null && !_smartCorePreviewWindow.IsDisposed && _smartCorePreviewWindow.Visible;
-        }
-    }
-
-    private void OpenSnapRangePreviewWindow()
-    {
-        lock (_snapRangePreviewWindowLock)
-        {
-            if (_snapRangePreviewWindow is not null && !_snapRangePreviewWindow.IsDisposed)
-            {
-                _snapRangePreviewWindow.BeginInvoke(new Action(() =>
-                {
-                    _snapRangePreviewWindowVisible = true;
-                    _snapRangePreviewWindow.Show();
-                    _snapRangePreviewWindow.Activate();
-                    _snapRangePreviewWindow.BringToFront();
-                }));
-                return;
-            }
-
-            var previewWindowThread = new Thread(() =>
-            {
-                using var form = new System.Windows.Forms.Form
-                {
-                    Text = string.Empty,
-                    StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen,
-                    ClientSize = new System.Drawing.Size(Math.Max(1, _homeViewState.SnapOuterRange), Math.Max(1, _homeViewState.SnapOuterRange)),
-                    TopMost = true,
-                    FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedDialog,
-                    MaximizeBox = false
-                };
-                form.BackColor = System.Drawing.Color.FromArgb(20, 22, 26);
-                form.ShowInTaskbar = false;
-
-                var refreshTimer = new System.Windows.Forms.Timer { Interval = 50 };
-                refreshTimer.Tick += (_, _) =>
-                {
-                    var outer = Math.Max(1, _homeViewState.SnapOuterRange);
-                    var expectedSize = new System.Drawing.Size(outer, outer);
-                    if (form.ClientSize != expectedSize)
-                    {
-                        form.ClientSize = expectedSize;
-                    }
-
-                    form.Invalidate();
-                };
-
-                form.Paint += (_, e) =>
-                {
-                    e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-
-                    var outer = Math.Max(1, _homeViewState.SnapOuterRange);
-                    var inner = Math.Clamp(_homeViewState.SnapInnerRange, 0, outer);
-                    var drawDiameter = Math.Max(2, Math.Min(form.ClientSize.Width, form.ClientSize.Height) - 2);
-                    var centerX = form.ClientSize.Width / 2f;
-                    var centerY = form.ClientSize.Height / 2f;
-                    var outerRadius = drawDiameter / 2f;
-                    var innerRadius = outerRadius * (inner / (float)outer);
-
-                    using var outerPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(0, 180, 255), 2f);
-                    using var innerPen = new System.Drawing.Pen(System.Drawing.Color.FromArgb(255, 140, 60), 2f);
-
-                    var outerRect = new System.Drawing.RectangleF(
-                        centerX - outerRadius,
-                        centerY - outerRadius,
-                        outerRadius * 2f,
-                        outerRadius * 2f);
-                    var innerRect = new System.Drawing.RectangleF(
-                        centerX - innerRadius,
-                        centerY - innerRadius,
-                        innerRadius * 2f,
-                        innerRadius * 2f);
-
-                    e.Graphics.DrawEllipse(outerPen, outerRect);
-                    e.Graphics.DrawEllipse(innerPen, innerRect);
-                };
-
-                form.FormClosing += (_, e) =>
-                {
-                    if (!_snapRangePreviewShuttingDown && e.CloseReason == System.Windows.Forms.CloseReason.UserClosing)
-                    {
-                        e.Cancel = true;
-                        _snapRangePreviewWindowVisible = false;
-                        form.Hide();
-                    }
-                };
-
-                form.FormClosed += (_, _) =>
-                {
-                    refreshTimer.Stop();
-                    refreshTimer.Dispose();
-                    lock (_snapRangePreviewWindowLock)
-                    {
-                        _snapRangePreviewWindowVisible = false;
-                        _snapRangePreviewWindow = null;
-                    }
-                };
-
-                lock (_snapRangePreviewWindowLock)
-                {
-                    _snapRangePreviewWindow = form;
-                }
-
-                refreshTimer.Start();
-                _snapRangePreviewWindowVisible = true;
-                form.Show();
-                System.Windows.Forms.Application.Run(form);
-            })
-            {
-                IsBackground = true,
-                Name = "SnapRangePreviewWindowThread"
-            };
-            previewWindowThread.SetApartmentState(ApartmentState.STA);
-            previewWindowThread.Start();
-        }
-    }
-
-    private bool IsSnapRangePreviewWindowOpen()
-    {
-        lock (_snapRangePreviewWindowLock)
-        {
-            return _snapRangePreviewWindowVisible && _snapRangePreviewWindow is not null && !_snapRangePreviewWindow.IsDisposed;
-        }
-    }
-
-    private void CloseSnapRangePreviewWindow()
-    {
-        lock (_snapRangePreviewWindowLock)
-        {
-            if (_snapRangePreviewWindow is not null && !_snapRangePreviewWindow.IsDisposed)
-            {
-                _snapRangePreviewShuttingDown = true;
-                _snapRangePreviewWindow.BeginInvoke(new Action(() => _snapRangePreviewWindow.Close()));
-            }
-        }
-    }
 
 }
 
-internal sealed class SmartCorePreviewForm : System.Windows.Forms.Form
-{
-    public SmartCorePreviewForm()
-    {
-        SetStyle(
-            System.Windows.Forms.ControlStyles.UserPaint |
-            System.Windows.Forms.ControlStyles.AllPaintingInWmPaint |
-            System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer,
-            true);
-        UpdateStyles();
-    }
-
-    protected override void OnPaintBackground(System.Windows.Forms.PaintEventArgs e)
-    {
-        // Skip the default background erase to reduce visible flicker between frames.
-    }
-}
-
-internal sealed class HomeViewState
-{
-    public int SnapModeIndex { get; set; } = -1;
-    public int AimBindingIndex { get; set; } = GamepadBindingCatalog.DefaultAimIndex;
-    public int FireBindingIndex { get; set; } = GamepadBindingCatalog.DefaultFireIndex;
-    public int SnapOuterRange { get; set; } = 1;
-    public float SnapOuterStrength { get; set; }
-    public int SnapInnerRange { get; set; } = 1;
-    public float SnapInnerStrength { get; set; }
-    public float SnapStartStrength { get; set; }
-    public float SnapVerticalStrengthFactor { get; set; }
-    public float SnapHipfireStrengthFactor { get; set; }
-    public float SnapHeight { get; set; }
-    public int SnapInnerInterpolationTypeIndex { get; set; }
-    public string AddNameBuffer { get; set; } = string.Empty;
-    public string AddError { get; set; } = string.Empty;
-    public bool IsAddModalOpen { get; set; }
-    public bool IsDeleteModalOpen { get; set; }
-    public bool IsAddModalOpenRequested { get; set; }
-    public bool IsDeleteModalOpenRequested { get; set; }
-    public string? PendingDeleteConfigBaseName { get; set; }
-
-    public void ApplySnapConfig(SnapConfigState snapConfig)
-    {
-        SnapOuterRange = snapConfig.OuterRange;
-        SnapInnerRange = snapConfig.InnerRange;
-        SnapOuterStrength = snapConfig.OuterStrength;
-        SnapInnerStrength = snapConfig.InnerStrength;
-        SnapStartStrength = snapConfig.StartStrength;
-        SnapVerticalStrengthFactor = snapConfig.VerticalStrengthFactor;
-        SnapHipfireStrengthFactor = snapConfig.HipfireStrengthFactor;
-        SnapHeight = snapConfig.Height;
-        SnapInnerInterpolationTypeIndex = snapConfig.InnerInterpolationTypeIndex;
-    }
-
-    public void ResetSnapSettings(
-        int snapModeIndex,
-        int aimBindingIndex,
-        int fireBindingIndex,
-        int outerRange,
-        int innerRange,
-        float outerStrength,
-        float innerStrength,
-        float startStrength,
-        float verticalStrengthFactor,
-        float hipfireStrengthFactor,
-        float height,
-        int interpolationTypeIndex)
-    {
-        SnapModeIndex = snapModeIndex;
-        AimBindingIndex = aimBindingIndex;
-        FireBindingIndex = fireBindingIndex;
-        SnapOuterRange = outerRange;
-        SnapInnerRange = innerRange;
-        SnapOuterStrength = outerStrength;
-        SnapInnerStrength = innerStrength;
-        SnapStartStrength = startStrength;
-        SnapVerticalStrengthFactor = verticalStrengthFactor;
-        SnapHipfireStrengthFactor = hipfireStrengthFactor;
-        SnapHeight = height;
-        SnapInnerInterpolationTypeIndex = interpolationTypeIndex;
-    }
-
-    public void OpenAddModal()
-    {
-        AddNameBuffer = string.Empty;
-        AddError = string.Empty;
-        IsAddModalOpen = true;
-        IsAddModalOpenRequested = true;
-    }
-
-    public void CloseAddModal()
-    {
-        AddError = string.Empty;
-        IsAddModalOpen = false;
-    }
-
-    public void OpenDeleteModal(string baseName)
-    {
-        PendingDeleteConfigBaseName = baseName;
-        IsDeleteModalOpen = true;
-        IsDeleteModalOpenRequested = true;
-    }
-
-    public void CloseDeleteModal()
-    {
-        PendingDeleteConfigBaseName = null;
-        IsDeleteModalOpen = false;
-    }
-}

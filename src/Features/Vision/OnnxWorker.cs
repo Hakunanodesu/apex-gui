@@ -206,7 +206,7 @@ internal sealed class OnnxWorker : IDisposable
         }
         catch (Exception ex)
         {
-            SetStatus($"鎺ㄧ悊澶辫触: {ex.GetType().Name}: {ex.Message}");
+            SetStatus($"推理失败: {ex.GetType().Name}: {ex.Message}");
             _running = false;
         }
     }

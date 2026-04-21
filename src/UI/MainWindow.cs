@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.Diagnostics;
 using ImGuiNET;
 using OpenTK.Graphics.OpenGL4;
@@ -10,6 +10,12 @@ using SDL3;
 
 public sealed partial class MainWindow : GameWindow
 {
+    // Partial layout:
+    // - MainWindow.cs: app bootstrap, lifecycle, shared state, top-level orchestration
+    // - MainWindow.Home.cs: Home tab UI composition and controls
+    // - MainWindow.Home.ConfigModals.cs: config create/delete modal flows
+    // - MainWindow.Home.PreviewWindows.cs: preview window threading and rendering
+    // - MainWindow.Vision.cs: SmartCore vision pipeline lifecycle
     private const string ViGemBusInstallPath = @"C:\Program Files\Nefarius Software Solutions";
     private const string ViGemBusInstallerUrl = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe";
     private const string WindowStateFileName = "window_state.ini";
@@ -27,7 +33,7 @@ public sealed partial class MainWindow : GameWindow
 
     private readonly List<OnnxModelConfig> _onnxModels = new();
     private int _onnxTopSelectedModelIndex = -1;
-    private static readonly string[] HomeSnapModeOptions = { "��������", "��׼ + ��������" };
+    private static readonly string[] HomeSnapModeOptions = { "开火吸附", "瞄准 + 开火吸附" };
     private static readonly string[] SnapInnerInterpolationTypeOptions =
     {
         "Linear",
@@ -138,7 +144,7 @@ public sealed partial class MainWindow : GameWindow
 
         if (ImGui.BeginTabBar("RootTabs"))
         {
-            if (ImGui.BeginTabItem("��ҳ"))
+            if (ImGui.BeginTabItem("主页"))
             {
                 DrawHomeTab();
                 ImGui.EndTabItem();
@@ -226,7 +232,7 @@ public sealed partial class MainWindow : GameWindow
         {
             ImGui.BeginDisabled();
             ImGui.SetNextItemWidth(comboWidth);
-            ImGui.Combo(id, ref _onnxTopSelectedModelIndex, "闂佸搫鍟版慨纾嬨亹閺屻儲鍋ㄩ柕濞㈢繝绶氬畷瑙勫垔?");
+            ImGui.Combo(id, ref _onnxTopSelectedModelIndex, "未找到可用模型");
             ImGui.EndDisabled();
             return;
         }
