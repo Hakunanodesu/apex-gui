@@ -6,12 +6,22 @@ using System.Threading;
 
 public sealed partial class MainWindow
 {
+    private const float SnapFloatStep = 0.01f;
+    private const string SnapFloatFormat = "%.2f";
+
     private readonly record struct HomeLayoutMetrics(
         float BaseTextWidth,
         float FirstColumnWidth,
         float ReserveWidth,
         float AddButtonWidth,
         float DeleteButtonWidth);
+
+    private readonly record struct SnapSettingsLayout(
+        float LabelWidth,
+        float LastLabelWidth,
+        float RangeInputWidth,
+        float StrengthInputWidth,
+        float ExtraInputWidth);
 
     private void DrawHomeTab()
     {
@@ -228,199 +238,260 @@ public sealed partial class MainWindow
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("吸附参数设定");
         ImGui.TableSetColumnIndex(1);
+
         var selectedModelSize = _onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count
             ? Math.Max(1, _onnxModels[_onnxTopSelectedModelIndex].InputHeight)
             : 1;
         var displayHeightLimit = GetDisplayHeightOrWindowHeight();
         var snapOuterRangeMax = Math.Max(selectedModelSize, displayHeightLimit);
+        NormalizeSnapSettings(selectedModelSize, snapOuterRangeMax);
+        var layout = BuildSnapSettingsLayout(metrics, topPanelStyle);
+
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
+        if (ImGui.BeginTable("##SnapSettingsGrid", 6, ImGuiTableFlags.SizingFixedFit))
+        {
+            SetupSnapSettingsGridColumns(layout);
+            DrawSnapRangeRow(layout, selectedModelSize, snapOuterRangeMax);
+            DrawSnapStrengthRow(layout);
+            DrawSnapExtraRow(layout);
+
+            ImGui.EndTable();
+        }
+
+        DrawSnapInterpolationTypeRow(metrics.ReserveWidth, layout.LabelWidth);
+    }
+
+    private void NormalizeSnapSettings(int selectedModelSize, int snapOuterRangeMax)
+    {
         _homeViewState.SnapOuterRange = Math.Clamp(_homeViewState.SnapOuterRange, selectedModelSize, snapOuterRangeMax);
         _homeViewState.SnapInnerRange = Math.Clamp(_homeViewState.SnapInnerRange, 1, _homeViewState.SnapOuterRange);
         _homeViewState.SnapOuterStrength = Math.Clamp(_homeViewState.SnapOuterStrength, 0f, 1f);
         _homeViewState.SnapInnerStrength = Math.Clamp(_homeViewState.SnapInnerStrength, 0f, 1f);
-        var snapRangeInputWidth = ImGui.CalcTextSize("0000").X + topPanelStyle.FramePadding.X * 2f;
-        var snapStrengthInputWidth = snapRangeInputWidth + ImGui.GetFrameHeight() * 2f + topPanelStyle.ItemInnerSpacing.X * 2f;
-        var snapExtraInputWidth = snapStrengthInputWidth;
         _homeViewState.SnapStartStrength = Math.Clamp(_homeViewState.SnapStartStrength, 0f, 1f);
         _homeViewState.SnapVerticalStrengthFactor = Math.Clamp(_homeViewState.SnapVerticalStrengthFactor, 0f, 1f);
         _homeViewState.SnapHipfireStrengthFactor = Math.Clamp(_homeViewState.SnapHipfireStrengthFactor, 0f, 1f);
         _homeViewState.SnapHeight = Math.Clamp(_homeViewState.SnapHeight, 0f, 1f);
-        var snapLabelWidth = metrics.BaseTextWidth * 6f;
-        var snapLastLabelWidth = metrics.BaseTextWidth * 4f;
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
-        if (ImGui.BeginTable("##SnapSettingsGrid", 6, ImGuiTableFlags.SizingFixedFit))
+    }
+
+    private static SnapSettingsLayout BuildSnapSettingsLayout(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
+    {
+        var rangeInputWidth = ImGui.CalcTextSize("0000").X + topPanelStyle.FramePadding.X * 2f;
+        var strengthInputWidth = rangeInputWidth + ImGui.GetFrameHeight() * 2f + topPanelStyle.ItemInnerSpacing.X * 2f;
+        return new SnapSettingsLayout(
+            metrics.BaseTextWidth * 6f,
+            metrics.BaseTextWidth * 4f,
+            rangeInputWidth,
+            strengthInputWidth,
+            strengthInputWidth);
+    }
+
+    private static void SetupSnapSettingsGridColumns(in SnapSettingsLayout layout)
+    {
+        ImGui.TableSetupColumn("##SnapLabelCol0", ImGuiTableColumnFlags.WidthFixed, layout.LabelWidth);
+        ImGui.TableSetupColumn("##SnapInputCol0", ImGuiTableColumnFlags.WidthFixed, layout.StrengthInputWidth);
+        ImGui.TableSetupColumn("##SnapLabelCol1", ImGuiTableColumnFlags.WidthFixed, layout.LabelWidth);
+        ImGui.TableSetupColumn("##SnapInputCol1", ImGuiTableColumnFlags.WidthFixed, layout.StrengthInputWidth);
+        ImGui.TableSetupColumn("##SnapLabelCol2", ImGuiTableColumnFlags.WidthFixed, layout.LastLabelWidth);
+        ImGui.TableSetupColumn("##SnapInputCol2", ImGuiTableColumnFlags.WidthFixed, layout.StrengthInputWidth);
+    }
+
+    private void DrawSnapRangeRow(in SnapSettingsLayout layout, int selectedModelSize, int snapOuterRangeMax)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("内圈范围");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.SetNextItemWidth(layout.RangeInputWidth);
+        var snapInnerRange = _homeViewState.SnapInnerRange;
+        if (ImGui.InputInt("##SnapInnerRange", ref snapInnerRange, 0, 0))
         {
-            ImGui.TableSetupColumn("##SnapLabelCol0", ImGuiTableColumnFlags.WidthFixed, snapLabelWidth);
-            ImGui.TableSetupColumn("##SnapInputCol0", ImGuiTableColumnFlags.WidthFixed, snapStrengthInputWidth);
-            ImGui.TableSetupColumn("##SnapLabelCol1", ImGuiTableColumnFlags.WidthFixed, snapLabelWidth);
-            ImGui.TableSetupColumn("##SnapInputCol1", ImGuiTableColumnFlags.WidthFixed, snapStrengthInputWidth);
-            ImGui.TableSetupColumn("##SnapLabelCol2", ImGuiTableColumnFlags.WidthFixed, snapLastLabelWidth);
-            ImGui.TableSetupColumn("##SnapInputCol2", ImGuiTableColumnFlags.WidthFixed, snapStrengthInputWidth);
-
-            // Row 1: ranges
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("内圈范围");
-            ImGui.TableSetColumnIndex(1);
-            ImGui.SetNextItemWidth(snapRangeInputWidth);
-            var snapInnerRange = _homeViewState.SnapInnerRange;
-            if (ImGui.InputInt("##SnapInnerRange", ref snapInnerRange, 0, 0))
-            {
-                _homeViewState.SnapInnerRange = Math.Clamp(snapInnerRange, 1, _homeViewState.SnapOuterRange);
-                TryWriteIntToCurrentConfig("snapInnerRange", _homeViewState.SnapInnerRange);
-                PushAimAssistConfig();
-            }
-
-            ImGui.TableSetColumnIndex(2);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("外圈范围");
-            ImGui.TableSetColumnIndex(3);
-            ImGui.SetNextItemWidth(snapRangeInputWidth);
-            var snapOuterRange = _homeViewState.SnapOuterRange;
-            if (ImGui.InputInt("##SnapOuterRange", ref snapOuterRange, 0, 0))
-            {
-                _homeViewState.SnapOuterRange = Math.Clamp(snapOuterRange, selectedModelSize, snapOuterRangeMax);
-                _homeViewState.SnapInnerRange = Math.Clamp(_homeViewState.SnapInnerRange, 1, _homeViewState.SnapOuterRange);
-                TryWriteIntToCurrentConfig("snapOuterRange", _homeViewState.SnapOuterRange);
-                TryWriteIntToCurrentConfig("snapInnerRange", _homeViewState.SnapInnerRange);
-                PushAimAssistConfig();
-                SyncSmartCoreVisionPipeline();
-            }
-
-            ImGui.TableSetColumnIndex(5);
-            var snapRangePreviewWindowOpen = IsSnapRangePreviewWindowOpen();
-            ImGui.BeginDisabled(snapRangePreviewWindowOpen);
-            if (ImGui.Button("范围预览##SnapRangePreviewWindowButton", new Vector2(snapExtraInputWidth, 0f)))
-            {
-                OpenSnapRangePreviewWindow();
-            }
-            ImGui.EndDisabled();
-
-            // Row 2: strengths
-            ImGui.TableNextRow();
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("内圈强度");
-            ImGui.TableSetColumnIndex(1);
-            ImGui.SetNextItemWidth(snapStrengthInputWidth);
-            var snapInnerStrength = _homeViewState.SnapInnerStrength;
-            if (ImGui.InputFloat("##SnapInnerStrength", ref snapInnerStrength, 0.01f, 0.01f, "%.2f"))
-            {
-                _homeViewState.SnapInnerStrength = Math.Clamp(snapInnerStrength, 0f, 1f);
-                TryWriteFloatToCurrentConfig("snapInnerStrength", _homeViewState.SnapInnerStrength);
-                PushAimAssistConfig();
-            }
-
-            ImGui.TableSetColumnIndex(2);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("外圈强度");
-            ImGui.TableSetColumnIndex(3);
-            ImGui.SetNextItemWidth(snapStrengthInputWidth);
-            var snapOuterStrength = _homeViewState.SnapOuterStrength;
-            if (ImGui.InputFloat("##SnapOuterStrength", ref snapOuterStrength, 0.01f, 0.01f, "%.2f"))
-            {
-                _homeViewState.SnapOuterStrength = Math.Clamp(snapOuterStrength, 0f, 1f);
-                TryWriteFloatToCurrentConfig("snapOuterStrength", _homeViewState.SnapOuterStrength);
-                PushAimAssistConfig();
-            }
-
-            ImGui.TableSetColumnIndex(4);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("起始强度");
-            ImGui.TableSetColumnIndex(5);
-            ImGui.SetNextItemWidth(snapExtraInputWidth);
-            var snapStartStrength = _homeViewState.SnapStartStrength;
-            if (ImGui.InputFloat("##SnapStartStrength", ref snapStartStrength, 0.01f, 0.01f, "%.2f"))
-            {
-                _homeViewState.SnapStartStrength = Math.Clamp(snapStartStrength, 0f, 1f);
-                TryWriteFloatToCurrentConfig("snapStartStrength", _homeViewState.SnapStartStrength);
-                PushAimAssistConfig();
-            }
-
-            // Row 3: extras
-            ImGui.TableNextRow();
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("腰射强度系数");
-            ImGui.TableSetColumnIndex(1);
-            ImGui.SetNextItemWidth(snapExtraInputWidth);
-            var snapHipfireStrengthFactor = _homeViewState.SnapHipfireStrengthFactor;
-            if (ImGui.InputFloat("##SnapHipfireStrengthFactor", ref snapHipfireStrengthFactor, 0.01f, 0.01f, "%.2f"))
-            {
-                _homeViewState.SnapHipfireStrengthFactor = Math.Clamp(snapHipfireStrengthFactor, 0f, 1f);
-                TryWriteFloatToCurrentConfig("snapHipfireStrengthFactor", _homeViewState.SnapHipfireStrengthFactor);
-                PushAimAssistConfig();
-            }
-
-            ImGui.TableSetColumnIndex(2);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("垂直强度系数");
-            ImGui.TableSetColumnIndex(3);
-            ImGui.SetNextItemWidth(snapExtraInputWidth);
-            var snapVerticalStrengthFactor = _homeViewState.SnapVerticalStrengthFactor;
-            if (ImGui.InputFloat("##SnapVerticalStrengthFactor", ref snapVerticalStrengthFactor, 0.01f, 0.01f, "%.2f"))
-            {
-                _homeViewState.SnapVerticalStrengthFactor = Math.Clamp(snapVerticalStrengthFactor, 0f, 1f);
-                TryWriteFloatToCurrentConfig("snapVerticalStrengthFactor", _homeViewState.SnapVerticalStrengthFactor);
-                PushAimAssistConfig();
-            }
-
-            ImGui.TableSetColumnIndex(4);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("吸附高度");
-            ImGui.TableSetColumnIndex(5);
-            ImGui.SetNextItemWidth(snapExtraInputWidth);
-            var snapHeight = _homeViewState.SnapHeight;
-            if (ImGui.InputFloat("##SnapHeight", ref snapHeight, 0.01f, 0.01f, "%.2f"))
-            {
-                _homeViewState.SnapHeight = Math.Clamp(snapHeight, 0f, 1f);
-                TryWriteFloatToCurrentConfig("snapHeight", _homeViewState.SnapHeight);
-                PushAimAssistConfig();
-            }
-
-            ImGui.EndTable();
+            _homeViewState.SnapInnerRange = Math.Clamp(snapInnerRange, 1, _homeViewState.SnapOuterRange);
+            TryWriteIntToCurrentConfig("snapInnerRange", _homeViewState.SnapInnerRange);
+            PushAimAssistConfig();
         }
 
-        if (ImGui.BeginTable("##SnapInterpolationRow", 2, ImGuiTableFlags.SizingStretchProp))
+        ImGui.TableSetColumnIndex(2);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("外圈范围");
+        ImGui.TableSetColumnIndex(3);
+        ImGui.SetNextItemWidth(layout.RangeInputWidth);
+        var snapOuterRange = _homeViewState.SnapOuterRange;
+        if (ImGui.InputInt("##SnapOuterRange", ref snapOuterRange, 0, 0))
         {
-            ImGui.TableSetupColumn("##SnapInterpolationLabel", ImGuiTableColumnFlags.WidthFixed, snapLabelWidth);
-            ImGui.TableSetupColumn("##SnapInterpolationInput", ImGuiTableColumnFlags.WidthStretch);
-            ImGui.TableNextRow();
-            _homeViewState.SnapInnerInterpolationTypeIndex = _homeViewState.SnapInnerInterpolationTypeIndex >= 0 && _homeViewState.SnapInnerInterpolationTypeIndex < SnapInnerInterpolationTypeOptions.Length
+            _homeViewState.SnapOuterRange = Math.Clamp(snapOuterRange, selectedModelSize, snapOuterRangeMax);
+            _homeViewState.SnapInnerRange = Math.Clamp(_homeViewState.SnapInnerRange, 1, _homeViewState.SnapOuterRange);
+            TryWriteIntToCurrentConfig("snapOuterRange", _homeViewState.SnapOuterRange);
+            TryWriteIntToCurrentConfig("snapInnerRange", _homeViewState.SnapInnerRange);
+            PushAimAssistConfig();
+            SyncSmartCoreVisionPipeline();
+        }
+
+        ImGui.TableSetColumnIndex(5);
+        var snapRangePreviewWindowOpen = IsSnapRangePreviewWindowOpen();
+        ImGui.BeginDisabled(snapRangePreviewWindowOpen);
+        if (ImGui.Button("范围预览##SnapRangePreviewWindowButton", new Vector2(layout.ExtraInputWidth, 0f)))
+        {
+            OpenSnapRangePreviewWindow();
+        }
+        ImGui.EndDisabled();
+    }
+
+    private void DrawSnapStrengthRow(in SnapSettingsLayout layout)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextRow();
+
+        ImGui.TableSetColumnIndex(0);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("内圈强度");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.SetNextItemWidth(layout.StrengthInputWidth);
+        DrawClampedConfigFloatInput(
+            "##SnapInnerStrength",
+            "snapInnerStrength",
+            _homeViewState.SnapInnerStrength,
+            value => _homeViewState.SnapInnerStrength = value,
+            0f,
+            1f);
+
+        ImGui.TableSetColumnIndex(2);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("外圈强度");
+        ImGui.TableSetColumnIndex(3);
+        ImGui.SetNextItemWidth(layout.StrengthInputWidth);
+        DrawClampedConfigFloatInput(
+            "##SnapOuterStrength",
+            "snapOuterStrength",
+            _homeViewState.SnapOuterStrength,
+            value => _homeViewState.SnapOuterStrength = value,
+            0f,
+            1f);
+
+        ImGui.TableSetColumnIndex(4);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("起始强度");
+        ImGui.TableSetColumnIndex(5);
+        ImGui.SetNextItemWidth(layout.ExtraInputWidth);
+        DrawClampedConfigFloatInput(
+            "##SnapStartStrength",
+            "snapStartStrength",
+            _homeViewState.SnapStartStrength,
+            value => _homeViewState.SnapStartStrength = value,
+            0f,
+            1f);
+    }
+
+    private void DrawSnapExtraRow(in SnapSettingsLayout layout)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextRow();
+
+        ImGui.TableSetColumnIndex(0);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("腰射强度系数");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.SetNextItemWidth(layout.ExtraInputWidth);
+        DrawClampedConfigFloatInput(
+            "##SnapHipfireStrengthFactor",
+            "snapHipfireStrengthFactor",
+            _homeViewState.SnapHipfireStrengthFactor,
+            value => _homeViewState.SnapHipfireStrengthFactor = value,
+            0f,
+            1f);
+
+        ImGui.TableSetColumnIndex(2);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("垂直强度系数");
+        ImGui.TableSetColumnIndex(3);
+        ImGui.SetNextItemWidth(layout.ExtraInputWidth);
+        DrawClampedConfigFloatInput(
+            "##SnapVerticalStrengthFactor",
+            "snapVerticalStrengthFactor",
+            _homeViewState.SnapVerticalStrengthFactor,
+            value => _homeViewState.SnapVerticalStrengthFactor = value,
+            0f,
+            1f);
+
+        ImGui.TableSetColumnIndex(4);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("吸附高度");
+        ImGui.TableSetColumnIndex(5);
+        ImGui.SetNextItemWidth(layout.ExtraInputWidth);
+        DrawClampedConfigFloatInput(
+            "##SnapHeight",
+            "snapHeight",
+            _homeViewState.SnapHeight,
+            value => _homeViewState.SnapHeight = value,
+            0f,
+            1f);
+    }
+
+    private void DrawSnapInterpolationTypeRow(float reserveWidth, float labelWidth)
+    {
+        if (!ImGui.BeginTable("##SnapInterpolationRow", 2, ImGuiTableFlags.SizingStretchProp))
+        {
+            return;
+        }
+
+        ImGui.TableSetupColumn("##SnapInterpolationLabel", ImGuiTableColumnFlags.WidthFixed, labelWidth);
+        ImGui.TableSetupColumn("##SnapInterpolationInput", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableNextRow();
+        _homeViewState.SnapInnerInterpolationTypeIndex =
+            _homeViewState.SnapInnerInterpolationTypeIndex >= 0 && _homeViewState.SnapInnerInterpolationTypeIndex < SnapInnerInterpolationTypeOptions.Length
                 ? _homeViewState.SnapInnerInterpolationTypeIndex
                 : 0;
-            ImGui.TableSetColumnIndex(0);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("内圈插值类型");
-            ImGui.TableSetColumnIndex(1);
-            var interpolationComboWidth = MathF.Max(90f, ImGui.GetContentRegionAvail().X - metrics.ReserveWidth);
-            ImGui.SetNextItemWidth(interpolationComboWidth);
-            var selectedSnapInnerInterpolationLabel = SnapInnerInterpolationTypeOptions[_homeViewState.SnapInnerInterpolationTypeIndex];
-            if (ImGui.BeginCombo("##SnapInnerInterpolationTypeCombo", selectedSnapInnerInterpolationLabel))
-            {
-                for (var i = 0; i < SnapInnerInterpolationTypeOptions.Length; i++)
-                {
-                    var isSelected = i == _homeViewState.SnapInnerInterpolationTypeIndex;
-                    if (ImGui.Selectable(SnapInnerInterpolationTypeOptions[i], isSelected))
-                    {
-                        _homeViewState.SnapInnerInterpolationTypeIndex = i;
-                        TryWriteStringToCurrentConfig("snapInnerInterpolationType", SnapInnerInterpolationTypeOptions[i]);
-                        PushAimAssistConfig();
-                    }
 
-                    if (isSelected)
-                    {
-                        ImGui.SetItemDefaultFocus();
-                    }
+        ImGui.TableSetColumnIndex(0);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("内圈插值类型");
+
+        ImGui.TableSetColumnIndex(1);
+        var interpolationComboWidth = MathF.Max(90f, ImGui.GetContentRegionAvail().X - reserveWidth);
+        ImGui.SetNextItemWidth(interpolationComboWidth);
+        var selectedSnapInnerInterpolationLabel = SnapInnerInterpolationTypeOptions[_homeViewState.SnapInnerInterpolationTypeIndex];
+        if (ImGui.BeginCombo("##SnapInnerInterpolationTypeCombo", selectedSnapInnerInterpolationLabel))
+        {
+            for (var i = 0; i < SnapInnerInterpolationTypeOptions.Length; i++)
+            {
+                var isSelected = i == _homeViewState.SnapInnerInterpolationTypeIndex;
+                if (ImGui.Selectable(SnapInnerInterpolationTypeOptions[i], isSelected))
+                {
+                    _homeViewState.SnapInnerInterpolationTypeIndex = i;
+                    TryWriteStringToCurrentConfig("snapInnerInterpolationType", SnapInnerInterpolationTypeOptions[i]);
+                    PushAimAssistConfig();
                 }
 
-                ImGui.EndCombo();
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
             }
 
-            ImGui.EndTable();
+            ImGui.EndCombo();
         }
+
+        ImGui.EndTable();
+    }
+
+    private void DrawClampedConfigFloatInput(
+        string controlId,
+        string configKey,
+        float currentValue,
+        Action<float> setValue,
+        float min,
+        float max)
+    {
+        var editedValue = currentValue;
+        if (!ImGui.InputFloat(controlId, ref editedValue, SnapFloatStep, SnapFloatStep, SnapFloatFormat))
+        {
+            return;
+        }
+
+        var clampedValue = Math.Clamp(editedValue, min, max);
+        setValue(clampedValue);
+        TryWriteFloatToCurrentConfig(configKey, clampedValue);
+        PushAimAssistConfig();
     }
 
     private void DrawSnapCurveSection(ImGuiStylePtr topPanelStyle)
@@ -563,20 +634,8 @@ public sealed partial class MainWindow
         ImGui.TextUnformatted("特殊武器逻辑");
         ImGui.TableSetColumnIndex(1);
         ImGui.BeginDisabled(_configFiles.Count == 0);
-        var weaponNameColumnWidth = ImGui.CalcTextSize("武器名").X;
-        for (var i = 0; i < _specialWeaponNames.Length; i++)
-        {
-            weaponNameColumnWidth = MathF.Max(weaponNameColumnWidth, ImGui.CalcTextSize(_specialWeaponNames[i]).X);
-        }
+        var (weaponNameColumnWidth, aimSnapColumnWidth, rapidFireColumnWidth, releaseFireColumnWidth) = MeasureSpecialWeaponColumnWidths();
 
-        var aimSnapColumnWidth = ImGui.CalcTextSize("瞄准吸附").X;
-        var rapidFireColumnWidth = ImGui.CalcTextSize("开火连点").X;
-        var releaseFireColumnWidth = ImGui.CalcTextSize("松手开火").X;
-        var specialWeaponStyle = ImGui.GetStyle();
-        weaponNameColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
-        aimSnapColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
-        rapidFireColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
-        releaseFireColumnWidth += specialWeaponStyle.CellPadding.X * 2f;
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() + topPanelStyle.CellPadding.Y);
         if (ImGui.BeginTable(
                 "##SpecialWeaponLogicTable",
@@ -597,31 +656,51 @@ public sealed partial class MainWindow
                 ImGui.AlignTextToFramePadding();
                 ImGui.TextUnformatted(_specialWeaponNames[i]);
 
-                ImGui.TableSetColumnIndex(1);
-                if (ImGui.Checkbox($"##SpecialWeaponAimSnap_{i}", ref _specialWeaponAimSnapEnabled[i]))
-                {
-                    TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i], _specialWeaponReleaseFireEnabled[i]);
-                    PushAimAssistConfig();
-                }
-
-                ImGui.TableSetColumnIndex(2);
-                if (ImGui.Checkbox($"##SpecialWeaponRapidFire_{i}", ref _specialWeaponRapidFireEnabled[i]))
-                {
-                    TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i], _specialWeaponReleaseFireEnabled[i]);
-                    PushAimAssistConfig();
-                }
-
-                ImGui.TableSetColumnIndex(3);
-                if (ImGui.Checkbox($"##SpecialWeaponReleaseFire_{i}", ref _specialWeaponReleaseFireEnabled[i]))
-                {
-                    TryWriteSpecialWeaponLogicValueToCurrentConfig(i, _specialWeaponAimSnapEnabled[i], _specialWeaponRapidFireEnabled[i], _specialWeaponReleaseFireEnabled[i]);
-                    PushAimAssistConfig();
-                }
+                DrawSpecialWeaponToggleCell(i, 1, $"##SpecialWeaponAimSnap_{i}", ref _specialWeaponAimSnapEnabled[i]);
+                DrawSpecialWeaponToggleCell(i, 2, $"##SpecialWeaponRapidFire_{i}", ref _specialWeaponRapidFireEnabled[i]);
+                DrawSpecialWeaponToggleCell(i, 3, $"##SpecialWeaponReleaseFire_{i}", ref _specialWeaponReleaseFireEnabled[i]);
             }
 
             ImGui.EndTable();
         }
         ImGui.EndDisabled();
+    }
+
+    private (float WeaponNameColumnWidth, float AimSnapColumnWidth, float RapidFireColumnWidth, float ReleaseFireColumnWidth)
+        MeasureSpecialWeaponColumnWidths()
+    {
+        var weaponNameColumnWidth = ImGui.CalcTextSize("武器名").X;
+        for (var i = 0; i < _specialWeaponNames.Length; i++)
+        {
+            weaponNameColumnWidth = MathF.Max(weaponNameColumnWidth, ImGui.CalcTextSize(_specialWeaponNames[i]).X);
+        }
+
+        var aimSnapColumnWidth = ImGui.CalcTextSize("瞄准吸附").X;
+        var rapidFireColumnWidth = ImGui.CalcTextSize("开火连点").X;
+        var releaseFireColumnWidth = ImGui.CalcTextSize("松手开火").X;
+        var style = ImGui.GetStyle();
+        var cellPadding = style.CellPadding.X * 2f;
+        return (
+            weaponNameColumnWidth + cellPadding,
+            aimSnapColumnWidth + cellPadding,
+            rapidFireColumnWidth + cellPadding,
+            releaseFireColumnWidth + cellPadding);
+    }
+
+    private void DrawSpecialWeaponToggleCell(int weaponIndex, int columnIndex, string controlId, ref bool flag)
+    {
+        ImGui.TableSetColumnIndex(columnIndex);
+        if (!ImGui.Checkbox(controlId, ref flag))
+        {
+            return;
+        }
+
+        TryWriteSpecialWeaponLogicValueToCurrentConfig(
+            weaponIndex,
+            _specialWeaponAimSnapEnabled[weaponIndex],
+            _specialWeaponRapidFireEnabled[weaponIndex],
+            _specialWeaponReleaseFireEnabled[weaponIndex]);
+        PushAimAssistConfig();
     }
 
     private void RefreshHomeInputDevices()
@@ -655,15 +734,21 @@ public sealed partial class MainWindow
 
     private void DrawConfigFileModals()
     {
+        RenderAddConfigModal();
+        RenderDeleteConfigModal();
+    }
+
+    private void RenderAddConfigModal()
+    {
         var isAddModalOpen = _homeViewState.IsAddModalOpen;
         var addNameBuffer = _homeViewState.AddNameBuffer;
         if (_homeViewState.IsAddModalOpenRequested)
         {
-            ImGui.OpenPopup("璇疯緭鍏ユ柊閰嶇疆鍚嶇О");
+            ImGui.OpenPopup("请输入新配置名称");
             _homeViewState.IsAddModalOpenRequested = false;
         }
 
-        if (ImGui.BeginPopupModal("璇疯緭鍏ユ柊閰嶇疆鍚嶇О", ref isAddModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("请输入新配置名称", ref isAddModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.InputText("##AddConfigNameInput", ref addNameBuffer, 256);
             _homeViewState.AddNameBuffer = addNameBuffer;
@@ -673,7 +758,7 @@ public sealed partial class MainWindow
                 ImGui.TextUnformatted(_homeViewState.AddError);
             }
 
-            if (ImGui.Button("鍒涘缓"))
+            if (ImGui.Button("创建"))
             {
                 if (TryCreateEmptyConfigFile(_homeViewState.AddNameBuffer, out var err))
                 {
@@ -687,7 +772,7 @@ public sealed partial class MainWindow
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("鍙栨秷"))
+            if (ImGui.Button("取消"))
             {
                 _homeViewState.CloseAddModal();
                 ImGui.CloseCurrentPopup();
@@ -695,21 +780,25 @@ public sealed partial class MainWindow
 
             ImGui.EndPopup();
         }
-        _homeViewState.IsAddModalOpen = isAddModalOpen;
 
+        _homeViewState.IsAddModalOpen = isAddModalOpen;
+    }
+
+    private void RenderDeleteConfigModal()
+    {
         var isDeleteModalOpen = _homeViewState.IsDeleteModalOpen;
         if (_homeViewState.IsDeleteModalOpenRequested)
         {
-            ImGui.OpenPopup("鍒犻櫎閰嶇疆纭");
+            ImGui.OpenPopup("删除配置确认");
             _homeViewState.IsDeleteModalOpenRequested = false;
         }
 
-        if (ImGui.BeginPopupModal("鍒犻櫎閰嶇疆纭", ref isDeleteModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("删除配置确认", ref isDeleteModalOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             var name = _homeViewState.PendingDeleteConfigBaseName ?? string.Empty;
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted($"纭畾鍒犻櫎閰嶇疆鏂囦欢 {name} 鍚楋紵姝ゆ搷浣滀笉鍙挙閿€銆?");
-            if (ImGui.Button("纭畾"))
+            ImGui.TextUnformatted($"确定删除配置文件 {name} 吗？此操作不可撤销。");
+            if (ImGui.Button("确定"))
             {
                 TryDeleteSelectedConfigFile(name);
                 _homeViewState.CloseDeleteModal();
@@ -717,7 +806,7 @@ public sealed partial class MainWindow
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("鍙栨秷"))
+            if (ImGui.Button("取消"))
             {
                 _homeViewState.CloseDeleteModal();
                 ImGui.CloseCurrentPopup();
@@ -725,6 +814,7 @@ public sealed partial class MainWindow
 
             ImGui.EndPopup();
         }
+
         _homeViewState.IsDeleteModalOpen = isDeleteModalOpen;
     }
 
