@@ -39,6 +39,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
 {
     private const uint InputKeyboard = 1;
     private const uint KeyEventFKeyUp = 0x0002;
+    private const uint KeyEventFScancode = 0x0008;
     private const ushort VkOemPlus = 0xBB;
     private const double TargetLoopIntervalMs = 1000.0 / 500.0;
     private static readonly TimeSpan SdlInputFailureGrace = TimeSpan.FromSeconds(1);
@@ -676,6 +677,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
     private static bool TrySendKeyboardEquals(bool keyDown, out string? error)
     {
+        var scanCode = (ushort)MapVirtualKey(VkOemPlus, 0);
+        var flags = KeyEventFScancode | (keyDown ? 0u : KeyEventFKeyUp);
         var input = new INPUT
         {
             Type = InputKeyboard,
@@ -683,9 +686,10 @@ internal sealed class ViGEmMappingWorker : IDisposable
             {
                 Keyboard = new KEYBDINPUT
                 {
-                    VirtualKey = VkOemPlus,
-                    ScanCode = 0,
-                    Flags = keyDown ? 0u : KeyEventFKeyUp,
+                    // Scancode injection is closer to real key hardware events.
+                    VirtualKey = 0,
+                    ScanCode = scanCode,
+                    Flags = flags,
                     Time = 0,
                     ExtraInfo = UIntPtr.Zero
                 }
@@ -928,6 +932,9 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint inputCount, INPUT[] inputs, int size);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint MapVirtualKey(uint code, uint mapType);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT
