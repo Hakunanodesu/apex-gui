@@ -516,8 +516,9 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(1);
         var style = ImGui.GetStyle();
         var availableWidth = MathF.Max(0f, ImGui.GetContentRegionAvail().X - reserveWidth);
-        var labelWidth = MathF.Max(ImGui.CalcTextSize("Ãé×¼").X, ImGui.CalcTextSize("¿ª»ð").X);
-        var comboWidth = MathF.Max(90f, availableWidth - labelWidth - style.ItemSpacing.X);
+        var labelWidth = ImGui.CalcTextSize("´¥Ãþ°å£¨×ó£©").X;
+        var totalSpacingWidth = style.ItemSpacing.X * 3f;
+        var comboWidth = MathF.Max(90f, (availableWidth - labelWidth * 2f - totalSpacingWidth) / 2f);
         _homeViewState.AimBindingIndex = _homeViewState.AimBindingIndex >= 0 && _homeViewState.AimBindingIndex < GamepadBindingCatalog.Options.Length
             ? _homeViewState.AimBindingIndex
             : GamepadBindingCatalog.DefaultAimIndex;
@@ -526,62 +527,110 @@ public sealed partial class MainWindow
             : GamepadBindingCatalog.DefaultFireIndex;
         var disableBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.Options.Length == 0;
 
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Ãé×¼");
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(comboWidth);
-        var selectedAimLabel = GamepadBindingCatalog.Options[_homeViewState.AimBindingIndex];
-        ImGui.BeginDisabled(disableBindingSelection);
-        if (ImGui.BeginCombo("##HomeAimBindingCombo", selectedAimLabel))
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - style.CellPadding.Y);
+        if (ImGui.BeginTable(
+                "##HomeKeyBindingInlineTable",
+                4,
+                ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX | ImGuiTableFlags.NoSavedSettings))
         {
-            for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
+            ImGui.TableSetupColumn("##HomeAimBindingLabelColumn", ImGuiTableColumnFlags.WidthFixed, labelWidth);
+            ImGui.TableSetupColumn("##HomeAimBindingComboColumn", ImGuiTableColumnFlags.WidthFixed, comboWidth);
+            ImGui.TableSetupColumn("##HomeFireBindingLabelColumn", ImGuiTableColumnFlags.WidthFixed, labelWidth);
+            ImGui.TableSetupColumn("##HomeFireBindingComboColumn", ImGuiTableColumnFlags.WidthFixed, comboWidth);
+
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("Ãé×¼");
+
+            ImGui.TableSetColumnIndex(1);
+            ImGui.SetNextItemWidth(comboWidth);
+            var selectedAimLabel = GamepadBindingCatalog.Options[_homeViewState.AimBindingIndex];
+            ImGui.BeginDisabled(disableBindingSelection);
+            if (ImGui.BeginCombo("##HomeAimBindingCombo", selectedAimLabel))
             {
-                var isSelected = i == _homeViewState.AimBindingIndex;
-                if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
+                for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
                 {
-                    _homeViewState.AimBindingIndex = i;
-                    TryWriteStringToCurrentConfig(AimBindingConfigKey, GamepadBindingCatalog.Options[i]);
-                    PushAimAssistConfig();
+                    var isSelected = i == _homeViewState.AimBindingIndex;
+                    if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
+                    {
+                        _homeViewState.AimBindingIndex = i;
+                        TryWriteStringToCurrentConfig(AimBindingConfigKey, GamepadBindingCatalog.Options[i]);
+                        PushAimAssistConfig();
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
+                    }
                 }
 
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
+                ImGui.EndCombo();
             }
+            ImGui.EndDisabled();
 
-            ImGui.EndCombo();
-        }
-        ImGui.EndDisabled();
+            ImGui.TableSetColumnIndex(2);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("¿ª»ð");
 
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + style.ItemSpacing.Y);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("¿ª»ð");
-        ImGui.SameLine();
-        ImGui.SetNextItemWidth(comboWidth);
-        var selectedFireLabel = GamepadBindingCatalog.Options[_homeViewState.FireBindingIndex];
-        ImGui.BeginDisabled(disableBindingSelection);
-        if (ImGui.BeginCombo("##HomeFireBindingCombo", selectedFireLabel))
-        {
-            for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
+            ImGui.TableSetColumnIndex(3);
+            ImGui.SetNextItemWidth(comboWidth);
+            var selectedFireLabel = GamepadBindingCatalog.Options[_homeViewState.FireBindingIndex];
+            ImGui.BeginDisabled(disableBindingSelection);
+            if (ImGui.BeginCombo("##HomeFireBindingCombo", selectedFireLabel))
             {
-                var isSelected = i == _homeViewState.FireBindingIndex;
-                if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
+                for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
                 {
-                    _homeViewState.FireBindingIndex = i;
-                    TryWriteStringToCurrentConfig(FireBindingConfigKey, GamepadBindingCatalog.Options[i]);
-                    PushAimAssistConfig();
+                    var isSelected = i == _homeViewState.FireBindingIndex;
+                    if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
+                    {
+                        _homeViewState.FireBindingIndex = i;
+                        TryWriteStringToCurrentConfig(FireBindingConfigKey, GamepadBindingCatalog.Options[i]);
+                        PushAimAssistConfig();
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
+                    }
                 }
 
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
+                ImGui.EndCombo();
             }
+            ImGui.EndDisabled();
 
-            ImGui.EndCombo();
+            ImGui.TableNextRow();
+            ImGui.TableNextRow();
+
+            ImGui.TableSetColumnIndex(0);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("´¥Ãþ°å£¨×ó£©");
+
+            ImGui.TableSetColumnIndex(1);
+            ImGui.SetNextItemWidth(comboWidth);
+            ImGui.BeginDisabled();
+            if (ImGui.BeginCombo("##HomeTouchpadLeftBindingCombo", "Õ¼Î»"))
+            {
+                ImGui.EndCombo();
+            }
+            ImGui.EndDisabled();
+
+            ImGui.TableSetColumnIndex(2);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("´¥Ãþ°å£¨ÓÒ£©");
+
+            ImGui.TableSetColumnIndex(3);
+            ImGui.SetNextItemWidth(comboWidth);
+            ImGui.BeginDisabled();
+            if (ImGui.BeginCombo("##HomeTouchpadRightBindingCombo", "Õ¼Î»"))
+            {
+                ImGui.EndCombo();
+            }
+            ImGui.EndDisabled();
+
+            ImGui.EndTable();
         }
-        ImGui.EndDisabled();
     }
 
     private void DrawSnapModeSection(float reserveWidth)
