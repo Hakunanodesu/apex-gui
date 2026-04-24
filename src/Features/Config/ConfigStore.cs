@@ -21,9 +21,19 @@ internal readonly record struct ConfigSelectionResult(
     int ModelIndex,
     int AimBindingIndex,
     int FireBindingIndex,
+    int TouchpadLeftBindingIndex,
+    int TouchpadRightBindingIndex,
     SnapConfigState SnapConfig)
 {
-    public static ConfigSelectionResult Empty => new(false, -1, -1, GamepadBindingCatalog.DefaultAimIndex, GamepadBindingCatalog.DefaultFireIndex, new SnapConfigState());
+    public static ConfigSelectionResult Empty => new(
+        false,
+        -1,
+        -1,
+        GamepadBindingCatalog.DefaultAimIndex,
+        GamepadBindingCatalog.DefaultFireIndex,
+        GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+        GamepadBindingCatalog.DefaultTouchpadRightIndex,
+        new SnapConfigState());
 }
 
 internal sealed class ConfigStore
@@ -80,8 +90,11 @@ internal sealed class ConfigStore
         IReadOnlyList<string> snapModeOptions,
         IReadOnlyList<string> interpolationOptions,
         IReadOnlyList<string> bindingOptions,
+        IReadOnlyList<string> touchpadBindingOptions,
         int defaultAimBindingIndex,
-        int defaultFireBindingIndex)
+        int defaultFireBindingIndex,
+        int defaultTouchpadLeftBindingIndex,
+        int defaultTouchpadRightBindingIndex)
     {
         if (!TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
         {
@@ -100,6 +113,14 @@ internal sealed class ConfigStore
             _repository.TryReadString(configPath, "fireBinding"),
             bindingOptions,
             defaultFireBindingIndex);
+        var touchpadLeftBindingIndex = ResolveOptionIndex(
+            _repository.TryReadString(configPath, "touchpadLeftBinding"),
+            touchpadBindingOptions,
+            defaultTouchpadLeftBindingIndex);
+        var touchpadRightBindingIndex = ResolveOptionIndex(
+            _repository.TryReadString(configPath, "touchpadRightBinding"),
+            touchpadBindingOptions,
+            defaultTouchpadRightBindingIndex);
         var modelIndex = onnxModels.Count == 0
             ? -1
             : ResolveModelIndex(_repository.TryReadString(configPath, "model"), onnxModels);
@@ -120,7 +141,15 @@ internal sealed class ConfigStore
             defaultHeight,
             interpolationOptions);
 
-        return new ConfigSelectionResult(true, snapModeIndex, modelIndex, aimBindingIndex, fireBindingIndex, snapConfig);
+        return new ConfigSelectionResult(
+            true,
+            snapModeIndex,
+            modelIndex,
+            aimBindingIndex,
+            fireBindingIndex,
+            touchpadLeftBindingIndex,
+            touchpadRightBindingIndex,
+            snapConfig);
     }
 
     public bool TryResolvePath(IReadOnlyList<string> configFiles, int selectedConfigFileIndex, out string configPath)

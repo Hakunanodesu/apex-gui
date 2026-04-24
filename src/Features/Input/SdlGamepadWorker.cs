@@ -4,6 +4,9 @@ using SDL3;
 
 internal readonly struct SdlGamepadInputSnapshot
 {
+    public readonly bool TouchpadPressed;
+    public readonly int TouchpadFingerCount;
+    public readonly float TouchpadX;
     public readonly short LeftX;
     public readonly short LeftY;
     public readonly short RightX;
@@ -27,6 +30,9 @@ internal readonly struct SdlGamepadInputSnapshot
     public readonly bool DpadRight;
 
     public SdlGamepadInputSnapshot(
+        bool touchpadPressed,
+        int touchpadFingerCount,
+        float touchpadX,
         short leftX,
         short leftY,
         short rightX,
@@ -49,6 +55,9 @@ internal readonly struct SdlGamepadInputSnapshot
         bool dpadLeft,
         bool dpadRight)
     {
+        TouchpadPressed = touchpadPressed;
+        TouchpadFingerCount = touchpadFingerCount;
+        TouchpadX = touchpadX;
         LeftX = leftX;
         LeftY = leftY;
         RightX = rightX;
@@ -245,6 +254,9 @@ internal sealed class SdlGamepadWorker : IDisposable
                 }
 
                 var snapshot = new SdlGamepadInputSnapshot(
+                    GetGamepadButtonByNames(openedGamepad, "Touchpad", "Misc1"),
+                    GetEffectiveTouchpadState(openedGamepad, out var touchpadX),
+                    touchpadX,
                     SDL.GetGamepadAxis(openedGamepad, SDL.GamepadAxis.LeftX),
                     SDL.GetGamepadAxis(openedGamepad, SDL.GamepadAxis.LeftY),
                     SDL.GetGamepadAxis(openedGamepad, SDL.GamepadAxis.RightX),
@@ -329,11 +341,64 @@ internal sealed class SdlGamepadWorker : IDisposable
         {
             if (Enum.TryParse<SDL.GamepadButton>(enumNames[i], true, out var button))
             {
-                return SDL.GetGamepadButton(gamepad, button);
+                if (SDL.GetGamepadButton(gamepad, button))
+                {
+                    return true;
+                }
             }
         }
 
         return false;
+    }
+
+    private static int GetEffectiveTouchpadState(IntPtr gamepad, out float x)
+    {
+        x = 0f;
+        var touchpadCount = SDL.GetNumGamepadTouchpads(gamepad);
+        if (touchpadCount <= 0)
+        {
+            return 0;
+        }
+
+        var fingerCount = SDL.GetNumGamepadTouchpadFingers(gamepad, 0);
+        if (fingerCount <= 0)
+        {
+            return 0;
+        }
+
+        var trackedFingers = 0;
+        float totalX = 0f;
+        var maxFingerSamples = Math.Min(2, fingerCount);
+        for (var fingerIndex = 0; fingerIndex < maxFingerSamples; fingerIndex++)
+        {
+            if (!SDL.GetGamepadTouchpadFinger(
+                    gamepad,
+                    0,
+                    fingerIndex,
+                    out var fingerDown,
+                    out var fingerX,
+                    out _,
+                    out _))
+            {
+                continue;
+            }
+
+            if (!fingerDown)
+            {
+                continue;
+            }
+
+            totalX += fingerX;
+            trackedFingers++;
+        }
+
+        if (trackedFingers <= 0)
+        {
+            return 0;
+        }
+
+        x = totalX / trackedFingers;
+        return trackedFingers;
     }
 
     public void Dispose()

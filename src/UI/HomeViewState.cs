@@ -3,6 +3,8 @@ internal sealed class HomeViewState
     public int SnapModeIndex { get; set; } = -1;
     public int AimBindingIndex { get; set; } = GamepadBindingCatalog.DefaultAimIndex;
     public int FireBindingIndex { get; set; } = GamepadBindingCatalog.DefaultFireIndex;
+    public int TouchpadLeftBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
+    public int TouchpadRightBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadRightIndex;
     public int SnapOuterRange { get; set; } = 1;
     public float SnapOuterStrength { get; set; }
     public int SnapInnerRange { get; set; } = 1;
@@ -37,6 +39,8 @@ internal sealed class HomeViewState
         int snapModeIndex,
         int aimBindingIndex,
         int fireBindingIndex,
+        int touchpadLeftBindingIndex,
+        int touchpadRightBindingIndex,
         int outerRange,
         int innerRange,
         float outerStrength,
@@ -50,6 +54,8 @@ internal sealed class HomeViewState
         SnapModeIndex = snapModeIndex;
         AimBindingIndex = aimBindingIndex;
         FireBindingIndex = fireBindingIndex;
+        TouchpadLeftBindingIndex = touchpadLeftBindingIndex;
+        TouchpadRightBindingIndex = touchpadRightBindingIndex;
         SnapOuterRange = outerRange;
         SnapInnerRange = innerRange;
         SnapOuterStrength = outerStrength;

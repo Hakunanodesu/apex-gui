@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
@@ -36,6 +37,9 @@ internal readonly record struct ControllerOutputState(
 
 internal sealed class ViGEmMappingWorker : IDisposable
 {
+    private const uint InputKeyboard = 1;
+    private const uint KeyEventFKeyUp = 0x0002;
+    private const ushort VkOemPlus = 0xBB;
     private const double TargetLoopIntervalMs = 1000.0 / 500.0;
     private static readonly TimeSpan SdlInputFailureGrace = TimeSpan.FromSeconds(1);
     private const int TriggerTimingUnitMs = 20;
@@ -249,6 +253,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
         DateTime? releasePulseUntil = null;
         DateTime? sdlInputFailureSinceUtc = null;
         ControllerOutputState? lastSubmittedState = null;
+        var keyboardEqualsInjectedPressed = false;
         while (_running)
         {
             WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetLoopIntervalMs);
@@ -272,6 +277,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
             if (sdlWorker is null || !isConnected || !requestedEnabled || !hasSelectedGamepad)
             {
+                UpdateKeyboardEqualsInjection(false, ref keyboardEqualsInjectedPressed);
                 sdlInputFailureSinceUtc = null;
                 lastSubmittedState = null;
                 lock (_sync)
@@ -290,6 +296,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 {
                     continue;
                 }
+
+                UpdateKeyboardEqualsInjection(false, ref keyboardEqualsInjectedPressed);
 
                 lock (_sync)
                 {
@@ -311,6 +319,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
             var isRapidFireWeapon = ContainsWeaponName(aimAssistConfigState.RapidFireWeapons, recognizedWeaponName);
             var isReleaseFireWeapon = ContainsWeaponName(aimAssistConfigState.ReleaseFireWeapons, recognizedWeaponName);
             var fireBindingIndex = aimAssistConfigState.FireBindingIndex;
+            var touchpadLeftBindingIndex = aimAssistConfigState.TouchpadLeftBindingIndex;
+            var touchpadRightBindingIndex = aimAssistConfigState.TouchpadRightBindingIndex;
             var firePressed = GamepadBindingCatalog.IsPressed(fireBindingIndex, input);
 
             short mappedLeftTrigger = input.LeftTrigger;
@@ -393,6 +403,66 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 }
             }
 
+            void OverlayBindingPressed(int bindingIndex, bool pressed)
+            {
+                if (!pressed)
+                {
+                    return;
+                }
+
+                switch (bindingIndex)
+                {
+                    case 0:
+                        mappedLeftTrigger = short.MaxValue;
+                        break;
+                    case 1:
+                        mappedRightTrigger = short.MaxValue;
+                        break;
+                    case 2:
+                        mappedLeftShoulder = true;
+                        break;
+                    case 3:
+                        mappedRightShoulder = true;
+                        break;
+                    case 4:
+                        mappedA = true;
+                        break;
+                    case 5:
+                        mappedB = true;
+                        break;
+                    case 6:
+                        mappedX = true;
+                        break;
+                    case 7:
+                        mappedY = true;
+                        break;
+                    case 8:
+                        mappedLeftThumb = true;
+                        break;
+                    case 9:
+                        mappedRightThumb = true;
+                        break;
+                    case 10:
+                        mappedDpadUp = true;
+                        break;
+                    case 11:
+                        mappedDpadDown = true;
+                        break;
+                    case 12:
+                        mappedDpadLeft = true;
+                        break;
+                    case 13:
+                        mappedDpadRight = true;
+                        break;
+                    case 14:
+                        mappedBack = true;
+                        break;
+                    case 15:
+                        mappedStart = true;
+                        break;
+                }
+            }
+
             if (isReleaseFireWeapon)
             {
                 if (firePressed)
@@ -454,6 +524,32 @@ internal sealed class ViGEmMappingWorker : IDisposable
             {
                 rapidHigh = false;
                 rapidLastToggleAt = DateTime.UtcNow;
+            }
+
+            var hasTouchpadPoint = input.TouchpadPressed && input.TouchpadFingerCount > 0;
+            if (hasTouchpadPoint)
+            {
+                var isLeftTouchRegion = input.TouchpadX < 0.5f;
+                var touchpadLeftPressed = isLeftTouchRegion;
+                var touchpadRightPressed = !isLeftTouchRegion;
+                var shouldPressKeyboardEquals =
+                    (touchpadLeftPressed && GamepadBindingCatalog.IsKeyboardEqualsBinding(touchpadLeftBindingIndex)) ||
+                    (touchpadRightPressed && GamepadBindingCatalog.IsKeyboardEqualsBinding(touchpadRightBindingIndex));
+                UpdateKeyboardEqualsInjection(shouldPressKeyboardEquals, ref keyboardEqualsInjectedPressed);
+
+                if (!GamepadBindingCatalog.IsKeyboardEqualsBinding(touchpadLeftBindingIndex))
+                {
+                    OverlayBindingPressed(touchpadLeftBindingIndex, touchpadLeftPressed);
+                }
+
+                if (!GamepadBindingCatalog.IsKeyboardEqualsBinding(touchpadRightBindingIndex))
+                {
+                    OverlayBindingPressed(touchpadRightBindingIndex, touchpadRightPressed);
+                }
+            }
+            else
+            {
+                UpdateKeyboardEqualsInjection(false, ref keyboardEqualsInjectedPressed);
             }
 
             var aimAssistResult = _smartCoreAimAssistService.Evaluate(new SmartCoreAimAssistContext(
@@ -549,6 +645,63 @@ internal sealed class ViGEmMappingWorker : IDisposable
             }
 
         }
+
+        if (keyboardEqualsInjectedPressed)
+        {
+            UpdateKeyboardEqualsInjection(false, ref keyboardEqualsInjectedPressed);
+        }
+    }
+
+    private void UpdateKeyboardEqualsInjection(bool shouldPress, ref bool isInjectedPressed)
+    {
+        if (isInjectedPressed == shouldPress)
+        {
+            return;
+        }
+
+        if (!TrySendKeyboardEquals(shouldPress, out var error))
+        {
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                lock (_sync)
+                {
+                    _lastError = error;
+                }
+            }
+            return;
+        }
+
+        isInjectedPressed = shouldPress;
+    }
+
+    private static bool TrySendKeyboardEquals(bool keyDown, out string? error)
+    {
+        var input = new INPUT
+        {
+            Type = InputKeyboard,
+            Data = new InputData
+            {
+                Keyboard = new KEYBDINPUT
+                {
+                    VirtualKey = VkOemPlus,
+                    ScanCode = 0,
+                    Flags = keyDown ? 0u : KeyEventFKeyUp,
+                    Time = 0,
+                    ExtraInfo = UIntPtr.Zero
+                }
+            }
+        };
+
+        var sent = SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
+        if (sent == 1)
+        {
+            error = null;
+            return true;
+        }
+
+        var win32Error = Marshal.GetLastWin32Error();
+        error = $"键盘 '=' 注入失败: {win32Error}";
+        return false;
     }
 
     private bool TrySubmitState(
@@ -717,6 +870,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
                a.SnapInnerInterpolationTypeIndex == b.SnapInnerInterpolationTypeIndex &&
                a.AimBindingIndex == b.AimBindingIndex &&
                a.FireBindingIndex == b.FireBindingIndex &&
+               a.TouchpadLeftBindingIndex == b.TouchpadLeftBindingIndex &&
+               a.TouchpadRightBindingIndex == b.TouchpadRightBindingIndex &&
                AreSameList(a.AimSnapWeapons, b.AimSnapWeapons) &&
                AreSameList(a.RapidFireWeapons, b.RapidFireWeapons) &&
                AreSameList(a.ReleaseFireWeapons, b.ReleaseFireWeapons);
@@ -769,6 +924,58 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
             Thread.SpinWait(64);
         }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint inputCount, INPUT[] inputs, int size);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct INPUT
+    {
+        public uint Type;
+        public InputData Data;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    private struct InputData
+    {
+        [FieldOffset(0)]
+        public KEYBDINPUT Keyboard;
+
+        [FieldOffset(0)]
+        public MOUSEINPUT Mouse;
+
+        [FieldOffset(0)]
+        public HARDWAREINPUT Hardware;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KEYBDINPUT
+    {
+        public ushort VirtualKey;
+        public ushort ScanCode;
+        public uint Flags;
+        public uint Time;
+        public UIntPtr ExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MOUSEINPUT
+    {
+        public int Dx;
+        public int Dy;
+        public uint MouseData;
+        public uint DwFlags;
+        public uint Time;
+        public UIntPtr ExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HARDWAREINPUT
+    {
+        public uint Msg;
+        public ushort ParamL;
+        public ushort ParamH;
     }
 }
 

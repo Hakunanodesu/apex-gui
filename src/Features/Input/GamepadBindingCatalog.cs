@@ -22,9 +22,19 @@
         "Start"
     };
 
+    public const string KeyboardEqualsBindingName = "键盘 =";
+
+    public static int KeyboardEqualsPseudoBindingIndex => Options.Length;
+
     public static int DefaultAimIndex => ResolveIndex("左扳机", 0);
 
     public static int DefaultFireIndex => ResolveIndex("右扳机", 1);
+
+    public static int DefaultTouchpadLeftIndex => ResolveIndex("Back", 14);
+
+    public static int DefaultTouchpadRightIndex => ResolveIndex("Start", 15);
+
+    public static bool IsKeyboardEqualsBinding(int bindingIndex) => bindingIndex == KeyboardEqualsPseudoBindingIndex;
 
     public static int ResolveIndex(string? bindingName, int fallbackIndex)
     {

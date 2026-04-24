@@ -220,8 +220,8 @@ public sealed partial class MainWindow
 
         DrawSnapSettingsSection(metrics, topPanelStyle);
         DrawSnapCurveSection(topPanelStyle);
-        DrawKeyBindingSection(metrics.ReserveWidth);
-        DrawSnapModeSection(metrics.ReserveWidth);
+        DrawKeyBindingSection(metrics.ReserveWidth, topPanelStyle);
+        DrawSnapModeSection(metrics.ReserveWidth, topPanelStyle);
         DrawSpecialWeaponLogicSection(topPanelStyle);
 
         ImGui.EndTable();
@@ -496,15 +496,15 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
+        // ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("吸附曲线预览");
         ImGui.TableSetColumnIndex(1);
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
+        // ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         DrawSnapCurvePreview();
     }
 
-    private void DrawKeyBindingSection(float reserveWidth)
+    private void DrawKeyBindingSection(float reserveWidth, ImGuiStylePtr topPanelStyle)
     {
         ImGui.TableNextRow();
         ImGui.TableNextRow();
@@ -514,10 +514,9 @@ public sealed partial class MainWindow
         ImGui.TextUnformatted("按键绑定");
 
         ImGui.TableSetColumnIndex(1);
-        var style = ImGui.GetStyle();
         var availableWidth = MathF.Max(0f, ImGui.GetContentRegionAvail().X - reserveWidth);
         var labelWidth = ImGui.CalcTextSize("触摸板（左）").X;
-        var totalSpacingWidth = style.ItemSpacing.X * 3f;
+        var totalSpacingWidth = topPanelStyle.ItemSpacing.X * 3f;
         var comboWidth = MathF.Max(90f, (availableWidth - labelWidth * 2f - totalSpacingWidth) / 2f);
         _homeViewState.AimBindingIndex = _homeViewState.AimBindingIndex >= 0 && _homeViewState.AimBindingIndex < GamepadBindingCatalog.Options.Length
             ? _homeViewState.AimBindingIndex
@@ -525,9 +524,16 @@ public sealed partial class MainWindow
         _homeViewState.FireBindingIndex = _homeViewState.FireBindingIndex >= 0 && _homeViewState.FireBindingIndex < GamepadBindingCatalog.Options.Length
             ? _homeViewState.FireBindingIndex
             : GamepadBindingCatalog.DefaultFireIndex;
+        _homeViewState.TouchpadLeftBindingIndex = _homeViewState.TouchpadLeftBindingIndex >= 0 && _homeViewState.TouchpadLeftBindingIndex < TouchpadBindingOptions.Length
+            ? _homeViewState.TouchpadLeftBindingIndex
+            : GamepadBindingCatalog.DefaultTouchpadLeftIndex;
+        _homeViewState.TouchpadRightBindingIndex = _homeViewState.TouchpadRightBindingIndex >= 0 && _homeViewState.TouchpadRightBindingIndex < TouchpadBindingOptions.Length
+            ? _homeViewState.TouchpadRightBindingIndex
+            : GamepadBindingCatalog.DefaultTouchpadRightIndex;
         var disableBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.Options.Length == 0;
+        var disableTouchpadBindingSelection = _configFiles.Count == 0 || TouchpadBindingOptions.Length == 0;
 
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - style.CellPadding.Y);
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         if (ImGui.BeginTable(
                 "##HomeKeyBindingInlineTable",
                 4,
@@ -609,9 +615,26 @@ public sealed partial class MainWindow
 
             ImGui.TableSetColumnIndex(1);
             ImGui.SetNextItemWidth(comboWidth);
-            ImGui.BeginDisabled();
-            if (ImGui.BeginCombo("##HomeTouchpadLeftBindingCombo", "占位"))
+            var selectedTouchpadLeftLabel = TouchpadBindingOptions[_homeViewState.TouchpadLeftBindingIndex];
+            ImGui.BeginDisabled(disableTouchpadBindingSelection);
+            if (ImGui.BeginCombo("##HomeTouchpadLeftBindingCombo", selectedTouchpadLeftLabel))
             {
+                for (var i = 0; i < TouchpadBindingOptions.Length; i++)
+                {
+                    var isSelected = i == _homeViewState.TouchpadLeftBindingIndex;
+                    if (ImGui.Selectable(TouchpadBindingOptions[i], isSelected))
+                    {
+                        _homeViewState.TouchpadLeftBindingIndex = i;
+                        TryWriteStringToCurrentConfig(TouchpadLeftBindingConfigKey, TouchpadBindingOptions[i]);
+                        PushAimAssistConfig();
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
+                    }
+                }
+
                 ImGui.EndCombo();
             }
             ImGui.EndDisabled();
@@ -622,9 +645,26 @@ public sealed partial class MainWindow
 
             ImGui.TableSetColumnIndex(3);
             ImGui.SetNextItemWidth(comboWidth);
-            ImGui.BeginDisabled();
-            if (ImGui.BeginCombo("##HomeTouchpadRightBindingCombo", "占位"))
+            var selectedTouchpadRightLabel = TouchpadBindingOptions[_homeViewState.TouchpadRightBindingIndex];
+            ImGui.BeginDisabled(disableTouchpadBindingSelection);
+            if (ImGui.BeginCombo("##HomeTouchpadRightBindingCombo", selectedTouchpadRightLabel))
             {
+                for (var i = 0; i < TouchpadBindingOptions.Length; i++)
+                {
+                    var isSelected = i == _homeViewState.TouchpadRightBindingIndex;
+                    if (ImGui.Selectable(TouchpadBindingOptions[i], isSelected))
+                    {
+                        _homeViewState.TouchpadRightBindingIndex = i;
+                        TryWriteStringToCurrentConfig(TouchpadRightBindingConfigKey, TouchpadBindingOptions[i]);
+                        PushAimAssistConfig();
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
+                    }
+                }
+
                 ImGui.EndCombo();
             }
             ImGui.EndDisabled();
@@ -633,15 +673,17 @@ public sealed partial class MainWindow
         }
     }
 
-    private void DrawSnapModeSection(float reserveWidth)
+    private void DrawSnapModeSection(float reserveWidth, ImGuiStylePtr topPanelStyle)
     {
         ImGui.TableNextRow();
         ImGui.TableNextRow();
 
         ImGui.TableSetColumnIndex(0);
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("开启吸附方式");
         ImGui.TableSetColumnIndex(1);
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         _homeViewState.SnapModeIndex = _homeViewState.SnapModeIndex >= 0 && _homeViewState.SnapModeIndex < HomeSnapModeOptions.Length ? _homeViewState.SnapModeIndex : 0;
         var selectedSnapModeLabel = HomeSnapModeOptions[_homeViewState.SnapModeIndex];
         var snapComboWidth = ImGui.GetContentRegionAvail().X - reserveWidth;

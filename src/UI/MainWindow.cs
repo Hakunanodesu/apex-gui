@@ -1,5 +1,6 @@
 ﻿using System.Numerics;
 using System.Diagnostics;
+using System.Linq;
 using ImGuiNET;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
@@ -41,12 +42,16 @@ public sealed partial class MainWindow : GameWindow
         "Quadratic Ease-Out",
         "Quadratic Ease-In-Out"
     };
+    private static readonly string[] TouchpadBindingOptions =
+        GamepadBindingCatalog.Options.Concat(new[] { GamepadBindingCatalog.KeyboardEqualsBindingName }).ToArray();
     private const string SpecialWeaponLogicConfigKey = "specialWeaponLogic";
     private const string AimSnapWeaponListConfigKey = "aimSnapWeapons";
     private const string RapidFireWeaponListConfigKey = "rapidFireWeapons";
     private const string ReleaseFireWeaponListConfigKey = "releaseFireWeapons";
     private const string AimBindingConfigKey = "aimBinding";
     private const string FireBindingConfigKey = "fireBinding";
+    private const string TouchpadLeftBindingConfigKey = "touchpadLeftBinding";
+    private const string TouchpadRightBindingConfigKey = "touchpadRightBinding";
     private readonly HomeViewState _homeViewState = new();
     private readonly string[] _specialWeaponNames;
     private bool[] _specialWeaponAimSnapEnabled;
@@ -402,13 +407,18 @@ public sealed partial class MainWindow : GameWindow
             HomeSnapModeOptions,
             SnapInnerInterpolationTypeOptions,
             GamepadBindingCatalog.Options,
+            TouchpadBindingOptions,
             GamepadBindingCatalog.DefaultAimIndex,
-            GamepadBindingCatalog.DefaultFireIndex);
+            GamepadBindingCatalog.DefaultFireIndex,
+            GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+            GamepadBindingCatalog.DefaultTouchpadRightIndex);
         if (!selectionResult.HasConfig)
         {
             _homeViewState.SnapModeIndex = -1;
             _homeViewState.AimBindingIndex = GamepadBindingCatalog.DefaultAimIndex;
             _homeViewState.FireBindingIndex = GamepadBindingCatalog.DefaultFireIndex;
+            _homeViewState.TouchpadLeftBindingIndex = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
+            _homeViewState.TouchpadRightBindingIndex = GamepadBindingCatalog.DefaultTouchpadRightIndex;
             _onnxTopSelectedModelIndex = -1;
             PushAimAssistConfig();
             SyncSmartCoreVisionPipeline();
@@ -418,6 +428,8 @@ public sealed partial class MainWindow : GameWindow
         _homeViewState.SnapModeIndex = selectionResult.SnapModeIndex;
         _homeViewState.AimBindingIndex = selectionResult.AimBindingIndex;
         _homeViewState.FireBindingIndex = selectionResult.FireBindingIndex;
+        _homeViewState.TouchpadLeftBindingIndex = selectionResult.TouchpadLeftBindingIndex;
+        _homeViewState.TouchpadRightBindingIndex = selectionResult.TouchpadRightBindingIndex;
         ApplySpecialWeaponLogicFromCurrentConfig();
         _onnxTopSelectedModelIndex = selectionResult.ModelIndex;
         _homeViewState.ApplySnapConfig(selectionResult.SnapConfig);
@@ -435,6 +447,8 @@ public sealed partial class MainWindow : GameWindow
             0,
             GamepadBindingCatalog.DefaultAimIndex,
             GamepadBindingCatalog.DefaultFireIndex,
+            GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+            GamepadBindingCatalog.DefaultTouchpadRightIndex,
             DefaultSnapOuterRange,
             DefaultSnapInnerRange,
             DefaultSnapOuterStrength,
@@ -724,6 +738,8 @@ protected override void OnResize(ResizeEventArgs e)
             _homeViewState.SnapInnerInterpolationTypeIndex,
             _homeViewState.AimBindingIndex,
             _homeViewState.FireBindingIndex,
+            _homeViewState.TouchpadLeftBindingIndex,
+            _homeViewState.TouchpadRightBindingIndex,
             BuildEnabledWeaponNameList(_specialWeaponAimSnapEnabled),
             BuildEnabledWeaponNameList(_specialWeaponRapidFireEnabled),
             BuildEnabledWeaponNameList(_specialWeaponReleaseFireEnabled));

@@ -41,6 +41,8 @@ internal readonly struct SmartCoreAimAssistConfigState
     public readonly int SnapInnerInterpolationTypeIndex;
     public readonly int AimBindingIndex;
     public readonly int FireBindingIndex;
+    public readonly int TouchpadLeftBindingIndex;
+    public readonly int TouchpadRightBindingIndex;
     public readonly string[] AimSnapWeapons;
     public readonly string[] RapidFireWeapons;
     public readonly string[] ReleaseFireWeapons;
@@ -60,6 +62,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         int snapInnerInterpolationTypeIndex,
         int aimBindingIndex,
         int fireBindingIndex,
+        int touchpadLeftBindingIndex,
+        int touchpadRightBindingIndex,
         string[] aimSnapWeapons,
         string[] rapidFireWeapons,
         string[] releaseFireWeapons)
@@ -78,6 +82,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         SnapInnerInterpolationTypeIndex = snapInnerInterpolationTypeIndex;
         AimBindingIndex = aimBindingIndex;
         FireBindingIndex = fireBindingIndex;
+        TouchpadLeftBindingIndex = touchpadLeftBindingIndex;
+        TouchpadRightBindingIndex = touchpadRightBindingIndex;
         AimSnapWeapons = aimSnapWeapons;
         RapidFireWeapons = rapidFireWeapons;
         ReleaseFireWeapons = releaseFireWeapons;
@@ -98,6 +104,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         0,
         GamepadBindingCatalog.DefaultAimIndex,
         GamepadBindingCatalog.DefaultFireIndex,
+        GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+        GamepadBindingCatalog.DefaultTouchpadRightIndex,
         Array.Empty<string>(),
         Array.Empty<string>(),
         Array.Empty<string>());
