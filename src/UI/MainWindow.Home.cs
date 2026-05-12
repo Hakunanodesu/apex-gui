@@ -1,10 +1,35 @@
 using ImGuiNET;
 using System.Numerics;
+using Keys = OpenTK.Windowing.GraphicsLibraryFramework.Keys;
 
 public sealed partial class MainWindow
 {
+    private enum TouchpadKeyCaptureTarget
+    {
+        None = 0,
+        Left = 1,
+        Right = 2,
+        Voice = 3
+    }
+
     private const float SnapFloatStep = 0.01f;
     private const string SnapFloatFormat = "%.2f";
+#if DEBUG
+    private static readonly TimeSpan DebugTouchpadTestCountdown = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan DebugTouchpadBurstDuration = TimeSpan.FromSeconds(3);
+
+    private sealed class DebugTouchpadTestState
+    {
+        public DateTime CountdownEndsAtUtc;
+        public DateTime BurstEndsAtUtc;
+        public bool IsActive;
+        public bool BurstStarted;
+        public string CustomKey = string.Empty;
+    }
+
+    private readonly DebugTouchpadTestState _leftDebugTouchpadTestState = new();
+    private readonly DebugTouchpadTestState _rightDebugTouchpadTestState = new();
+#endif
 
     private readonly record struct HomeLayoutMetrics(
         float BaseTextWidth,
@@ -25,7 +50,7 @@ public sealed partial class MainWindow
         RefreshSmartCoreState();
 
         var topPanelStyle = ImGui.GetStyle();
-        var baseTextWidth = ImGui.CalcTextSize("Ò»").X;
+        var baseTextWidth = ImGui.CalcTextSize("ä¸€").X;
         var addButtonWidth = baseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
         var deleteButtonWidth = baseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
         var reserveWidth = addButtonWidth + deleteButtonWidth + topPanelStyle.ItemSpacing.X * 2f;
@@ -65,10 +90,10 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÒÀÀµ×´Ì¬");
+        ImGui.TextUnformatted("ä¾èµ–çŠ¶æ€");
         ImGui.TableSetColumnIndex(1);
 
-        var vigemActionLabel = vigemReady ? "ÖØÐÂ°²×°" : "°²×°";
+        var vigemActionLabel = vigemReady ? "é‡æ–°å®‰è£…" : "å®‰è£…";
         var gamepads = GetConnectedGamepadOptions();
         var hasGamepads = gamepads.Length > 0;
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
@@ -78,17 +103,17 @@ public sealed partial class MainWindow
             return;
         }
 
-        ImGui.TableSetupColumn("##DepName", ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("ViGemBus Çý¶¯").X);
+        ImGui.TableSetupColumn("##DepName", ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("ViGemBus é©±åŠ¨").X);
         ImGui.TableSetupColumn("##DepState", ImGuiTableColumnFlags.WidthFixed, metrics.BaseTextWidth * 3f);
         ImGui.TableSetupColumn("##DepAction", ImGuiTableColumnFlags.WidthStretch);
 
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ViGemBus Çý¶¯");
+        ImGui.TextUnformatted("ViGemBus é©±åŠ¨");
         ImGui.TableSetColumnIndex(1);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted(vigemReady ? "ÒÑ¾ÍÐ÷" : "Î´¾ÍÐ÷");
+        ImGui.TextUnformatted(vigemReady ? "å·²å°±ç»ª" : "æœªå°±ç»ª");
         ImGui.TableSetColumnIndex(2);
         if (ImGui.Button(vigemActionLabel))
         {
@@ -99,10 +124,10 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÊäÈëÉè±¸");
+        ImGui.TextUnformatted("è¾“å…¥è®¾å¤‡");
         ImGui.TableSetColumnIndex(1);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted(hasGamepads ? "ÒÑ¾ÍÐ÷" : "Î´¾ÍÐ÷");
+        ImGui.TextUnformatted(hasGamepads ? "å·²å°±ç»ª" : "æœªå°±ç»ª");
         ImGui.TableSetColumnIndex(2);
         var gamepadIndexBeforeUi = _homeSelectedGamepadIndex;
         var inputRefreshButtonWidth = metrics.BaseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
@@ -113,7 +138,7 @@ public sealed partial class MainWindow
             ApplySelectedGamepadSelection();
         }
         ImGui.SameLine();
-        if (ImGui.Button("Ë¢ÐÂ##HomeInputDeviceRefresh", new Vector2(inputRefreshButtonWidth, 0f)))
+        if (ImGui.Button("åˆ·æ–°##HomeInputDeviceRefresh", new Vector2(inputRefreshButtonWidth, 0f)))
         {
             RefreshHomeInputDevices();
         }
@@ -129,14 +154,14 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(0);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÅäÖÃÑ¡Ôñ");
+        ImGui.TextUnformatted("é…ç½®é€‰æ‹©");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         var configComboWidth = ImGui.GetContentRegionAvail().X - metrics.ReserveWidth;
         ImGui.BeginDisabled(disableConfigSelection);
         DrawConfigFileCombo("##TopConfigCombo", configComboWidth);
         ImGui.SameLine();
-        if (ImGui.Button("Ìí¼Ó", new Vector2(metrics.AddButtonWidth, 0f)))
+        if (ImGui.Button("æ·»åŠ ", new Vector2(metrics.AddButtonWidth, 0f)))
         {
             _homeViewState.OpenAddModal();
         }
@@ -144,7 +169,7 @@ public sealed partial class MainWindow
         ImGui.SameLine();
         if (_configFiles.Count > 0)
         {
-            if (ImGui.Button("É¾³ý", new Vector2(metrics.DeleteButtonWidth, 0f)))
+            if (ImGui.Button("åˆ é™¤", new Vector2(metrics.DeleteButtonWidth, 0f)))
             {
                 _homeViewState.OpenDeleteModal(_configFiles[Math.Clamp(_selectedConfigFileIndex, 0, _configFiles.Count - 1)]);
             }
@@ -152,7 +177,7 @@ public sealed partial class MainWindow
         else
         {
             ImGui.BeginDisabled();
-            ImGui.Button("É¾³ý", new Vector2(metrics.DeleteButtonWidth, 0f));
+            ImGui.Button("åˆ é™¤", new Vector2(metrics.DeleteButtonWidth, 0f));
             ImGui.EndDisabled();
         }
         ImGui.EndDisabled();
@@ -164,7 +189,7 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÖÇ»ÛºËÐÄ");
+        ImGui.TextUnformatted("æ™ºæ…§æ ¸å¿ƒ");
         ImGui.TableSetColumnIndex(1);
         ImGui.BeginDisabled(!_smartCoreMappingState.IsDependenciesReady);
         var requestedSmartCoreEnabled = _smartCoreMappingState.RequestedEnabled;
@@ -184,7 +209,7 @@ public sealed partial class MainWindow
         ImGui.SameLine();
         var smartCorePreviewWindowOpen = IsSmartCorePreviewWindowOpen();
         ImGui.BeginDisabled(!_smartCoreMappingState.RequestedEnabled || smartCorePreviewWindowOpen);
-        if (ImGui.Button("Ô¤ÀÀ##SmartCorePreviewButton"))
+        if (ImGui.Button("é¢„è§ˆ##SmartCorePreviewButton"))
         {
             OpenSmartCorePreviewWindow();
         }
@@ -206,13 +231,13 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Ñ¡ÔñÄ£ÐÍ");
+        ImGui.TextUnformatted("é€‰æ‹©æ¨¡åž‹");
         ImGui.TableSetColumnIndex(1);
         var modelComboWidth = ImGui.GetContentRegionAvail().X - metrics.ReserveWidth;
         ImGui.BeginDisabled(_smartCoreMappingState.IsEnabled);
         DrawHomeModelCombo("##HomeModelCombo", modelComboWidth);
         ImGui.SameLine();
-        if (ImGui.Button("Ë¢ÐÂ", new Vector2(refreshButtonWidth, 0f)))
+        if (ImGui.Button("åˆ·æ–°", new Vector2(refreshButtonWidth, 0f)))
         {
             RefreshOnnxModels();
         }
@@ -233,7 +258,7 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Îü¸½²ÎÊýÉè¶¨");
+        ImGui.TextUnformatted("å¸é™„å‚æ•°è®¾å®š");
         ImGui.TableSetColumnIndex(1);
 
         var selectedModelSize = _onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count
@@ -297,7 +322,7 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÄÚÈ¦·¶Î§");
+        ImGui.TextUnformatted("å†…åœˆèŒƒå›´");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetNextItemWidth(layout.RangeInputWidth);
         var snapInnerRange = _homeViewState.SnapInnerRange;
@@ -310,7 +335,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(2);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÍâÈ¦·¶Î§");
+        ImGui.TextUnformatted("å¤–åœˆèŒƒå›´");
         ImGui.TableSetColumnIndex(3);
         ImGui.SetNextItemWidth(layout.RangeInputWidth);
         var snapOuterRange = _homeViewState.SnapOuterRange;
@@ -327,7 +352,7 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(5);
         var snapRangePreviewWindowOpen = IsSnapRangePreviewWindowOpen();
         ImGui.BeginDisabled(snapRangePreviewWindowOpen);
-        if (ImGui.Button("·¶Î§Ô¤ÀÀ##SnapRangePreviewWindowButton", new Vector2(layout.ExtraInputWidth, 0f)))
+        if (ImGui.Button("èŒƒå›´é¢„è§ˆ##SnapRangePreviewWindowButton", new Vector2(layout.ExtraInputWidth, 0f)))
         {
             OpenSnapRangePreviewWindow();
         }
@@ -341,7 +366,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÄÚÈ¦Ç¿¶È");
+        ImGui.TextUnformatted("å†…åœˆå¼ºåº¦");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetNextItemWidth(layout.StrengthInputWidth);
         DrawClampedConfigFloatInput(
@@ -354,7 +379,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(2);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÍâÈ¦Ç¿¶È");
+        ImGui.TextUnformatted("å¤–åœˆå¼ºåº¦");
         ImGui.TableSetColumnIndex(3);
         ImGui.SetNextItemWidth(layout.StrengthInputWidth);
         DrawClampedConfigFloatInput(
@@ -367,7 +392,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(4);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÆðÊ¼Ç¿¶È");
+        ImGui.TextUnformatted("èµ·å§‹å¼ºåº¦");
         ImGui.TableSetColumnIndex(5);
         ImGui.SetNextItemWidth(layout.ExtraInputWidth);
         DrawClampedConfigFloatInput(
@@ -386,7 +411,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÑüÉäÇ¿¶ÈÏµÊý");
+        ImGui.TextUnformatted("è…°å°„å¼ºåº¦ç³»æ•°");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetNextItemWidth(layout.ExtraInputWidth);
         DrawClampedConfigFloatInput(
@@ -399,7 +424,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(2);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("´¹Ö±Ç¿¶ÈÏµÊý");
+        ImGui.TextUnformatted("åž‚ç›´å¼ºåº¦ç³»æ•°");
         ImGui.TableSetColumnIndex(3);
         ImGui.SetNextItemWidth(layout.ExtraInputWidth);
         DrawClampedConfigFloatInput(
@@ -412,7 +437,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(4);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Îü¸½¸ß¶È");
+        ImGui.TextUnformatted("å¸é™„é«˜åº¦");
         ImGui.TableSetColumnIndex(5);
         ImGui.SetNextItemWidth(layout.ExtraInputWidth);
         DrawClampedConfigFloatInput(
@@ -441,7 +466,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÄÚÈ¦²åÖµÀàÐÍ");
+        ImGui.TextUnformatted("å†…åœˆæ’å€¼ç±»åž‹");
 
         ImGui.TableSetColumnIndex(1);
         var interpolationComboWidth = MathF.Max(90f, ImGui.GetContentRegionAvail().X - reserveWidth);
@@ -498,7 +523,7 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(0);
         // ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("Îü¸½ÇúÏßÔ¤ÀÀ");
+        ImGui.TextUnformatted("å¸é™„æ›²çº¿é¢„è§ˆ");
         ImGui.TableSetColumnIndex(1);
         // ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         DrawSnapCurvePreview();
@@ -506,52 +531,98 @@ public sealed partial class MainWindow
 
     private void DrawKeyBindingSection(float reserveWidth, ImGuiStylePtr topPanelStyle)
     {
+        TryCaptureTouchpadCustomKey();
+#if DEBUG
+        UpdateDebugTouchpadTestState(_leftDebugTouchpadTestState);
+        UpdateDebugTouchpadTestState(_rightDebugTouchpadTestState);
+#endif
+
         ImGui.TableNextRow();
         ImGui.TableNextRow();
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("°´¼ü°ó¶¨");
+        ImGui.TextUnformatted("æŒ‰é”®ç»‘å®š");
 
         ImGui.TableSetColumnIndex(1);
         var availableWidth = MathF.Max(0f, ImGui.GetContentRegionAvail().X - reserveWidth);
-        var labelWidth = ImGui.CalcTextSize("´¥Ãþ°å£¨×ó£©").X;
-        var totalSpacingWidth = topPanelStyle.ItemSpacing.X * 3f;
-        var comboWidth = MathF.Max(90f, (availableWidth - labelWidth * 2f - totalSpacingWidth) / 2f);
+        var labelWidth = ImGui.CalcTextSize("è§¦æ‘¸æ¿ï¼ˆå·¦ï¼‰").X;
+        var minBindingContentWidth = 140f;
         _homeViewState.AimBindingIndex = _homeViewState.AimBindingIndex >= 0 && _homeViewState.AimBindingIndex < GamepadBindingCatalog.Options.Length
             ? _homeViewState.AimBindingIndex
             : GamepadBindingCatalog.DefaultAimIndex;
         _homeViewState.FireBindingIndex = _homeViewState.FireBindingIndex >= 0 && _homeViewState.FireBindingIndex < GamepadBindingCatalog.Options.Length
             ? _homeViewState.FireBindingIndex
             : GamepadBindingCatalog.DefaultFireIndex;
+        _homeViewState.VoiceBindingIndex = _homeViewState.VoiceBindingIndex >= 0 && _homeViewState.VoiceBindingIndex < GamepadBindingCatalog.Options.Length
+            ? _homeViewState.VoiceBindingIndex
+            : GamepadBindingCatalog.DefaultTouchpadLeftIndex;
         _homeViewState.TouchpadLeftBindingIndex = _homeViewState.TouchpadLeftBindingIndex >= 0 && _homeViewState.TouchpadLeftBindingIndex < TouchpadBindingOptions.Length
             ? _homeViewState.TouchpadLeftBindingIndex
             : GamepadBindingCatalog.DefaultTouchpadLeftIndex;
         _homeViewState.TouchpadRightBindingIndex = _homeViewState.TouchpadRightBindingIndex >= 0 && _homeViewState.TouchpadRightBindingIndex < TouchpadBindingOptions.Length
             ? _homeViewState.TouchpadRightBindingIndex
             : GamepadBindingCatalog.DefaultTouchpadRightIndex;
+        if (!GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(_homeViewState.TouchpadLeftCustomKey, out _, out var normalizedLeftCustomKey))
+        {
+            normalizedLeftCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
+        }
+
+        if (!GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(_homeViewState.TouchpadRightCustomKey, out _, out var normalizedRightCustomKey))
+        {
+            normalizedRightCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
+        }
+        if (!GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(_homeViewState.VoiceCustomKey, out _, out var normalizedVoiceCustomKey))
+        {
+            normalizedVoiceCustomKey = DefaultVoiceCustomKeyName;
+        }
+
+        _homeViewState.TouchpadLeftCustomKey = normalizedLeftCustomKey;
+        _homeViewState.TouchpadRightCustomKey = normalizedRightCustomKey;
+        _homeViewState.VoiceCustomKey = normalizedVoiceCustomKey;
         var disableBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.Options.Length == 0;
         var disableTouchpadBindingSelection = _configFiles.Count == 0 || TouchpadBindingOptions.Length == 0;
+        var touchpadCaptureButtonWidth = ImGui.CalcTextSize("PrintScreen").X + topPanelStyle.FramePadding.X * 2f;
+        var voiceCaptureButtonWidth = touchpadCaptureButtonWidth;
+        var touchpadDebugTriggerButtonWidth = 0f;
+#if DEBUG
+        touchpadDebugTriggerButtonWidth = ImGui.CalcTextSize("è¿žç‚¹ä¸­").X + topPanelStyle.FramePadding.X * 2f;
+#endif
+        var fromLabelColumnWidth = ImGui.CalcTextSize("ä»Ž").X;
+        var toLabelColumnWidth = ImGui.CalcTextSize("æ˜ å°„åˆ°").X;
+        var actionColumnMinWidth = touchpadCaptureButtonWidth;
+#if DEBUG
+        actionColumnMinWidth += topPanelStyle.ItemSpacing.X + touchpadDebugTriggerButtonWidth;
+#endif
+        var unifiedComboWidth = MathF.Max(90f, availableWidth - fromLabelColumnWidth - toLabelColumnWidth - actionColumnMinWidth);
+        var leftCustomSelected = GamepadBindingCatalog.IsKeyboardCustomBinding(_homeViewState.TouchpadLeftBindingIndex);
+        var rightCustomSelected = GamepadBindingCatalog.IsKeyboardCustomBinding(_homeViewState.TouchpadRightBindingIndex);
+        if ((_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Left && !leftCustomSelected) ||
+            (_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Right && !rightCustomSelected))
+        {
+            CancelTouchpadKeyCapture();
+        }
 
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         if (ImGui.BeginTable(
                 "##HomeKeyBindingInlineTable",
-                4,
-                ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX | ImGuiTableFlags.NoSavedSettings))
+                5,
+                ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoSavedSettings))
         {
-            ImGui.TableSetupColumn("##HomeAimBindingLabelColumn", ImGuiTableColumnFlags.WidthFixed, labelWidth);
-            ImGui.TableSetupColumn("##HomeAimBindingComboColumn", ImGuiTableColumnFlags.WidthFixed, comboWidth);
-            ImGui.TableSetupColumn("##HomeFireBindingLabelColumn", ImGuiTableColumnFlags.WidthFixed, labelWidth);
-            ImGui.TableSetupColumn("##HomeFireBindingComboColumn", ImGuiTableColumnFlags.WidthFixed, comboWidth);
+            ImGui.TableSetupColumn("##HomeBindingLabelColumn", ImGuiTableColumnFlags.WidthFixed, labelWidth);
+            ImGui.TableSetupColumn("##HomeBindingMidLabelColumn", ImGuiTableColumnFlags.WidthFixed, fromLabelColumnWidth);
+            ImGui.TableSetupColumn("##HomeBindingComboColumn", ImGuiTableColumnFlags.WidthFixed, unifiedComboWidth);
+            ImGui.TableSetupColumn("##HomeBindingToLabelColumn", ImGuiTableColumnFlags.WidthFixed, toLabelColumnWidth);
+            ImGui.TableSetupColumn("##HomeBindingActionColumn", ImGuiTableColumnFlags.WidthStretch);
 
             ImGui.TableNextRow();
 
             ImGui.TableSetColumnIndex(0);
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("Ãé×¼");
+            ImGui.TextUnformatted("çž„å‡†");
 
-            ImGui.TableSetColumnIndex(1);
-            ImGui.SetNextItemWidth(comboWidth);
+            ImGui.TableSetColumnIndex(2);
+            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
             var selectedAimLabel = GamepadBindingCatalog.Options[_homeViewState.AimBindingIndex];
             ImGui.BeginDisabled(disableBindingSelection);
             if (ImGui.BeginCombo("##HomeAimBindingCombo", selectedAimLabel))
@@ -576,12 +647,14 @@ public sealed partial class MainWindow
             }
             ImGui.EndDisabled();
 
-            ImGui.TableSetColumnIndex(2);
+            ImGui.TableNextRow();
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("¿ª»ð");
+            ImGui.TextUnformatted("å¼€ç«");
 
-            ImGui.TableSetColumnIndex(3);
-            ImGui.SetNextItemWidth(comboWidth);
+            ImGui.TableSetColumnIndex(2);
+            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
             var selectedFireLabel = GamepadBindingCatalog.Options[_homeViewState.FireBindingIndex];
             ImGui.BeginDisabled(disableBindingSelection);
             if (ImGui.BeginCombo("##HomeFireBindingCombo", selectedFireLabel))
@@ -608,13 +681,58 @@ public sealed partial class MainWindow
 
             ImGui.TableNextRow();
             ImGui.TableNextRow();
-
             ImGui.TableSetColumnIndex(0);
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("´¥Ãþ°å£¨×ó£©");
+            ImGui.TextUnformatted("è¯­éŸ³");
 
             ImGui.TableSetColumnIndex(1);
-            ImGui.SetNextItemWidth(comboWidth);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("ä»Ž");
+
+            ImGui.TableSetColumnIndex(2);
+            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
+            var selectedVoiceLabel = GamepadBindingCatalog.Options[_homeViewState.VoiceBindingIndex];
+            ImGui.BeginDisabled(disableBindingSelection);
+            if (ImGui.BeginCombo("##HomeVoiceBindingCombo", selectedVoiceLabel))
+            {
+                for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
+                {
+                    var isSelected = i == _homeViewState.VoiceBindingIndex;
+                    if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
+                    {
+                        _homeViewState.VoiceBindingIndex = i;
+                        TryWriteStringToCurrentConfig(VoiceBindingConfigKey, GamepadBindingCatalog.Options[i]);
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
+                    }
+                }
+
+                ImGui.EndCombo();
+            }
+            ImGui.EndDisabled();
+            ImGui.TableSetColumnIndex(3);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("æ˜ å°„åˆ°");
+            ImGui.TableSetColumnIndex(4);
+            ImGui.BeginDisabled(_configFiles.Count == 0 || disableBindingSelection);
+            var voiceButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Voice, _homeViewState.VoiceCustomKey);
+            if (ImGui.Button($"{voiceButtonLabel}###HomeVoiceCustomKeyCaptureButton", new Vector2(voiceCaptureButtonWidth, 0f)))
+            {
+                ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget.Voice);
+            }
+            ImGui.EndDisabled();
+
+            ImGui.TableNextRow();
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("è§¦æ‘¸æ¿ï¼ˆå·¦ï¼‰");
+
+            ImGui.TableSetColumnIndex(2);
+            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
             var selectedTouchpadLeftLabel = TouchpadBindingOptions[_homeViewState.TouchpadLeftBindingIndex];
             ImGui.BeginDisabled(disableTouchpadBindingSelection);
             if (ImGui.BeginCombo("##HomeTouchpadLeftBindingCombo", selectedTouchpadLeftLabel))
@@ -626,6 +744,10 @@ public sealed partial class MainWindow
                     {
                         _homeViewState.TouchpadLeftBindingIndex = i;
                         TryWriteStringToCurrentConfig(TouchpadLeftBindingConfigKey, TouchpadBindingOptions[i]);
+                        if (!GamepadBindingCatalog.IsKeyboardCustomBinding(i))
+                        {
+                            CancelTouchpadKeyCapture();
+                        }
                         PushAimAssistConfig();
                     }
 
@@ -638,13 +760,33 @@ public sealed partial class MainWindow
                 ImGui.EndCombo();
             }
             ImGui.EndDisabled();
+            ImGui.TableSetColumnIndex(4);
+            ImGui.BeginDisabled(!leftCustomSelected || disableTouchpadBindingSelection);
+            var leftButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Left, _homeViewState.TouchpadLeftCustomKey);
+            if (ImGui.Button($"{leftButtonLabel}###HomeTouchpadLeftCustomKeyCaptureButton", new Vector2(touchpadCaptureButtonWidth, 0f)))
+            {
+                ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget.Left);
+            }
+            ImGui.EndDisabled();
+#if DEBUG
+            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+            var leftDebugTestButtonLabel = BuildDebugTouchpadTestButtonLabel(_leftDebugTouchpadTestState);
+            ImGui.BeginDisabled(!leftCustomSelected || disableTouchpadBindingSelection || _leftDebugTouchpadTestState.IsActive);
+            if (ImGui.Button($"{leftDebugTestButtonLabel}###HomeTouchpadLeftCustomKeyTestButton", new Vector2(touchpadDebugTriggerButtonWidth, 0f)))
+            {
+                StartDebugTouchpadTest(_leftDebugTouchpadTestState, _homeViewState.TouchpadLeftCustomKey);
+            }
+            ImGui.EndDisabled();
+#endif
+
+            ImGui.TableNextRow();
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("è§¦æ‘¸æ¿ï¼ˆå³ï¼‰");
 
             ImGui.TableSetColumnIndex(2);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("´¥Ãþ°å£¨ÓÒ£©");
-
-            ImGui.TableSetColumnIndex(3);
-            ImGui.SetNextItemWidth(comboWidth);
+            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
             var selectedTouchpadRightLabel = TouchpadBindingOptions[_homeViewState.TouchpadRightBindingIndex];
             ImGui.BeginDisabled(disableTouchpadBindingSelection);
             if (ImGui.BeginCombo("##HomeTouchpadRightBindingCombo", selectedTouchpadRightLabel))
@@ -656,6 +798,10 @@ public sealed partial class MainWindow
                     {
                         _homeViewState.TouchpadRightBindingIndex = i;
                         TryWriteStringToCurrentConfig(TouchpadRightBindingConfigKey, TouchpadBindingOptions[i]);
+                        if (!GamepadBindingCatalog.IsKeyboardCustomBinding(i))
+                        {
+                            CancelTouchpadKeyCapture();
+                        }
                         PushAimAssistConfig();
                     }
 
@@ -668,9 +814,183 @@ public sealed partial class MainWindow
                 ImGui.EndCombo();
             }
             ImGui.EndDisabled();
+            ImGui.TableSetColumnIndex(4);
+            ImGui.BeginDisabled(!rightCustomSelected || disableTouchpadBindingSelection);
+            var rightButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Right, _homeViewState.TouchpadRightCustomKey);
+            if (ImGui.Button($"{rightButtonLabel}###HomeTouchpadRightCustomKeyCaptureButton", new Vector2(touchpadCaptureButtonWidth, 0f)))
+            {
+                ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget.Right);
+            }
+            ImGui.EndDisabled();
+#if DEBUG
+            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+            var rightDebugTestButtonLabel = BuildDebugTouchpadTestButtonLabel(_rightDebugTouchpadTestState);
+            ImGui.BeginDisabled(!rightCustomSelected || disableTouchpadBindingSelection || _rightDebugTouchpadTestState.IsActive);
+            if (ImGui.Button($"{rightDebugTestButtonLabel}###HomeTouchpadRightCustomKeyTestButton", new Vector2(touchpadDebugTriggerButtonWidth, 0f)))
+            {
+                StartDebugTouchpadTest(_rightDebugTouchpadTestState, _homeViewState.TouchpadRightCustomKey);
+            }
+            ImGui.EndDisabled();
+#endif
 
             ImGui.EndTable();
         }
+    }
+
+#if DEBUG
+    private void StartDebugTouchpadTest(DebugTouchpadTestState state, string customKey)
+    {
+        state.CustomKey = customKey;
+        state.IsActive = true;
+        state.BurstStarted = false;
+        state.CountdownEndsAtUtc = DateTime.UtcNow + DebugTouchpadTestCountdown;
+        state.BurstEndsAtUtc = state.CountdownEndsAtUtc + DebugTouchpadBurstDuration;
+        _smartCoreMappingState.LastError = string.Empty;
+    }
+
+    private void UpdateDebugTouchpadTestState(DebugTouchpadTestState state)
+    {
+        if (!state.IsActive)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        if (!state.BurstStarted)
+        {
+            if (now < state.CountdownEndsAtUtc)
+            {
+                return;
+            }
+
+            var worker = _viGEmMappingWorker;
+            if (worker is null)
+            {
+                _smartCoreMappingState.LastError = "æ˜ å°„çº¿ç¨‹æœªåˆå§‹åŒ–";
+                state.IsActive = false;
+                return;
+            }
+
+            if (!worker.TryStartCustomKeyboardBurst(state.CustomKey, DebugTouchpadBurstDuration, out var error))
+            {
+                if (!string.IsNullOrWhiteSpace(error))
+                {
+                    _smartCoreMappingState.LastError = error;
+                }
+                state.IsActive = false;
+                return;
+            }
+
+            state.BurstStarted = true;
+            return;
+        }
+
+        if (now >= state.BurstEndsAtUtc)
+        {
+            state.IsActive = false;
+            state.BurstStarted = false;
+        }
+    }
+
+    private static string BuildDebugTouchpadTestButtonLabel(DebugTouchpadTestState state)
+    {
+        if (!state.IsActive)
+        {
+            return "æµ‹è¯•";
+        }
+
+        if (state.BurstStarted)
+        {
+            return "è¿žç‚¹ä¸­";
+        }
+
+        var remaining = Math.Max(0.0, (state.CountdownEndsAtUtc - DateTime.UtcNow).TotalSeconds);
+        return $"{Math.Ceiling(remaining)}s";
+    }
+
+#endif
+
+    private void TryCaptureTouchpadCustomKey()
+    {
+        if (_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.None)
+        {
+            return;
+        }
+
+        Keys? captured = null;
+        foreach (var key in GamepadBindingCatalog.CapturableCustomKeyboardKeys)
+        {
+            if (!KeyboardState.IsKeyDown(key) || _touchpadCapturePreviousDownKeys.Contains(key))
+            {
+                continue;
+            }
+
+            captured = key;
+            break;
+        }
+
+        _touchpadCapturePreviousDownKeys.Clear();
+        foreach (var key in GamepadBindingCatalog.CapturableCustomKeyboardKeys)
+        {
+            if (KeyboardState.IsKeyDown(key))
+            {
+                _touchpadCapturePreviousDownKeys.Add(key);
+            }
+        }
+
+        if (!captured.HasValue ||
+            !GamepadBindingCatalog.TryGetCustomKeyboardDisplayName(captured.Value, out var capturedDisplayName))
+        {
+            return;
+        }
+
+        if (_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Left)
+        {
+            _homeViewState.TouchpadLeftCustomKey = capturedDisplayName;
+            TryWriteStringToCurrentConfig(TouchpadLeftCustomKeyConfigKey, capturedDisplayName);
+        }
+        else if (_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Right)
+        {
+            _homeViewState.TouchpadRightCustomKey = capturedDisplayName;
+            TryWriteStringToCurrentConfig(TouchpadRightCustomKeyConfigKey, capturedDisplayName);
+        }
+        else
+        {
+            _homeViewState.VoiceCustomKey = capturedDisplayName;
+            TryWriteStringToCurrentConfig(VoiceCustomKeyConfigKey, capturedDisplayName);
+        }
+
+        CancelTouchpadKeyCapture();
+        PushAimAssistConfig();
+    }
+
+    private void ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget target)
+    {
+        _activeTouchpadKeyCaptureTarget = target;
+        _touchpadCapturePreviousDownKeys.Clear();
+        foreach (var key in GamepadBindingCatalog.CapturableCustomKeyboardKeys)
+        {
+            if (KeyboardState.IsKeyDown(key))
+            {
+                _touchpadCapturePreviousDownKeys.Add(key);
+            }
+        }
+    }
+
+    private void CancelTouchpadKeyCapture()
+    {
+        _activeTouchpadKeyCaptureTarget = TouchpadKeyCaptureTarget.None;
+        _touchpadCapturePreviousDownKeys.Clear();
+    }
+
+    private string BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget target, string customKey)
+    {
+        if (_activeTouchpadKeyCaptureTarget == target)
+        {
+            return "æŒ‰ä¸‹ä»»æ„é”®";
+        }
+
+        return string.IsNullOrWhiteSpace(customKey) ? "ç‚¹å‡»è®¾ç½®" : customKey;
     }
 
     private void DrawSnapModeSection(float reserveWidth, ImGuiStylePtr topPanelStyle)
@@ -681,7 +1001,7 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(0);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("¿ªÆôÎü¸½·½Ê½");
+        ImGui.TextUnformatted("å¼€å¯å¸é™„æ–¹å¼");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         _homeViewState.SnapModeIndex = _homeViewState.SnapModeIndex >= 0 && _homeViewState.SnapModeIndex < HomeSnapModeOptions.Length ? _homeViewState.SnapModeIndex : 0;
@@ -719,7 +1039,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ÌØÊâÎäÆ÷Âß¼­");
+        ImGui.TextUnformatted("ç‰¹æ®Šæ­¦å™¨é€»è¾‘");
         ImGui.TableSetColumnIndex(1);
         ImGui.BeginDisabled(_configFiles.Count == 0);
         var (weaponNameColumnWidth, aimSnapColumnWidth, rapidFireColumnWidth, releaseFireColumnWidth) = MeasureSpecialWeaponColumnWidths();
@@ -730,10 +1050,10 @@ public sealed partial class MainWindow
                 4,
                 ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.BordersOuter | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX))
         {
-            ImGui.TableSetupColumn("ÎäÆ÷Ãû", ImGuiTableColumnFlags.WidthFixed, weaponNameColumnWidth);
-            ImGui.TableSetupColumn("Ãé×¼Îü¸½", ImGuiTableColumnFlags.WidthFixed, aimSnapColumnWidth);
-            ImGui.TableSetupColumn("¿ª»ðÁ¬µã", ImGuiTableColumnFlags.WidthFixed, rapidFireColumnWidth);
-            ImGui.TableSetupColumn("ËÉÊÖ¿ª»ð", ImGuiTableColumnFlags.WidthFixed, releaseFireColumnWidth);
+            ImGui.TableSetupColumn("æ­¦å™¨å", ImGuiTableColumnFlags.WidthFixed, weaponNameColumnWidth);
+            ImGui.TableSetupColumn("çž„å‡†å¸é™„", ImGuiTableColumnFlags.WidthFixed, aimSnapColumnWidth);
+            ImGui.TableSetupColumn("å¼€ç«è¿žç‚¹", ImGuiTableColumnFlags.WidthFixed, rapidFireColumnWidth);
+            ImGui.TableSetupColumn("æ¾æ‰‹å¼€ç«", ImGuiTableColumnFlags.WidthFixed, releaseFireColumnWidth);
             ImGui.TableHeadersRow();
 
             for (var i = 0; i < _specialWeaponNames.Length; i++)
@@ -757,15 +1077,15 @@ public sealed partial class MainWindow
     private (float WeaponNameColumnWidth, float AimSnapColumnWidth, float RapidFireColumnWidth, float ReleaseFireColumnWidth)
         MeasureSpecialWeaponColumnWidths()
     {
-        var weaponNameColumnWidth = ImGui.CalcTextSize("ÎäÆ÷Ãû").X;
+        var weaponNameColumnWidth = ImGui.CalcTextSize("æ­¦å™¨å").X;
         for (var i = 0; i < _specialWeaponNames.Length; i++)
         {
             weaponNameColumnWidth = MathF.Max(weaponNameColumnWidth, ImGui.CalcTextSize(_specialWeaponNames[i]).X);
         }
 
-        var aimSnapColumnWidth = ImGui.CalcTextSize("Ãé×¼Îü¸½").X;
-        var rapidFireColumnWidth = ImGui.CalcTextSize("¿ª»ðÁ¬µã").X;
-        var releaseFireColumnWidth = ImGui.CalcTextSize("ËÉÊÖ¿ª»ð").X;
+        var aimSnapColumnWidth = ImGui.CalcTextSize("çž„å‡†å¸é™„").X;
+        var rapidFireColumnWidth = ImGui.CalcTextSize("å¼€ç«è¿žç‚¹").X;
+        var releaseFireColumnWidth = ImGui.CalcTextSize("æ¾æ‰‹å¼€ç«").X;
         var style = ImGui.GetStyle();
         var cellPadding = style.CellPadding.X * 2f;
         return (

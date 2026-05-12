@@ -3,8 +3,12 @@ internal sealed class HomeViewState
     public int SnapModeIndex { get; set; } = -1;
     public int AimBindingIndex { get; set; } = GamepadBindingCatalog.DefaultAimIndex;
     public int FireBindingIndex { get; set; } = GamepadBindingCatalog.DefaultFireIndex;
+    public int VoiceBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
+    public string VoiceCustomKey { get; set; } = "V";
     public int TouchpadLeftBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
     public int TouchpadRightBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadRightIndex;
+    public string TouchpadLeftCustomKey { get; set; } = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
+    public string TouchpadRightCustomKey { get; set; } = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
     public int SnapOuterRange { get; set; } = 1;
     public float SnapOuterStrength { get; set; }
     public int SnapInnerRange { get; set; } = 1;
@@ -39,8 +43,12 @@ internal sealed class HomeViewState
         int snapModeIndex,
         int aimBindingIndex,
         int fireBindingIndex,
+        int voiceBindingIndex,
+        string voiceCustomKey,
         int touchpadLeftBindingIndex,
         int touchpadRightBindingIndex,
+        string touchpadLeftCustomKey,
+        string touchpadRightCustomKey,
         int outerRange,
         int innerRange,
         float outerStrength,
@@ -54,8 +62,12 @@ internal sealed class HomeViewState
         SnapModeIndex = snapModeIndex;
         AimBindingIndex = aimBindingIndex;
         FireBindingIndex = fireBindingIndex;
+        VoiceBindingIndex = voiceBindingIndex;
+        VoiceCustomKey = voiceCustomKey;
         TouchpadLeftBindingIndex = touchpadLeftBindingIndex;
         TouchpadRightBindingIndex = touchpadRightBindingIndex;
+        TouchpadLeftCustomKey = touchpadLeftCustomKey;
+        TouchpadRightCustomKey = touchpadRightCustomKey;
         SnapOuterRange = outerRange;
         SnapInnerRange = innerRange;
         SnapOuterStrength = outerStrength;

@@ -21,8 +21,12 @@ internal readonly record struct ConfigSelectionResult(
     int ModelIndex,
     int AimBindingIndex,
     int FireBindingIndex,
+    int VoiceBindingIndex,
+    string VoiceCustomKey,
     int TouchpadLeftBindingIndex,
     int TouchpadRightBindingIndex,
+    string TouchpadLeftCustomKey,
+    string TouchpadRightCustomKey,
     SnapConfigState SnapConfig)
 {
     public static ConfigSelectionResult Empty => new(
@@ -32,7 +36,11 @@ internal readonly record struct ConfigSelectionResult(
         GamepadBindingCatalog.DefaultAimIndex,
         GamepadBindingCatalog.DefaultFireIndex,
         GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+        "V",
+        GamepadBindingCatalog.DefaultTouchpadLeftIndex,
         GamepadBindingCatalog.DefaultTouchpadRightIndex,
+        GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
+        GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
         new SnapConfigState());
 }
 
@@ -93,6 +101,8 @@ internal sealed class ConfigStore
         IReadOnlyList<string> touchpadBindingOptions,
         int defaultAimBindingIndex,
         int defaultFireBindingIndex,
+        int defaultVoiceBindingIndex,
+        string defaultVoiceCustomKey,
         int defaultTouchpadLeftBindingIndex,
         int defaultTouchpadRightBindingIndex)
     {
@@ -113,6 +123,13 @@ internal sealed class ConfigStore
             _repository.TryReadString(configPath, "fireBinding"),
             bindingOptions,
             defaultFireBindingIndex);
+        var voiceBindingIndex = ResolveOptionIndex(
+            _repository.TryReadString(configPath, "voiceBinding"),
+            bindingOptions,
+            defaultVoiceBindingIndex);
+        var voiceCustomKey = NormalizeCustomKeyboardKey(
+            _repository.TryReadString(configPath, "voiceCustomKey"),
+            defaultVoiceCustomKey);
         var touchpadLeftBindingIndex = ResolveOptionIndex(
             _repository.TryReadString(configPath, "touchpadLeftBinding"),
             touchpadBindingOptions,
@@ -121,6 +138,8 @@ internal sealed class ConfigStore
             _repository.TryReadString(configPath, "touchpadRightBinding"),
             touchpadBindingOptions,
             defaultTouchpadRightBindingIndex);
+        var touchpadLeftCustomKey = NormalizeCustomKeyboardKey(_repository.TryReadString(configPath, "touchpadLeftCustomKey"), GamepadBindingCatalog.DefaultCustomKeyboardKeyName);
+        var touchpadRightCustomKey = NormalizeCustomKeyboardKey(_repository.TryReadString(configPath, "touchpadRightCustomKey"), GamepadBindingCatalog.DefaultCustomKeyboardKeyName);
         var modelIndex = onnxModels.Count == 0
             ? -1
             : ResolveModelIndex(_repository.TryReadString(configPath, "model"), onnxModels);
@@ -147,8 +166,12 @@ internal sealed class ConfigStore
             modelIndex,
             aimBindingIndex,
             fireBindingIndex,
+            voiceBindingIndex,
+            voiceCustomKey,
             touchpadLeftBindingIndex,
             touchpadRightBindingIndex,
+            touchpadLeftCustomKey,
+            touchpadRightCustomKey,
             snapConfig);
     }
 
@@ -337,6 +360,16 @@ internal sealed class ConfigStore
             {
                 return i;
             }
+        }
+
+        return fallback;
+    }
+
+    private static string NormalizeCustomKeyboardKey(string? key, string fallback)
+    {
+        if (GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(key, out _, out var normalized))
+        {
+            return normalized;
         }
 
         return fallback;

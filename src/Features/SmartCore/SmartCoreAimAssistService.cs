@@ -41,8 +41,12 @@ internal readonly struct SmartCoreAimAssistConfigState
     public readonly int SnapInnerInterpolationTypeIndex;
     public readonly int AimBindingIndex;
     public readonly int FireBindingIndex;
+    public readonly int VoiceBindingIndex;
+    public readonly string VoiceCustomKey;
     public readonly int TouchpadLeftBindingIndex;
     public readonly int TouchpadRightBindingIndex;
+    public readonly string TouchpadLeftCustomKey;
+    public readonly string TouchpadRightCustomKey;
     public readonly string[] AimSnapWeapons;
     public readonly string[] RapidFireWeapons;
     public readonly string[] ReleaseFireWeapons;
@@ -62,8 +66,12 @@ internal readonly struct SmartCoreAimAssistConfigState
         int snapInnerInterpolationTypeIndex,
         int aimBindingIndex,
         int fireBindingIndex,
+        int voiceBindingIndex,
+        string voiceCustomKey,
         int touchpadLeftBindingIndex,
         int touchpadRightBindingIndex,
+        string touchpadLeftCustomKey,
+        string touchpadRightCustomKey,
         string[] aimSnapWeapons,
         string[] rapidFireWeapons,
         string[] releaseFireWeapons)
@@ -82,8 +90,12 @@ internal readonly struct SmartCoreAimAssistConfigState
         SnapInnerInterpolationTypeIndex = snapInnerInterpolationTypeIndex;
         AimBindingIndex = aimBindingIndex;
         FireBindingIndex = fireBindingIndex;
+        VoiceBindingIndex = voiceBindingIndex;
+        VoiceCustomKey = voiceCustomKey;
         TouchpadLeftBindingIndex = touchpadLeftBindingIndex;
         TouchpadRightBindingIndex = touchpadRightBindingIndex;
+        TouchpadLeftCustomKey = touchpadLeftCustomKey;
+        TouchpadRightCustomKey = touchpadRightCustomKey;
         AimSnapWeapons = aimSnapWeapons;
         RapidFireWeapons = rapidFireWeapons;
         ReleaseFireWeapons = releaseFireWeapons;
@@ -105,7 +117,11 @@ internal readonly struct SmartCoreAimAssistConfigState
         GamepadBindingCatalog.DefaultAimIndex,
         GamepadBindingCatalog.DefaultFireIndex,
         GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+        "V",
+        GamepadBindingCatalog.DefaultTouchpadLeftIndex,
         GamepadBindingCatalog.DefaultTouchpadRightIndex,
+        GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
+        GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
         Array.Empty<string>(),
         Array.Empty<string>(),
         Array.Empty<string>());

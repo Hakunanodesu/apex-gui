@@ -43,15 +43,20 @@ public sealed partial class MainWindow : GameWindow
         "Quadratic Ease-In-Out"
     };
     private static readonly string[] TouchpadBindingOptions =
-        GamepadBindingCatalog.Options.Concat(new[] { GamepadBindingCatalog.KeyboardEqualsBindingName }).ToArray();
+        GamepadBindingCatalog.Options.Concat(new[] { GamepadBindingCatalog.KeyboardCustomBindingName }).ToArray();
     private const string SpecialWeaponLogicConfigKey = "specialWeaponLogic";
     private const string AimSnapWeaponListConfigKey = "aimSnapWeapons";
     private const string RapidFireWeaponListConfigKey = "rapidFireWeapons";
     private const string ReleaseFireWeaponListConfigKey = "releaseFireWeapons";
     private const string AimBindingConfigKey = "aimBinding";
     private const string FireBindingConfigKey = "fireBinding";
+    private const string VoiceBindingConfigKey = "voiceBinding";
+    private const string VoiceCustomKeyConfigKey = "voiceCustomKey";
     private const string TouchpadLeftBindingConfigKey = "touchpadLeftBinding";
     private const string TouchpadRightBindingConfigKey = "touchpadRightBinding";
+    private const string TouchpadLeftCustomKeyConfigKey = "touchpadLeftCustomKey";
+    private const string TouchpadRightCustomKeyConfigKey = "touchpadRightCustomKey";
+    private const string DefaultVoiceCustomKeyName = "V";
     private readonly HomeViewState _homeViewState = new();
     private readonly string[] _specialWeaponNames;
     private bool[] _specialWeaponAimSnapEnabled;
@@ -71,6 +76,8 @@ public sealed partial class MainWindow : GameWindow
     private static readonly WindowStateService WindowStateService = new();
     private (uint InstanceId, string Name)[] _cachedConnectedGamepads = Array.Empty<(uint InstanceId, string Name)>();
     private string[] _cachedGamepadOptions = Array.Empty<string>();
+    private readonly HashSet<Keys> _touchpadCapturePreviousDownKeys = new();
+    private TouchpadKeyCaptureTarget _activeTouchpadKeyCaptureTarget;
     private static uint? _startupSelectedGamepadInstanceId;
     internal static string WindowStateFilePath => Path.Combine(Environment.CurrentDirectory, WindowStateFileName);
 
@@ -411,14 +418,20 @@ public sealed partial class MainWindow : GameWindow
             GamepadBindingCatalog.DefaultAimIndex,
             GamepadBindingCatalog.DefaultFireIndex,
             GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+            DefaultVoiceCustomKeyName,
+            GamepadBindingCatalog.DefaultTouchpadLeftIndex,
             GamepadBindingCatalog.DefaultTouchpadRightIndex);
         if (!selectionResult.HasConfig)
         {
             _homeViewState.SnapModeIndex = -1;
             _homeViewState.AimBindingIndex = GamepadBindingCatalog.DefaultAimIndex;
             _homeViewState.FireBindingIndex = GamepadBindingCatalog.DefaultFireIndex;
+            _homeViewState.VoiceBindingIndex = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
+            _homeViewState.VoiceCustomKey = DefaultVoiceCustomKeyName;
             _homeViewState.TouchpadLeftBindingIndex = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
             _homeViewState.TouchpadRightBindingIndex = GamepadBindingCatalog.DefaultTouchpadRightIndex;
+            _homeViewState.TouchpadLeftCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
+            _homeViewState.TouchpadRightCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
             _onnxTopSelectedModelIndex = -1;
             PushAimAssistConfig();
             SyncSmartCoreVisionPipeline();
@@ -428,8 +441,12 @@ public sealed partial class MainWindow : GameWindow
         _homeViewState.SnapModeIndex = selectionResult.SnapModeIndex;
         _homeViewState.AimBindingIndex = selectionResult.AimBindingIndex;
         _homeViewState.FireBindingIndex = selectionResult.FireBindingIndex;
+        _homeViewState.VoiceBindingIndex = selectionResult.VoiceBindingIndex;
+        _homeViewState.VoiceCustomKey = selectionResult.VoiceCustomKey;
         _homeViewState.TouchpadLeftBindingIndex = selectionResult.TouchpadLeftBindingIndex;
         _homeViewState.TouchpadRightBindingIndex = selectionResult.TouchpadRightBindingIndex;
+        _homeViewState.TouchpadLeftCustomKey = selectionResult.TouchpadLeftCustomKey;
+        _homeViewState.TouchpadRightCustomKey = selectionResult.TouchpadRightCustomKey;
         ApplySpecialWeaponLogicFromCurrentConfig();
         _onnxTopSelectedModelIndex = selectionResult.ModelIndex;
         _homeViewState.ApplySnapConfig(selectionResult.SnapConfig);
@@ -448,7 +465,11 @@ public sealed partial class MainWindow : GameWindow
             GamepadBindingCatalog.DefaultAimIndex,
             GamepadBindingCatalog.DefaultFireIndex,
             GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+            DefaultVoiceCustomKeyName,
+            GamepadBindingCatalog.DefaultTouchpadLeftIndex,
             GamepadBindingCatalog.DefaultTouchpadRightIndex,
+            GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
+            GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
             DefaultSnapOuterRange,
             DefaultSnapInnerRange,
             DefaultSnapOuterStrength,
@@ -738,8 +759,12 @@ protected override void OnResize(ResizeEventArgs e)
             _homeViewState.SnapInnerInterpolationTypeIndex,
             _homeViewState.AimBindingIndex,
             _homeViewState.FireBindingIndex,
+            _homeViewState.VoiceBindingIndex,
+            _homeViewState.VoiceCustomKey,
             _homeViewState.TouchpadLeftBindingIndex,
             _homeViewState.TouchpadRightBindingIndex,
+            _homeViewState.TouchpadLeftCustomKey,
+            _homeViewState.TouchpadRightCustomKey,
             BuildEnabledWeaponNameList(_specialWeaponAimSnapEnabled),
             BuildEnabledWeaponNameList(_specialWeaponRapidFireEnabled),
             BuildEnabledWeaponNameList(_specialWeaponReleaseFireEnabled));

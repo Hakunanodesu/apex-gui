@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Nefarius.ViGEm.Client;
@@ -40,7 +40,6 @@ internal sealed class ViGEmMappingWorker : IDisposable
     private const uint InputKeyboard = 1;
     private const uint KeyEventFKeyUp = 0x0002;
     private const uint KeyEventFScancode = 0x0008;
-    private const ushort VkOemPlus = 0xBB;
     private const double TargetLoopIntervalMs = 1000.0 / 500.0;
     private static readonly TimeSpan SdlInputFailureGrace = TimeSpan.FromSeconds(1);
     private const int TriggerTimingUnitMs = 20;
@@ -183,6 +182,66 @@ internal sealed class ViGEmMappingWorker : IDisposable
         }
     }
 
+#if DEBUG
+    private int _debugKeyboardBurstGeneration;
+
+    public bool TryStartCustomKeyboardBurst(string? customKey, TimeSpan duration, out string error)
+    {
+        error = string.Empty;
+        if (!GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(customKey, out var virtualKey, out var normalized))
+        {
+            error = $"无效的自定义键位: {customKey}";
+            lock (_sync)
+            {
+                _lastError = error;
+            }
+            return false;
+        }
+
+        if (duration <= TimeSpan.Zero)
+        {
+            error = "连点时长必须大于 0";
+            return false;
+        }
+
+        var generation = Interlocked.Increment(ref _debugKeyboardBurstGeneration);
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            var endAt = DateTime.UtcNow + duration;
+            while (_running && DateTime.UtcNow < endAt)
+            {
+                if (generation != Volatile.Read(ref _debugKeyboardBurstGeneration))
+                {
+                    return;
+                }
+
+                if (!TrySendKeyboardKey(virtualKey, keyDown: true, out var downError))
+                {
+                    lock (_sync)
+                    {
+                        _lastError = downError ?? $"键盘按键注入失败: {normalized}";
+                    }
+                    return;
+                }
+
+                Thread.Sleep(20);
+                if (!TrySendKeyboardKey(virtualKey, keyDown: false, out var upError))
+                {
+                    lock (_sync)
+                    {
+                        _lastError = upError ?? $"键盘按键释放失败: {normalized}";
+                    }
+                    return;
+                }
+
+                Thread.Sleep(40);
+            }
+        });
+        return true;
+    }
+
+#endif
+
     public void SetRequestedEnabled(bool requestedEnabled)
     {
         lock (_sync)
@@ -254,7 +313,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
         DateTime? releasePulseUntil = null;
         DateTime? sdlInputFailureSinceUtc = null;
         ControllerOutputState? lastSubmittedState = null;
-        var keyboardEqualsInjectedPressed = false;
+        var injectedKeyboardVirtualKeys = new HashSet<ushort>();
+        var desiredKeyboardVirtualKeys = new HashSet<ushort>();
         while (_running)
         {
             WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetLoopIntervalMs);
@@ -278,7 +338,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
             if (sdlWorker is null || !isConnected || !requestedEnabled || !hasSelectedGamepad)
             {
-                UpdateKeyboardEqualsInjection(false, ref keyboardEqualsInjectedPressed);
+                desiredKeyboardVirtualKeys.Clear();
+                UpdateKeyboardInjections(desiredKeyboardVirtualKeys, injectedKeyboardVirtualKeys);
                 sdlInputFailureSinceUtc = null;
                 lastSubmittedState = null;
                 lock (_sync)
@@ -298,7 +359,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
                     continue;
                 }
 
-                UpdateKeyboardEqualsInjection(false, ref keyboardEqualsInjectedPressed);
+                desiredKeyboardVirtualKeys.Clear();
+                UpdateKeyboardInjections(desiredKeyboardVirtualKeys, injectedKeyboardVirtualKeys);
 
                 lock (_sync)
                 {
@@ -320,6 +382,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
             var isRapidFireWeapon = ContainsWeaponName(aimAssistConfigState.RapidFireWeapons, recognizedWeaponName);
             var isReleaseFireWeapon = ContainsWeaponName(aimAssistConfigState.ReleaseFireWeapons, recognizedWeaponName);
             var fireBindingIndex = aimAssistConfigState.FireBindingIndex;
+            var voiceBindingIndex = aimAssistConfigState.VoiceBindingIndex;
             var touchpadLeftBindingIndex = aimAssistConfigState.TouchpadLeftBindingIndex;
             var touchpadRightBindingIndex = aimAssistConfigState.TouchpadRightBindingIndex;
             var firePressed = GamepadBindingCatalog.IsPressed(fireBindingIndex, input);
@@ -527,31 +590,40 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 rapidLastToggleAt = DateTime.UtcNow;
             }
 
+            desiredKeyboardVirtualKeys.Clear();
             var hasTouchpadPoint = input.TouchpadPressed && input.TouchpadFingerCount > 0;
             if (hasTouchpadPoint)
             {
                 var isLeftTouchRegion = input.TouchpadX < 0.5f;
                 var touchpadLeftPressed = isLeftTouchRegion;
                 var touchpadRightPressed = !isLeftTouchRegion;
-                var shouldPressKeyboardEquals =
-                    (touchpadLeftPressed && GamepadBindingCatalog.IsKeyboardEqualsBinding(touchpadLeftBindingIndex)) ||
-                    (touchpadRightPressed && GamepadBindingCatalog.IsKeyboardEqualsBinding(touchpadRightBindingIndex));
-                UpdateKeyboardEqualsInjection(shouldPressKeyboardEquals, ref keyboardEqualsInjectedPressed);
+                if (touchpadLeftPressed && GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadLeftBindingIndex))
+                {
+                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadLeftCustomKey);
+                }
 
-                if (!GamepadBindingCatalog.IsKeyboardEqualsBinding(touchpadLeftBindingIndex))
+                if (touchpadRightPressed && GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadRightBindingIndex))
+                {
+                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadRightCustomKey);
+                }
+
+                if (!GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadLeftBindingIndex))
                 {
                     OverlayBindingPressed(touchpadLeftBindingIndex, touchpadLeftPressed);
                 }
 
-                if (!GamepadBindingCatalog.IsKeyboardEqualsBinding(touchpadRightBindingIndex))
+                if (!GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadRightBindingIndex))
                 {
                     OverlayBindingPressed(touchpadRightBindingIndex, touchpadRightPressed);
                 }
             }
-            else
+
+            if (GamepadBindingCatalog.IsPressed(voiceBindingIndex, input))
             {
-                UpdateKeyboardEqualsInjection(false, ref keyboardEqualsInjectedPressed);
+                AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.VoiceCustomKey);
             }
+
+            UpdateKeyboardInjections(desiredKeyboardVirtualKeys, injectedKeyboardVirtualKeys);
 
             var aimAssistResult = _smartCoreAimAssistService.Evaluate(new SmartCoreAimAssistContext(
                 aimAssistConfigState.IsEnabled,
@@ -647,37 +719,85 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
         }
 
-        if (keyboardEqualsInjectedPressed)
+        if (injectedKeyboardVirtualKeys.Count > 0)
         {
-            UpdateKeyboardEqualsInjection(false, ref keyboardEqualsInjectedPressed);
+            desiredKeyboardVirtualKeys.Clear();
+            UpdateKeyboardInjections(desiredKeyboardVirtualKeys, injectedKeyboardVirtualKeys);
         }
     }
 
-    private void UpdateKeyboardEqualsInjection(bool shouldPress, ref bool isInjectedPressed)
+    private void UpdateKeyboardInjections(HashSet<ushort> desiredVirtualKeys, HashSet<ushort> injectedVirtualKeys)
     {
-        if (isInjectedPressed == shouldPress)
+        if (injectedVirtualKeys.Count == desiredVirtualKeys.Count)
         {
-            return;
-        }
-
-        if (!TrySendKeyboardEquals(shouldPress, out var error))
-        {
-            if (!string.IsNullOrWhiteSpace(error))
+            var isSameSet = true;
+            foreach (var key in desiredVirtualKeys)
             {
-                lock (_sync)
+                if (!injectedVirtualKeys.Contains(key))
                 {
-                    _lastError = error;
+                    isSameSet = false;
+                    break;
                 }
             }
-            return;
+
+            if (isSameSet)
+            {
+                return;
+            }
         }
 
-        isInjectedPressed = shouldPress;
+        var releaseKeys = new List<ushort>();
+        foreach (var key in injectedVirtualKeys)
+        {
+            if (!desiredVirtualKeys.Contains(key))
+            {
+                releaseKeys.Add(key);
+            }
+        }
+
+        foreach (var key in releaseKeys)
+        {
+            if (!TrySendKeyboardKey(key, keyDown: false, out var releaseError))
+            {
+                if (!string.IsNullOrWhiteSpace(releaseError))
+                {
+                    lock (_sync)
+                    {
+                        _lastError = releaseError;
+                    }
+                }
+                return;
+            }
+
+            injectedVirtualKeys.Remove(key);
+        }
+
+        foreach (var key in desiredVirtualKeys)
+        {
+            if (injectedVirtualKeys.Contains(key))
+            {
+                continue;
+            }
+
+            if (!TrySendKeyboardKey(key, keyDown: true, out var pressError))
+            {
+                if (!string.IsNullOrWhiteSpace(pressError))
+                {
+                    lock (_sync)
+                    {
+                        _lastError = pressError;
+                    }
+                }
+                return;
+            }
+
+            injectedVirtualKeys.Add(key);
+        }
     }
 
-    private static bool TrySendKeyboardEquals(bool keyDown, out string? error)
+    private static bool TrySendKeyboardKey(ushort virtualKey, bool keyDown, out string? error)
     {
-        var scanCode = (ushort)MapVirtualKey(VkOemPlus, 0);
+        var scanCode = (ushort)MapVirtualKey(virtualKey, 0);
         var flags = KeyEventFScancode | (keyDown ? 0u : KeyEventFKeyUp);
         var input = new INPUT
         {
@@ -704,8 +824,24 @@ internal sealed class ViGEmMappingWorker : IDisposable
         }
 
         var win32Error = Marshal.GetLastWin32Error();
-        error = $"键盘 '=' 注入失败: {win32Error}";
+        error = $"键盘按键注入失败(VK={virtualKey}): {win32Error}";
         return false;
+    }
+
+    private static ushort? ResolveCustomKeyboardVirtualKey(string? customKey)
+    {
+        return GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(customKey, out var virtualKey, out _)
+            ? virtualKey
+            : null;
+    }
+
+    private static void AddResolvedCustomKeyboardVirtualKey(HashSet<ushort> keys, string? customKey)
+    {
+        var virtualKey = ResolveCustomKeyboardVirtualKey(customKey);
+        if (virtualKey.HasValue)
+        {
+            keys.Add(virtualKey.Value);
+        }
     }
 
     private bool TrySubmitState(
@@ -874,8 +1010,12 @@ internal sealed class ViGEmMappingWorker : IDisposable
                a.SnapInnerInterpolationTypeIndex == b.SnapInnerInterpolationTypeIndex &&
                a.AimBindingIndex == b.AimBindingIndex &&
                a.FireBindingIndex == b.FireBindingIndex &&
+               a.VoiceBindingIndex == b.VoiceBindingIndex &&
+               string.Equals(a.VoiceCustomKey, b.VoiceCustomKey, StringComparison.Ordinal) &&
                a.TouchpadLeftBindingIndex == b.TouchpadLeftBindingIndex &&
                a.TouchpadRightBindingIndex == b.TouchpadRightBindingIndex &&
+               string.Equals(a.TouchpadLeftCustomKey, b.TouchpadLeftCustomKey, StringComparison.Ordinal) &&
+               string.Equals(a.TouchpadRightCustomKey, b.TouchpadRightCustomKey, StringComparison.Ordinal) &&
                AreSameList(a.AimSnapWeapons, b.AimSnapWeapons) &&
                AreSameList(a.RapidFireWeapons, b.RapidFireWeapons) &&
                AreSameList(a.ReleaseFireWeapons, b.ReleaseFireWeapons);
