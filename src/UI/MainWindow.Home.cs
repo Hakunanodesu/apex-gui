@@ -32,7 +32,6 @@ public sealed partial class MainWindow
 #endif
 
     private readonly record struct HomeLayoutMetrics(
-        float BaseTextWidth,
         float FirstColumnWidth,
         float ReserveWidth,
         float AddButtonWidth,
@@ -50,11 +49,21 @@ public sealed partial class MainWindow
         RefreshSmartCoreState();
 
         var topPanelStyle = ImGui.GetStyle();
-        var baseTextWidth = ImGui.CalcTextSize("一").X;
-        var addButtonWidth = baseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
-        var deleteButtonWidth = baseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
+        var addButtonWidth = ImGui.CalcTextSize("添加").X + topPanelStyle.FramePadding.X * 2f;
+        var deleteButtonWidth = ImGui.CalcTextSize("删除").X + topPanelStyle.FramePadding.X * 2f;
+        var firstColumnWidth = MeasureMaxTextWidth(
+                                   "依赖状态",
+                                   "配置选择",
+                                   "智慧核心",
+                                   "选择模型",
+                                   "吸附参数设定",
+                                   "吸附曲线预览",
+                                   "按键绑定",
+                                   "开启吸附方式",
+                                   "特殊武器逻辑")
+                               + topPanelStyle.CellPadding.X * 2f;
         var reserveWidth = addButtonWidth + deleteButtonWidth + topPanelStyle.ItemSpacing.X * 2f;
-        var metrics = new HomeLayoutMetrics(baseTextWidth, baseTextWidth * 6.5f, reserveWidth, addButtonWidth, deleteButtonWidth);
+        var metrics = new HomeLayoutMetrics(firstColumnWidth, reserveWidth, addButtonWidth, deleteButtonWidth);
 
         DrawHomeTopTable(metrics, topPanelStyle);
         DrawConfigFileModals();
@@ -104,7 +113,8 @@ public sealed partial class MainWindow
         }
 
         ImGui.TableSetupColumn("##DepName", ImGuiTableColumnFlags.WidthFixed, ImGui.CalcTextSize("ViGemBus 驱动").X);
-        ImGui.TableSetupColumn("##DepState", ImGuiTableColumnFlags.WidthFixed, metrics.BaseTextWidth * 3f);
+        var depStateColumnWidth = MeasureMaxTextWidth("已就绪", "未就绪") + topPanelStyle.CellPadding.X * 2f;
+        ImGui.TableSetupColumn("##DepState", ImGuiTableColumnFlags.WidthFixed, depStateColumnWidth);
         ImGui.TableSetupColumn("##DepAction", ImGuiTableColumnFlags.WidthStretch);
 
         ImGui.TableNextRow();
@@ -130,7 +140,7 @@ public sealed partial class MainWindow
         ImGui.TextUnformatted(hasGamepads ? "已就绪" : "未就绪");
         ImGui.TableSetColumnIndex(2);
         var gamepadIndexBeforeUi = _homeSelectedGamepadIndex;
-        var inputRefreshButtonWidth = metrics.BaseTextWidth * 2f + topPanelStyle.FramePadding.X * 2f;
+        var inputRefreshButtonWidth = ImGui.CalcTextSize("刷新").X + topPanelStyle.FramePadding.X * 2f;
         ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - metrics.ReserveWidth);
         ImGui.Combo("##InputDeviceCombo", ref _homeSelectedGamepadIndex, gamepads, gamepads.Length);
         if (_homeSelectedGamepadIndex != gamepadIndexBeforeUi)
@@ -219,7 +229,7 @@ public sealed partial class MainWindow
     private void DrawHomeMainTable(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
     {
         var modelLineStyle = ImGui.GetStyle();
-        var refreshButtonWidth = metrics.BaseTextWidth * 2f + modelLineStyle.FramePadding.X * 2f;
+        var refreshButtonWidth = ImGui.CalcTextSize("刷新").X + modelLineStyle.FramePadding.X * 2f;
         if (!ImGui.BeginTable("##HomeMainTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
             return;
@@ -267,7 +277,7 @@ public sealed partial class MainWindow
         var displayHeightLimit = GetDisplayHeightOrWindowHeight();
         var snapOuterRangeMax = Math.Max(selectedModelSize, displayHeightLimit);
         NormalizeSnapSettings(selectedModelSize, snapOuterRangeMax);
-        var layout = BuildSnapSettingsLayout(metrics, topPanelStyle);
+        var layout = BuildSnapSettingsLayout(topPanelStyle);
 
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         if (ImGui.BeginTable("##SnapSettingsGrid", 6, ImGuiTableFlags.SizingFixedFit))
@@ -295,16 +305,36 @@ public sealed partial class MainWindow
         _homeViewState.SnapHeight = Math.Clamp(_homeViewState.SnapHeight, 0f, 1f);
     }
 
-    private static SnapSettingsLayout BuildSnapSettingsLayout(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
+    private static SnapSettingsLayout BuildSnapSettingsLayout(ImGuiStylePtr topPanelStyle)
     {
         var rangeInputWidth = ImGui.CalcTextSize("0000").X + topPanelStyle.FramePadding.X * 2f;
         var strengthInputWidth = rangeInputWidth + ImGui.GetFrameHeight() * 2f + topPanelStyle.ItemInnerSpacing.X * 2f;
+        var labelWidth = MeasureMaxTextWidth(
+                             "内圈范围",
+                             "外圈范围",
+                             "内圈强度",
+                             "外圈强度",
+                             "腰射强度系数",
+                             "垂直强度系数")
+                         + topPanelStyle.CellPadding.X * 2f;
+        var lastLabelWidth = MeasureMaxTextWidth("起始强度", "吸附高度") + topPanelStyle.CellPadding.X * 2f;
         return new SnapSettingsLayout(
-            metrics.BaseTextWidth * 6f,
-            metrics.BaseTextWidth * 4f,
+            labelWidth,
+            lastLabelWidth,
             rangeInputWidth,
             strengthInputWidth,
             strengthInputWidth);
+    }
+
+    private static float MeasureMaxTextWidth(params string[] texts)
+    {
+        var maxWidth = 0f;
+        for (var i = 0; i < texts.Length; i++)
+        {
+            maxWidth = MathF.Max(maxWidth, ImGui.CalcTextSize(texts[i]).X);
+        }
+
+        return maxWidth;
     }
 
     private static void SetupSnapSettingsGridColumns(in SnapSettingsLayout layout)
@@ -811,6 +841,7 @@ public sealed partial class MainWindow
                     {
                         _homeViewState.VoiceBindingIndex = i;
                         TryWriteStringToCurrentConfig(VoiceBindingConfigKey, GamepadBindingCatalog.Options[i]);
+                        PushAimAssistConfig();
                     }
 
                     if (isSelected)
