@@ -582,19 +582,6 @@ public sealed partial class MainWindow
         _homeViewState.VoiceCustomKey = normalizedVoiceCustomKey;
         var disableBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.Options.Length == 0;
         var disableTouchpadBindingSelection = _configFiles.Count == 0 || TouchpadBindingOptions.Length == 0;
-        var touchpadCaptureButtonWidth = ImGui.CalcTextSize("PrintScreen").X + topPanelStyle.FramePadding.X * 2f;
-        var voiceCaptureButtonWidth = touchpadCaptureButtonWidth;
-        var touchpadDebugTriggerButtonWidth = 0f;
-#if DEBUG
-        touchpadDebugTriggerButtonWidth = ImGui.CalcTextSize("连点中").X + topPanelStyle.FramePadding.X * 2f;
-#endif
-        var fromLabelColumnWidth = ImGui.CalcTextSize("从").X;
-        var toLabelColumnWidth = ImGui.CalcTextSize("映射到").X;
-        var actionColumnMinWidth = touchpadCaptureButtonWidth;
-#if DEBUG
-        actionColumnMinWidth += topPanelStyle.ItemSpacing.X + touchpadDebugTriggerButtonWidth;
-#endif
-        var unifiedComboWidth = MathF.Max(90f, availableWidth - fromLabelColumnWidth - toLabelColumnWidth - actionColumnMinWidth);
         var leftCustomSelected = GamepadBindingCatalog.IsKeyboardCustomBinding(_homeViewState.TouchpadLeftBindingIndex);
         var rightCustomSelected = GamepadBindingCatalog.IsKeyboardCustomBinding(_homeViewState.TouchpadRightBindingIndex);
         if ((_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Left && !leftCustomSelected) ||
@@ -606,14 +593,11 @@ public sealed partial class MainWindow
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
         if (ImGui.BeginTable(
                 "##HomeKeyBindingInlineTable",
-                5,
-                ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoSavedSettings))
+                2,
+                ImGuiTableFlags.SizingStretchProp | ImGuiTableFlags.NoSavedSettings))
         {
             ImGui.TableSetupColumn("##HomeBindingLabelColumn", ImGuiTableColumnFlags.WidthFixed, labelWidth);
-            ImGui.TableSetupColumn("##HomeBindingMidLabelColumn", ImGuiTableColumnFlags.WidthFixed, fromLabelColumnWidth);
-            ImGui.TableSetupColumn("##HomeBindingComboColumn", ImGuiTableColumnFlags.WidthFixed, unifiedComboWidth);
-            ImGui.TableSetupColumn("##HomeBindingToLabelColumn", ImGuiTableColumnFlags.WidthFixed, toLabelColumnWidth);
-            ImGui.TableSetupColumn("##HomeBindingActionColumn", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("##HomeBindingContentColumn", ImGuiTableColumnFlags.WidthStretch, 1f);
 
             ImGui.TableNextRow();
 
@@ -621,8 +605,9 @@ public sealed partial class MainWindow
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("瞄准");
 
-            ImGui.TableSetColumnIndex(2);
-            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
+            ImGui.TableSetColumnIndex(1);
+            var bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
+            ImGui.SetNextItemWidth(bindingContentWidth);
             var selectedAimLabel = GamepadBindingCatalog.Options[_homeViewState.AimBindingIndex];
             ImGui.BeginDisabled(disableBindingSelection);
             if (ImGui.BeginCombo("##HomeAimBindingCombo", selectedAimLabel))
@@ -653,8 +638,9 @@ public sealed partial class MainWindow
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("开火");
 
-            ImGui.TableSetColumnIndex(2);
-            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
+            ImGui.TableSetColumnIndex(1);
+            bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
+            ImGui.SetNextItemWidth(bindingContentWidth);
             var selectedFireLabel = GamepadBindingCatalog.Options[_homeViewState.FireBindingIndex];
             ImGui.BeginDisabled(disableBindingSelection);
             if (ImGui.BeginCombo("##HomeFireBindingCombo", selectedFireLabel))
@@ -683,56 +669,17 @@ public sealed partial class MainWindow
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("语音");
-
-            ImGui.TableSetColumnIndex(1);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("从");
-
-            ImGui.TableSetColumnIndex(2);
-            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
-            var selectedVoiceLabel = GamepadBindingCatalog.Options[_homeViewState.VoiceBindingIndex];
-            ImGui.BeginDisabled(disableBindingSelection);
-            if (ImGui.BeginCombo("##HomeVoiceBindingCombo", selectedVoiceLabel))
-            {
-                for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
-                {
-                    var isSelected = i == _homeViewState.VoiceBindingIndex;
-                    if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
-                    {
-                        _homeViewState.VoiceBindingIndex = i;
-                        TryWriteStringToCurrentConfig(VoiceBindingConfigKey, GamepadBindingCatalog.Options[i]);
-                    }
-
-                    if (isSelected)
-                    {
-                        ImGui.SetItemDefaultFocus();
-                    }
-                }
-
-                ImGui.EndCombo();
-            }
-            ImGui.EndDisabled();
-            ImGui.TableSetColumnIndex(3);
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted("映射到");
-            ImGui.TableSetColumnIndex(4);
-            ImGui.BeginDisabled(_configFiles.Count == 0 || disableBindingSelection);
-            var voiceButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Voice, _homeViewState.VoiceCustomKey);
-            if (ImGui.Button($"{voiceButtonLabel}###HomeVoiceCustomKeyCaptureButton", new Vector2(voiceCaptureButtonWidth, 0f)))
-            {
-                ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget.Voice);
-            }
-            ImGui.EndDisabled();
-
-            ImGui.TableNextRow();
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("触摸板（左）");
 
-            ImGui.TableSetColumnIndex(2);
-            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
+            ImGui.TableSetColumnIndex(1);
+            bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
+            var touchpadCaptureButtonWidth = ImGui.CalcTextSize("PrintScreen").X + topPanelStyle.FramePadding.X * 2f;
+#if DEBUG
+            var touchpadDebugTriggerButtonWidth = ImGui.CalcTextSize("连点中").X + topPanelStyle.FramePadding.X * 2f;
+#endif
+            var touchpadComboWidth = bindingContentWidth - topPanelStyle.ItemSpacing.X - touchpadCaptureButtonWidth;
+            touchpadComboWidth = MathF.Max(70f, touchpadComboWidth);
+            ImGui.SetNextItemWidth(touchpadComboWidth);
             var selectedTouchpadLeftLabel = TouchpadBindingOptions[_homeViewState.TouchpadLeftBindingIndex];
             ImGui.BeginDisabled(disableTouchpadBindingSelection);
             if (ImGui.BeginCombo("##HomeTouchpadLeftBindingCombo", selectedTouchpadLeftLabel))
@@ -760,7 +707,7 @@ public sealed partial class MainWindow
                 ImGui.EndCombo();
             }
             ImGui.EndDisabled();
-            ImGui.TableSetColumnIndex(4);
+            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
             ImGui.BeginDisabled(!leftCustomSelected || disableTouchpadBindingSelection);
             var leftButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Left, _homeViewState.TouchpadLeftCustomKey);
             if (ImGui.Button($"{leftButtonLabel}###HomeTouchpadLeftCustomKeyCaptureButton", new Vector2(touchpadCaptureButtonWidth, 0f)))
@@ -785,8 +732,10 @@ public sealed partial class MainWindow
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("触摸板（右）");
 
-            ImGui.TableSetColumnIndex(2);
-            ImGui.SetNextItemWidth(MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X));
+            ImGui.TableSetColumnIndex(1);
+            bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
+            touchpadComboWidth = MathF.Max(70f, bindingContentWidth - topPanelStyle.ItemSpacing.X - touchpadCaptureButtonWidth);
+            ImGui.SetNextItemWidth(touchpadComboWidth);
             var selectedTouchpadRightLabel = TouchpadBindingOptions[_homeViewState.TouchpadRightBindingIndex];
             ImGui.BeginDisabled(disableTouchpadBindingSelection);
             if (ImGui.BeginCombo("##HomeTouchpadRightBindingCombo", selectedTouchpadRightLabel))
@@ -814,7 +763,7 @@ public sealed partial class MainWindow
                 ImGui.EndCombo();
             }
             ImGui.EndDisabled();
-            ImGui.TableSetColumnIndex(4);
+            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
             ImGui.BeginDisabled(!rightCustomSelected || disableTouchpadBindingSelection);
             var rightButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Right, _homeViewState.TouchpadRightCustomKey);
             if (ImGui.Button($"{rightButtonLabel}###HomeTouchpadRightCustomKeyCaptureButton", new Vector2(touchpadCaptureButtonWidth, 0f)))
@@ -832,6 +781,58 @@ public sealed partial class MainWindow
             }
             ImGui.EndDisabled();
 #endif
+
+            ImGui.TableNextRow();
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("语音");
+
+            ImGui.TableSetColumnIndex(1);
+            bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
+            var voiceCaptureButtonWidth = ImGui.CalcTextSize("PrintScreen").X + topPanelStyle.FramePadding.X * 2f;
+            var fromLabelWidth = ImGui.CalcTextSize("从").X;
+            var toLabelWidth = ImGui.CalcTextSize("映射到").X;
+            var voiceComboWidth = MathF.Max(
+                90f,
+                bindingContentWidth - voiceCaptureButtonWidth - fromLabelWidth - toLabelWidth - topPanelStyle.ItemSpacing.X * 3f);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("从");
+            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+            ImGui.SetNextItemWidth(voiceComboWidth);
+            var selectedVoiceLabel = GamepadBindingCatalog.Options[_homeViewState.VoiceBindingIndex];
+            ImGui.BeginDisabled(disableBindingSelection);
+            if (ImGui.BeginCombo("##HomeVoiceBindingCombo", selectedVoiceLabel))
+            {
+                for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
+                {
+                    var isSelected = i == _homeViewState.VoiceBindingIndex;
+                    if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
+                    {
+                        _homeViewState.VoiceBindingIndex = i;
+                        TryWriteStringToCurrentConfig(VoiceBindingConfigKey, GamepadBindingCatalog.Options[i]);
+                    }
+
+                    if (isSelected)
+                    {
+                        ImGui.SetItemDefaultFocus();
+                    }
+                }
+
+                ImGui.EndCombo();
+            }
+            ImGui.EndDisabled();
+            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted("映射到");
+            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+            ImGui.BeginDisabled(_configFiles.Count == 0);
+            var voiceButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Voice, _homeViewState.VoiceCustomKey);
+            if (ImGui.Button($"{voiceButtonLabel}###HomeVoiceCustomKeyCaptureButton", new Vector2(voiceCaptureButtonWidth, 0f)))
+            {
+                ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget.Voice);
+            }
+            ImGui.EndDisabled();
 
             ImGui.EndTable();
         }
