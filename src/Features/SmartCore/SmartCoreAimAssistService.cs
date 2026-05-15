@@ -276,22 +276,25 @@ internal sealed class SmartCoreStickMapper
         var outerStrength = Math.Clamp(context.SnapOuterStrength, 0f, 1f);
         var verticalFactor = Math.Clamp(context.SnapVerticalStrengthFactor, 0f, 1f);
 
+        var isAiming = GamepadBindingCatalog.IsPressed(context.AimBindingIndex, context.Input);
         float strength;
-        if (distance <= innerRadiusModel)
+        if (isAiming)
         {
-            var t = innerRadiusModel <= 0.001f ? 1f : Math.Clamp(distance / innerRadiusModel, 0f, 1f);
-            var curveT = SnapInterpolation.EvaluateNormalized(t, context.SnapInnerInterpolationTypeIndex);
-            strength = Lerp(startStrength, innerStrength, curveT);
+            if (distance <= innerRadiusModel)
+            {
+                var t = innerRadiusModel <= 0.001f ? 1f : Math.Clamp(distance / innerRadiusModel, 0f, 1f);
+                var curveT = SnapInterpolation.EvaluateNormalized(t, context.SnapInnerInterpolationTypeIndex);
+                strength = Lerp(startStrength, innerStrength, curveT);
+            }
+            else
+            {
+                strength = outerStrength;
+            }
         }
         else
         {
-            strength = outerStrength;
-        }
-
-        var isAiming = GamepadBindingCatalog.IsPressed(context.AimBindingIndex, context.Input);
-        if (!isAiming)
-        {
-            strength *= Math.Clamp(context.SnapHipfireStrengthFactor, 0f, 1f);
+            // Hipfire ignores inner-ring interpolation and uses outer strength only.
+            strength = outerStrength * Math.Clamp(context.SnapHipfireStrengthFactor, 0f, 1f);
         }
 
         if (strength <= 0f)
