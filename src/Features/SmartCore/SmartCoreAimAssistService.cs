@@ -293,8 +293,19 @@ internal sealed class SmartCoreStickMapper
         }
         else
         {
-            // Hipfire ignores inner-ring interpolation and uses outer strength only.
-            strength = outerStrength * Math.Clamp(context.SnapHipfireStrengthFactor, 0f, 1f);
+            if (distance <= innerRadiusModel)
+            {
+                var t = innerRadiusModel <= 0.001f ? 1f : Math.Clamp(distance / innerRadiusModel, 0f, 1f);
+                var curveT = SnapInterpolation.EvaluateNormalized(t, context.SnapInnerInterpolationTypeIndex);
+                strength = Lerp(startStrength, innerStrength, curveT);
+            }
+            else
+            {
+                // Hipfire keeps inner-ring strength once outside inner range.
+                strength = innerStrength;
+            }
+
+            strength *= Math.Clamp(context.SnapHipfireStrengthFactor, 0f, 1f);
         }
 
         if (strength <= 0f)
