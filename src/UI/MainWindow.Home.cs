@@ -210,6 +210,7 @@ public sealed partial class MainWindow
             if (!requestedSmartCoreEnabled)
             {
                 CloseSmartCorePreviewWindow();
+                RefreshHomeInputDevices();
             }
             RefreshSmartCoreState();
             PushAimAssistConfig();
