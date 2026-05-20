@@ -309,6 +309,10 @@ internal sealed class ViGEmMappingWorker : IDisposable
         var releasePulseDuration = TimeSpan.FromMilliseconds(ReleaseToFirePulseMs);
         var rapidHigh = false;
         var rapidLastToggleAt = DateTime.UtcNow;
+        var touchpadLeftRapidHigh = false;
+        var touchpadLeftRapidLastToggleAt = DateTime.UtcNow;
+        var touchpadRightRapidHigh = false;
+        var touchpadRightRapidLastToggleAt = DateTime.UtcNow;
         var releasePrevPressed = false;
         DateTime? releasePulseUntil = null;
         DateTime? sdlInputFailureSinceUtc = null;
@@ -592,19 +596,31 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
             desiredKeyboardVirtualKeys.Clear();
             var hasTouchpadPoint = input.TouchpadPressed && input.TouchpadFingerCount > 0;
+            var touchpadLeftPressed = false;
+            var touchpadRightPressed = false;
+            var touchpadLeftRapidActive = false;
+            var touchpadRightRapidActive = false;
             if (hasTouchpadPoint)
             {
                 var isLeftTouchRegion = input.TouchpadX < 0.5f;
-                var touchpadLeftPressed = isLeftTouchRegion;
-                var touchpadRightPressed = !isLeftTouchRegion;
+                touchpadLeftPressed = isLeftTouchRegion;
+                touchpadRightPressed = !isLeftTouchRegion;
                 if (touchpadLeftPressed && GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadLeftBindingIndex))
                 {
-                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadLeftCustomKey);
+                    touchpadLeftRapidActive = aimAssistConfigState.TouchpadLeftRapidEnabled;
+                    if (!touchpadLeftRapidActive)
+                    {
+                        AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadLeftCustomKey);
+                    }
                 }
 
                 if (touchpadRightPressed && GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadRightBindingIndex))
                 {
-                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadRightCustomKey);
+                    touchpadRightRapidActive = aimAssistConfigState.TouchpadRightRapidEnabled;
+                    if (!touchpadRightRapidActive)
+                    {
+                        AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadRightCustomKey);
+                    }
                 }
 
                 if (!GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadLeftBindingIndex))
@@ -616,6 +632,58 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 {
                     OverlayBindingPressed(touchpadRightBindingIndex, touchpadRightPressed);
                 }
+            }
+
+            if (touchpadLeftRapidActive)
+            {
+                var now = DateTime.UtcNow;
+                var elapsed = now - touchpadLeftRapidLastToggleAt;
+                if (elapsed >= rapidFireHalfPeriod)
+                {
+                    var steps = Math.Max(1, (int)(elapsed.Ticks / rapidFireHalfPeriod.Ticks));
+                    if ((steps & 1) == 1)
+                    {
+                        touchpadLeftRapidHigh = !touchpadLeftRapidHigh;
+                    }
+
+                    touchpadLeftRapidLastToggleAt = touchpadLeftRapidLastToggleAt.AddTicks(rapidFireHalfPeriod.Ticks * steps);
+                }
+
+                if (touchpadLeftRapidHigh)
+                {
+                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadLeftCustomKey);
+                }
+            }
+            else
+            {
+                touchpadLeftRapidHigh = false;
+                touchpadLeftRapidLastToggleAt = DateTime.UtcNow;
+            }
+
+            if (touchpadRightRapidActive)
+            {
+                var now = DateTime.UtcNow;
+                var elapsed = now - touchpadRightRapidLastToggleAt;
+                if (elapsed >= rapidFireHalfPeriod)
+                {
+                    var steps = Math.Max(1, (int)(elapsed.Ticks / rapidFireHalfPeriod.Ticks));
+                    if ((steps & 1) == 1)
+                    {
+                        touchpadRightRapidHigh = !touchpadRightRapidHigh;
+                    }
+
+                    touchpadRightRapidLastToggleAt = touchpadRightRapidLastToggleAt.AddTicks(rapidFireHalfPeriod.Ticks * steps);
+                }
+
+                if (touchpadRightRapidHigh)
+                {
+                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadRightCustomKey);
+                }
+            }
+            else
+            {
+                touchpadRightRapidHigh = false;
+                touchpadRightRapidLastToggleAt = DateTime.UtcNow;
             }
 
             if (GamepadBindingCatalog.IsPressed(voiceBindingIndex, input))
@@ -1016,6 +1084,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
                a.TouchpadRightBindingIndex == b.TouchpadRightBindingIndex &&
                string.Equals(a.TouchpadLeftCustomKey, b.TouchpadLeftCustomKey, StringComparison.Ordinal) &&
                string.Equals(a.TouchpadRightCustomKey, b.TouchpadRightCustomKey, StringComparison.Ordinal) &&
+               a.TouchpadLeftRapidEnabled == b.TouchpadLeftRapidEnabled &&
+               a.TouchpadRightRapidEnabled == b.TouchpadRightRapidEnabled &&
                AreSameList(a.AimSnapWeapons, b.AimSnapWeapons) &&
                AreSameList(a.RapidFireWeapons, b.RapidFireWeapons) &&
                AreSameList(a.ReleaseFireWeapons, b.ReleaseFireWeapons);

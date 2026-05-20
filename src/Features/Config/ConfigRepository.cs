@@ -215,6 +215,23 @@ internal sealed class ConfigRepository
         }
     }
 
+    public bool? TryReadBool(string path, string key)
+    {
+        try
+        {
+            if (!TryLoadJsonObject(path, out var root))
+            {
+                return null;
+            }
+
+            return root[key]?.GetValue<bool>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public void TryWriteString(string path, string key, string value)
     {
         try
@@ -244,6 +261,20 @@ internal sealed class ConfigRepository
     }
 
     public void TryWriteFloat(string path, string key, float value)
+    {
+        try
+        {
+            var root = LoadJsonObjectOrEmpty(path);
+            root[key] = value;
+            SaveJsonObject(path, root);
+        }
+        catch
+        {
+            // Keep selection changes responsive if file IO fails.
+        }
+    }
+
+    public void TryWriteBool(string path, string key, bool value)
     {
         try
         {

@@ -27,6 +27,8 @@ internal readonly record struct ConfigSelectionResult(
     int TouchpadRightBindingIndex,
     string TouchpadLeftCustomKey,
     string TouchpadRightCustomKey,
+    bool TouchpadLeftRapidEnabled,
+    bool TouchpadRightRapidEnabled,
     SnapConfigState SnapConfig)
 {
     public static ConfigSelectionResult Empty => new(
@@ -41,6 +43,8 @@ internal readonly record struct ConfigSelectionResult(
         GamepadBindingCatalog.DefaultTouchpadRightIndex,
         GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
         GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
+        false,
+        false,
         new SnapConfigState());
 }
 
@@ -104,7 +108,9 @@ internal sealed class ConfigStore
         int defaultVoiceBindingIndex,
         string defaultVoiceCustomKey,
         int defaultTouchpadLeftBindingIndex,
-        int defaultTouchpadRightBindingIndex)
+        int defaultTouchpadRightBindingIndex,
+        bool defaultTouchpadLeftRapidEnabled,
+        bool defaultTouchpadRightRapidEnabled)
     {
         if (!TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
         {
@@ -140,6 +146,8 @@ internal sealed class ConfigStore
             defaultTouchpadRightBindingIndex);
         var touchpadLeftCustomKey = NormalizeCustomKeyboardKey(_repository.TryReadString(configPath, "touchpadLeftCustomKey"), GamepadBindingCatalog.DefaultCustomKeyboardKeyName);
         var touchpadRightCustomKey = NormalizeCustomKeyboardKey(_repository.TryReadString(configPath, "touchpadRightCustomKey"), GamepadBindingCatalog.DefaultCustomKeyboardKeyName);
+        var touchpadLeftRapidEnabled = _repository.TryReadBool(configPath, "touchpadLeftRapidEnabled") ?? defaultTouchpadLeftRapidEnabled;
+        var touchpadRightRapidEnabled = _repository.TryReadBool(configPath, "touchpadRightRapidEnabled") ?? defaultTouchpadRightRapidEnabled;
         var modelIndex = onnxModels.Count == 0
             ? -1
             : ResolveModelIndex(_repository.TryReadString(configPath, "model"), onnxModels);
@@ -172,6 +180,8 @@ internal sealed class ConfigStore
             touchpadRightBindingIndex,
             touchpadLeftCustomKey,
             touchpadRightCustomKey,
+            touchpadLeftRapidEnabled,
+            touchpadRightRapidEnabled,
             snapConfig);
     }
 
@@ -216,6 +226,14 @@ internal sealed class ConfigStore
         if (TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
         {
             _repository.TryWriteFloat(configPath, key, value);
+        }
+    }
+
+    public void TryWriteBool(IReadOnlyList<string> configFiles, int selectedConfigFileIndex, string key, bool value)
+    {
+        if (TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
+        {
+            _repository.TryWriteBool(configPath, key, value);
         }
     }
 

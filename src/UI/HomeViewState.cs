@@ -9,6 +9,8 @@ internal sealed class HomeViewState
     public int TouchpadRightBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadRightIndex;
     public string TouchpadLeftCustomKey { get; set; } = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
     public string TouchpadRightCustomKey { get; set; } = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
+    public bool TouchpadLeftRapidEnabled { get; set; }
+    public bool TouchpadRightRapidEnabled { get; set; }
     public int SnapOuterRange { get; set; } = 1;
     public float SnapOuterStrength { get; set; }
     public int SnapInnerRange { get; set; } = 1;
@@ -49,6 +51,8 @@ internal sealed class HomeViewState
         int touchpadRightBindingIndex,
         string touchpadLeftCustomKey,
         string touchpadRightCustomKey,
+        bool touchpadLeftRapidEnabled,
+        bool touchpadRightRapidEnabled,
         int outerRange,
         int innerRange,
         float outerStrength,
@@ -68,6 +72,8 @@ internal sealed class HomeViewState
         TouchpadRightBindingIndex = touchpadRightBindingIndex;
         TouchpadLeftCustomKey = touchpadLeftCustomKey;
         TouchpadRightCustomKey = touchpadRightCustomKey;
+        TouchpadLeftRapidEnabled = touchpadLeftRapidEnabled;
+        TouchpadRightRapidEnabled = touchpadRightRapidEnabled;
         SnapOuterRange = outerRange;
         SnapInnerRange = innerRange;
         SnapOuterStrength = outerStrength;

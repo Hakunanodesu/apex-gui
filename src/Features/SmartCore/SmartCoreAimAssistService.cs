@@ -47,6 +47,8 @@ internal readonly struct SmartCoreAimAssistConfigState
     public readonly int TouchpadRightBindingIndex;
     public readonly string TouchpadLeftCustomKey;
     public readonly string TouchpadRightCustomKey;
+    public readonly bool TouchpadLeftRapidEnabled;
+    public readonly bool TouchpadRightRapidEnabled;
     public readonly string[] AimSnapWeapons;
     public readonly string[] RapidFireWeapons;
     public readonly string[] ReleaseFireWeapons;
@@ -72,6 +74,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         int touchpadRightBindingIndex,
         string touchpadLeftCustomKey,
         string touchpadRightCustomKey,
+        bool touchpadLeftRapidEnabled,
+        bool touchpadRightRapidEnabled,
         string[] aimSnapWeapons,
         string[] rapidFireWeapons,
         string[] releaseFireWeapons)
@@ -96,6 +100,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         TouchpadRightBindingIndex = touchpadRightBindingIndex;
         TouchpadLeftCustomKey = touchpadLeftCustomKey;
         TouchpadRightCustomKey = touchpadRightCustomKey;
+        TouchpadLeftRapidEnabled = touchpadLeftRapidEnabled;
+        TouchpadRightRapidEnabled = touchpadRightRapidEnabled;
         AimSnapWeapons = aimSnapWeapons;
         RapidFireWeapons = rapidFireWeapons;
         ReleaseFireWeapons = releaseFireWeapons;
@@ -122,6 +128,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         GamepadBindingCatalog.DefaultTouchpadRightIndex,
         GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
         GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
+        false,
+        false,
         Array.Empty<string>(),
         Array.Empty<string>(),
         Array.Empty<string>());

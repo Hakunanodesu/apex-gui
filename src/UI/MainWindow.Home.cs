@@ -745,6 +745,16 @@ public sealed partial class MainWindow
                 ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget.Left);
             }
             ImGui.EndDisabled();
+            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+            ImGui.BeginDisabled(!leftCustomSelected || disableTouchpadBindingSelection);
+            var leftRapidEnabled = _homeViewState.TouchpadLeftRapidEnabled;
+            if (ImGui.Checkbox("连点###HomeTouchpadLeftRapidToggle", ref leftRapidEnabled))
+            {
+                _homeViewState.TouchpadLeftRapidEnabled = leftRapidEnabled;
+                TryWriteBoolToCurrentConfig(TouchpadLeftRapidEnabledConfigKey, leftRapidEnabled);
+                PushAimAssistConfig();
+            }
+            ImGui.EndDisabled();
 #if DEBUG
             ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
             var leftDebugTestButtonLabel = BuildDebugTouchpadTestButtonLabel(_leftDebugTouchpadTestState);
@@ -799,6 +809,16 @@ public sealed partial class MainWindow
             if (ImGui.Button($"{rightButtonLabel}###HomeTouchpadRightCustomKeyCaptureButton", new Vector2(touchpadCaptureButtonWidth, 0f)))
             {
                 ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget.Right);
+            }
+            ImGui.EndDisabled();
+            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+            ImGui.BeginDisabled(!rightCustomSelected || disableTouchpadBindingSelection);
+            var rightRapidEnabled = _homeViewState.TouchpadRightRapidEnabled;
+            if (ImGui.Checkbox("连点###HomeTouchpadRightRapidToggle", ref rightRapidEnabled))
+            {
+                _homeViewState.TouchpadRightRapidEnabled = rightRapidEnabled;
+                TryWriteBoolToCurrentConfig(TouchpadRightRapidEnabledConfigKey, rightRapidEnabled);
+                PushAimAssistConfig();
             }
             ImGui.EndDisabled();
 #if DEBUG
