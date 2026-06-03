@@ -182,66 +182,6 @@ internal sealed class ViGEmMappingWorker : IDisposable
         }
     }
 
-#if DEBUG
-    private int _debugKeyboardBurstGeneration;
-
-    public bool TryStartCustomKeyboardBurst(string? customKey, TimeSpan duration, out string error)
-    {
-        error = string.Empty;
-        if (!GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(customKey, out var virtualKey, out var normalized))
-        {
-            error = $"无效的自定义键位: {customKey}";
-            lock (_sync)
-            {
-                _lastError = error;
-            }
-            return false;
-        }
-
-        if (duration <= TimeSpan.Zero)
-        {
-            error = "连点时长必须大于 0";
-            return false;
-        }
-
-        var generation = Interlocked.Increment(ref _debugKeyboardBurstGeneration);
-        ThreadPool.QueueUserWorkItem(_ =>
-        {
-            var endAt = DateTime.UtcNow + duration;
-            while (_running && DateTime.UtcNow < endAt)
-            {
-                if (generation != Volatile.Read(ref _debugKeyboardBurstGeneration))
-                {
-                    return;
-                }
-
-                if (!TrySendKeyboardKey(virtualKey, keyDown: true, out var downError))
-                {
-                    lock (_sync)
-                    {
-                        _lastError = downError ?? $"键盘按键注入失败: {normalized}";
-                    }
-                    return;
-                }
-
-                Thread.Sleep(20);
-                if (!TrySendKeyboardKey(virtualKey, keyDown: false, out var upError))
-                {
-                    lock (_sync)
-                    {
-                        _lastError = upError ?? $"键盘按键释放失败: {normalized}";
-                    }
-                    return;
-                }
-
-                Thread.Sleep(40);
-            }
-        });
-        return true;
-    }
-
-#endif
-
     public void SetRequestedEnabled(bool requestedEnabled)
     {
         lock (_sync)

@@ -14,22 +14,6 @@ public sealed partial class MainWindow
 
     private const float SnapFloatStep = 0.01f;
     private const string SnapFloatFormat = "%.2f";
-#if DEBUG
-    private static readonly TimeSpan DebugTouchpadTestCountdown = TimeSpan.FromSeconds(3);
-    private static readonly TimeSpan DebugTouchpadBurstDuration = TimeSpan.FromSeconds(3);
-
-    private sealed class DebugTouchpadTestState
-    {
-        public DateTime CountdownEndsAtUtc;
-        public DateTime BurstEndsAtUtc;
-        public bool IsActive;
-        public bool BurstStarted;
-        public string CustomKey = string.Empty;
-    }
-
-    private readonly DebugTouchpadTestState _leftDebugTouchpadTestState = new();
-    private readonly DebugTouchpadTestState _rightDebugTouchpadTestState = new();
-#endif
 
     private readonly record struct HomeLayoutMetrics(
         float FirstColumnWidth,
@@ -563,10 +547,6 @@ public sealed partial class MainWindow
     private void DrawKeyBindingSection(float reserveWidth, ImGuiStylePtr topPanelStyle)
     {
         TryCaptureTouchpadCustomKey();
-#if DEBUG
-        UpdateDebugTouchpadTestState(_leftDebugTouchpadTestState);
-        UpdateDebugTouchpadTestState(_rightDebugTouchpadTestState);
-#endif
 
         ImGui.TableNextRow();
         ImGui.TableNextRow();
@@ -705,9 +685,6 @@ public sealed partial class MainWindow
             ImGui.TableSetColumnIndex(1);
             bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
             var touchpadCaptureButtonWidth = ImGui.CalcTextSize("PrintScreen").X + topPanelStyle.FramePadding.X * 2f;
-#if DEBUG
-            var touchpadDebugTriggerButtonWidth = ImGui.CalcTextSize("连点中").X + topPanelStyle.FramePadding.X * 2f;
-#endif
             var touchpadComboWidth = bindingContentWidth - topPanelStyle.ItemSpacing.X - touchpadCaptureButtonWidth;
             touchpadComboWidth = MathF.Max(70f, touchpadComboWidth);
             ImGui.SetNextItemWidth(touchpadComboWidth);
@@ -756,16 +733,6 @@ public sealed partial class MainWindow
                 PushAimAssistConfig();
             }
             ImGui.EndDisabled();
-#if DEBUG
-            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-            var leftDebugTestButtonLabel = BuildDebugTouchpadTestButtonLabel(_leftDebugTouchpadTestState);
-            ImGui.BeginDisabled(!leftCustomSelected || disableTouchpadBindingSelection || _leftDebugTouchpadTestState.IsActive);
-            if (ImGui.Button($"{leftDebugTestButtonLabel}###HomeTouchpadLeftCustomKeyTestButton", new Vector2(touchpadDebugTriggerButtonWidth, 0f)))
-            {
-                StartDebugTouchpadTest(_leftDebugTouchpadTestState, _homeViewState.TouchpadLeftCustomKey);
-            }
-            ImGui.EndDisabled();
-#endif
 
             ImGui.TableNextRow();
             ImGui.TableNextRow();
@@ -822,16 +789,6 @@ public sealed partial class MainWindow
                 PushAimAssistConfig();
             }
             ImGui.EndDisabled();
-#if DEBUG
-            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-            var rightDebugTestButtonLabel = BuildDebugTouchpadTestButtonLabel(_rightDebugTouchpadTestState);
-            ImGui.BeginDisabled(!rightCustomSelected || disableTouchpadBindingSelection || _rightDebugTouchpadTestState.IsActive);
-            if (ImGui.Button($"{rightDebugTestButtonLabel}###HomeTouchpadRightCustomKeyTestButton", new Vector2(touchpadDebugTriggerButtonWidth, 0f)))
-            {
-                StartDebugTouchpadTest(_rightDebugTouchpadTestState, _homeViewState.TouchpadRightCustomKey);
-            }
-            ImGui.EndDisabled();
-#endif
 
             ImGui.TableNextRow();
             ImGui.TableNextRow();
@@ -889,79 +846,6 @@ public sealed partial class MainWindow
             ImGui.EndTable();
         }
     }
-
-#if DEBUG
-    private void StartDebugTouchpadTest(DebugTouchpadTestState state, string customKey)
-    {
-        state.CustomKey = customKey;
-        state.IsActive = true;
-        state.BurstStarted = false;
-        state.CountdownEndsAtUtc = DateTime.UtcNow + DebugTouchpadTestCountdown;
-        state.BurstEndsAtUtc = state.CountdownEndsAtUtc + DebugTouchpadBurstDuration;
-        _smartCoreMappingState.LastError = string.Empty;
-    }
-
-    private void UpdateDebugTouchpadTestState(DebugTouchpadTestState state)
-    {
-        if (!state.IsActive)
-        {
-            return;
-        }
-
-        var now = DateTime.UtcNow;
-        if (!state.BurstStarted)
-        {
-            if (now < state.CountdownEndsAtUtc)
-            {
-                return;
-            }
-
-            var worker = _viGEmMappingWorker;
-            if (worker is null)
-            {
-                _smartCoreMappingState.LastError = "映射线程未初始化";
-                state.IsActive = false;
-                return;
-            }
-
-            if (!worker.TryStartCustomKeyboardBurst(state.CustomKey, DebugTouchpadBurstDuration, out var error))
-            {
-                if (!string.IsNullOrWhiteSpace(error))
-                {
-                    _smartCoreMappingState.LastError = error;
-                }
-                state.IsActive = false;
-                return;
-            }
-
-            state.BurstStarted = true;
-            return;
-        }
-
-        if (now >= state.BurstEndsAtUtc)
-        {
-            state.IsActive = false;
-            state.BurstStarted = false;
-        }
-    }
-
-    private static string BuildDebugTouchpadTestButtonLabel(DebugTouchpadTestState state)
-    {
-        if (!state.IsActive)
-        {
-            return "测试";
-        }
-
-        if (state.BurstStarted)
-        {
-            return "连点中";
-        }
-
-        var remaining = Math.Max(0.0, (state.CountdownEndsAtUtc - DateTime.UtcNow).TotalSeconds);
-        return $"{Math.Ceiling(remaining)}s";
-    }
-
-#endif
 
     private void TryCaptureTouchpadCustomKey()
     {
