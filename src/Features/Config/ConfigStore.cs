@@ -10,6 +10,7 @@ internal sealed class SnapConfigState
     public float VerticalStrengthFactor { get; init; }
     public float HipfireStrengthFactor { get; init; }
     public float Height { get; init; }
+    public float StrengthRampTime { get; init; }
     public int InnerInterpolationTypeIndex { get; init; }
 }
 
@@ -99,6 +100,7 @@ internal sealed class ConfigStore
         float defaultVerticalStrengthFactor,
         float defaultHipfireStrengthFactor,
         float defaultHeight,
+        float defaultStrengthRampTime,
         IReadOnlyList<string> snapModeOptions,
         IReadOnlyList<string> interpolationOptions,
         IReadOnlyList<string> bindingOptions,
@@ -166,6 +168,7 @@ internal sealed class ConfigStore
             defaultVerticalStrengthFactor,
             defaultHipfireStrengthFactor,
             defaultHeight,
+            defaultStrengthRampTime,
             interpolationOptions);
 
         return new ConfigSelectionResult(
@@ -423,6 +426,7 @@ internal sealed class ConfigStore
         float defaultVerticalStrengthFactor,
         float defaultHipfireStrengthFactor,
         float defaultHeight,
+        float defaultStrengthRampTime,
         IReadOnlyList<string> interpolationOptions)
     {
         var snapOuterRangeMax = Math.Max(selectedModelSize, displayHeightLimit);
@@ -434,6 +438,13 @@ internal sealed class ConfigStore
         var verticalStrengthFactor = Math.Clamp(_repository.TryReadFloat(configPath, "snapVerticalStrengthFactor") ?? defaultVerticalStrengthFactor, 0f, 1f);
         var hipfireStrengthFactor = Math.Clamp(_repository.TryReadFloat(configPath, "snapHipfireStrengthFactor") ?? defaultHipfireStrengthFactor, 0f, 1f);
         var height = Math.Clamp(_repository.TryReadFloat(configPath, "snapHeight") ?? defaultHeight, 0f, 1f);
+        var existingStrengthRampTime = _repository.TryReadFloat(configPath, "snapStrengthRampTime");
+        var strengthRampTime = Math.Clamp(existingStrengthRampTime ?? defaultStrengthRampTime, 0f, 1f);
+        if (existingStrengthRampTime is null)
+        {
+            _repository.TryWriteFloat(configPath, "snapStrengthRampTime", strengthRampTime);
+        }
+
         var interpolationTypeIndex = ResolveOptionIndex(
             _repository.TryReadString(configPath, "snapInnerInterpolationType"),
             interpolationOptions,
@@ -449,6 +460,7 @@ internal sealed class ConfigStore
             VerticalStrengthFactor = verticalStrengthFactor,
             HipfireStrengthFactor = hipfireStrengthFactor,
             Height = height,
+            StrengthRampTime = strengthRampTime,
             InnerInterpolationTypeIndex = interpolationTypeIndex
         };
     }

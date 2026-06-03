@@ -19,6 +19,7 @@ internal sealed class HomeViewState
     public float SnapVerticalStrengthFactor { get; set; }
     public float SnapHipfireStrengthFactor { get; set; }
     public float SnapHeight { get; set; }
+    public float SnapStrengthRampTime { get; set; }
     public int SnapInnerInterpolationTypeIndex { get; set; }
     public string AddNameBuffer { get; set; } = string.Empty;
     public string AddError { get; set; } = string.Empty;
@@ -38,6 +39,7 @@ internal sealed class HomeViewState
         SnapVerticalStrengthFactor = snapConfig.VerticalStrengthFactor;
         SnapHipfireStrengthFactor = snapConfig.HipfireStrengthFactor;
         SnapHeight = snapConfig.Height;
+        SnapStrengthRampTime = snapConfig.StrengthRampTime;
         SnapInnerInterpolationTypeIndex = snapConfig.InnerInterpolationTypeIndex;
     }
 
@@ -61,6 +63,7 @@ internal sealed class HomeViewState
         float verticalStrengthFactor,
         float hipfireStrengthFactor,
         float height,
+        float strengthRampTime,
         int interpolationTypeIndex)
     {
         SnapModeIndex = snapModeIndex;
@@ -82,6 +85,7 @@ internal sealed class HomeViewState
         SnapVerticalStrengthFactor = verticalStrengthFactor;
         SnapHipfireStrengthFactor = hipfireStrengthFactor;
         SnapHeight = height;
+        SnapStrengthRampTime = strengthRampTime;
         SnapInnerInterpolationTypeIndex = interpolationTypeIndex;
     }
 

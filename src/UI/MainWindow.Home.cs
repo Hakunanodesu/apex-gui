@@ -271,6 +271,7 @@ public sealed partial class MainWindow
             DrawSnapRangeRow(layout, selectedModelSize, snapOuterRangeMax);
             DrawSnapStrengthRow(layout);
             DrawSnapExtraRow(layout);
+            DrawSnapStrengthRampRow(layout);
 
             ImGui.EndTable();
         }
@@ -338,6 +339,11 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("内圈范围");
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("内圈吸附半径，目标进入该范围后按内圈强度进行吸附。\n单位：像素，需小于等于外圈范围。");
+        }
+
         ImGui.TableSetColumnIndex(1);
         ImGui.SetNextItemWidth(layout.RangeInputWidth);
         var snapInnerRange = _homeViewState.SnapInnerRange;
@@ -351,6 +357,11 @@ public sealed partial class MainWindow
         ImGui.TableSetColumnIndex(2);
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("外圈范围");
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("外圈吸附半径，目标进入该范围即开始吸附。\n单位：像素，上限取决于模型尺寸与显示高度。");
+        }
+
         ImGui.TableSetColumnIndex(3);
         ImGui.SetNextItemWidth(layout.RangeInputWidth);
         var snapOuterRange = _homeViewState.SnapOuterRange;
@@ -464,6 +475,32 @@ public sealed partial class MainWindow
             1f);
     }
 
+    private void DrawSnapStrengthRampRow(in SnapSettingsLayout layout)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextRow();
+
+        ImGui.TableSetColumnIndex(0);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("强度爬升时间");
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("吸附强度从起始强度爬升到目标强度所需的时间（秒）。\n0 表示瞬间到达目标强度，数值越大爬升越平缓。");
+        }
+
+        ImGui.TableSetColumnIndex(1);
+        ImGui.SetNextItemWidth(layout.StrengthInputWidth);
+        DrawClampedConfigFloatInput(
+            "##SnapStrengthRampTime",
+            "snapStrengthRampTime",
+            _homeViewState.SnapStrengthRampTime,
+            value => _homeViewState.SnapStrengthRampTime = value,
+            0f,
+            1f,
+            0.1f,
+            "%.1f");
+    }
+
     private void DrawSnapInterpolationTypeRow(float reserveWidth, float labelWidth)
     {
         if (!ImGui.BeginTable("##SnapInterpolationRow", 2, ImGuiTableFlags.SizingStretchProp))
@@ -517,10 +554,12 @@ public sealed partial class MainWindow
         float currentValue,
         Action<float> setValue,
         float min,
-        float max)
+        float max,
+        float step = SnapFloatStep,
+        string format = SnapFloatFormat)
     {
         var editedValue = currentValue;
-        if (!ImGui.InputFloat(controlId, ref editedValue, SnapFloatStep, SnapFloatStep, SnapFloatFormat))
+        if (!ImGui.InputFloat(controlId, ref editedValue, step, step, format))
         {
             return;
         }
@@ -988,7 +1027,7 @@ public sealed partial class MainWindow
                 ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.BordersOuter | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.NoHostExtendX))
         {
             ImGui.TableSetupColumn("武器名", ImGuiTableColumnFlags.WidthFixed, weaponNameColumnWidth);
-            ImGui.TableSetupColumn("瞄准吸附", ImGuiTableColumnFlags.WidthFixed, aimSnapColumnWidth);
+            ImGui.TableSetupColumn("瞄准 + 开火吸附", ImGuiTableColumnFlags.WidthFixed, aimSnapColumnWidth);
             ImGui.TableSetupColumn("开火连点", ImGuiTableColumnFlags.WidthFixed, rapidFireColumnWidth);
             ImGui.TableSetupColumn("松手开火", ImGuiTableColumnFlags.WidthFixed, releaseFireColumnWidth);
             ImGui.TableHeadersRow();
@@ -1020,7 +1059,7 @@ public sealed partial class MainWindow
             weaponNameColumnWidth = MathF.Max(weaponNameColumnWidth, ImGui.CalcTextSize(_specialWeaponNames[i]).X);
         }
 
-        var aimSnapColumnWidth = ImGui.CalcTextSize("瞄准吸附").X;
+        var aimSnapColumnWidth = ImGui.CalcTextSize("瞄准 + 开火吸附").X;
         var rapidFireColumnWidth = ImGui.CalcTextSize("开火连点").X;
         var releaseFireColumnWidth = ImGui.CalcTextSize("松手开火").X;
         var style = ImGui.GetStyle();

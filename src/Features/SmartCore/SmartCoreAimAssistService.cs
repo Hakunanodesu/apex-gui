@@ -38,6 +38,7 @@ internal readonly struct SmartCoreAimAssistConfigState
     public readonly float SnapVerticalStrengthFactor;
     public readonly float SnapHipfireStrengthFactor;
     public readonly float SnapHeight;
+    public readonly float SnapStrengthRampTime;
     public readonly int SnapInnerInterpolationTypeIndex;
     public readonly int AimBindingIndex;
     public readonly int FireBindingIndex;
@@ -65,6 +66,7 @@ internal readonly struct SmartCoreAimAssistConfigState
         float snapVerticalStrengthFactor,
         float snapHipfireStrengthFactor,
         float snapHeight,
+        float snapStrengthRampTime,
         int snapInnerInterpolationTypeIndex,
         int aimBindingIndex,
         int fireBindingIndex,
@@ -91,6 +93,7 @@ internal readonly struct SmartCoreAimAssistConfigState
         SnapVerticalStrengthFactor = snapVerticalStrengthFactor;
         SnapHipfireStrengthFactor = snapHipfireStrengthFactor;
         SnapHeight = snapHeight;
+        SnapStrengthRampTime = snapStrengthRampTime;
         SnapInnerInterpolationTypeIndex = snapInnerInterpolationTypeIndex;
         AimBindingIndex = aimBindingIndex;
         FireBindingIndex = fireBindingIndex;
@@ -113,6 +116,7 @@ internal readonly struct SmartCoreAimAssistConfigState
         0,
         1,
         1,
+        0f,
         0f,
         0f,
         0f,
@@ -152,6 +156,7 @@ internal readonly struct SmartCoreAimAssistContext
     public readonly int AimBindingIndex;
     public readonly int FireBindingIndex;
     public readonly bool IsAimSnapOverrideWeapon;
+    public readonly float FireStrengthRampMultiplier;
     public readonly SdlGamepadInputSnapshot Input;
     public readonly OnnxDebugBox[] Boxes;
 
@@ -171,6 +176,7 @@ internal readonly struct SmartCoreAimAssistContext
         int aimBindingIndex,
         int fireBindingIndex,
         bool isAimSnapOverrideWeapon,
+        float fireStrengthRampMultiplier,
         SdlGamepadInputSnapshot input,
         OnnxDebugBox[] boxes)
     {
@@ -189,6 +195,7 @@ internal readonly struct SmartCoreAimAssistContext
         AimBindingIndex = aimBindingIndex;
         FireBindingIndex = fireBindingIndex;
         IsAimSnapOverrideWeapon = isAimSnapOverrideWeapon;
+        FireStrengthRampMultiplier = fireStrengthRampMultiplier;
         Input = input;
         Boxes = boxes;
     }
@@ -315,6 +322,8 @@ internal sealed class SmartCoreStickMapper
 
             strength *= Math.Clamp(context.SnapHipfireStrengthFactor, 0f, 1f);
         }
+
+        strength *= Math.Clamp(context.FireStrengthRampMultiplier, 0f, 1f);
 
         if (strength <= 0f)
         {

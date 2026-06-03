@@ -28,6 +28,7 @@ public sealed partial class MainWindow : GameWindow
     private const float DefaultSnapVerticalStrengthFactor = 0f;
     private const float DefaultSnapHipfireStrengthFactor = 0f;
     private const float DefaultSnapHeight = 0f;
+    private const float DefaultSnapStrengthRampTime = 0f;
 
     private ImGuiController? _controller;
     private float _dpiScale = 1.0f;
@@ -413,6 +414,7 @@ public sealed partial class MainWindow : GameWindow
             DefaultSnapVerticalStrengthFactor,
             DefaultSnapHipfireStrengthFactor,
             DefaultSnapHeight,
+            DefaultSnapStrengthRampTime,
             HomeSnapModeOptions,
             SnapInnerInterpolationTypeOptions,
             GamepadBindingCatalog.Options,
@@ -488,6 +490,7 @@ public sealed partial class MainWindow : GameWindow
             DefaultSnapVerticalStrengthFactor,
             DefaultSnapHipfireStrengthFactor,
             DefaultSnapHeight,
+            DefaultSnapStrengthRampTime,
             0);
         Array.Clear(_specialWeaponAimSnapEnabled);
         Array.Clear(_specialWeaponRapidFireEnabled);
@@ -769,6 +772,7 @@ protected override void OnResize(ResizeEventArgs e)
             _homeViewState.SnapVerticalStrengthFactor,
             _homeViewState.SnapHipfireStrengthFactor,
             _homeViewState.SnapHeight,
+            _homeViewState.SnapStrengthRampTime,
             _homeViewState.SnapInnerInterpolationTypeIndex,
             _homeViewState.AimBindingIndex,
             _homeViewState.FireBindingIndex,

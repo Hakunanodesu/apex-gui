@@ -254,6 +254,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
         var touchpadRightRapidHigh = false;
         var touchpadRightRapidLastToggleAt = DateTime.UtcNow;
         var releasePrevPressed = false;
+        var snapRampTriggerPrev = false;
+        var snapRampStartedAt = DateTime.UtcNow;
         DateTime? releasePulseUntil = null;
         DateTime? sdlInputFailureSinceUtc = null;
         ControllerOutputState? lastSubmittedState = null;
@@ -330,6 +332,41 @@ internal sealed class ViGEmMappingWorker : IDisposable
             var touchpadLeftBindingIndex = aimAssistConfigState.TouchpadLeftBindingIndex;
             var touchpadRightBindingIndex = aimAssistConfigState.TouchpadRightBindingIndex;
             var firePressed = GamepadBindingCatalog.IsPressed(fireBindingIndex, input);
+
+            var aimPressedForRamp = GamepadBindingCatalog.IsPressed(aimAssistConfigState.AimBindingIndex, input);
+            bool snapRampTrigger;
+            if (isAimSnapOverrideWeapon)
+            {
+                snapRampTrigger = firePressed || aimPressedForRamp;
+            }
+            else
+            {
+                snapRampTrigger = aimAssistConfigState.SnapModeIndex switch
+                {
+                    0 => firePressed,
+                    1 => aimPressedForRamp || firePressed,
+                    _ => false
+                };
+            }
+
+            var nowForRamp = DateTime.UtcNow;
+            if (snapRampTrigger && !snapRampTriggerPrev)
+            {
+                snapRampStartedAt = nowForRamp;
+            }
+
+            snapRampTriggerPrev = snapRampTrigger;
+            var snapRampTime = aimAssistConfigState.SnapStrengthRampTime;
+            float fireStrengthRampMultiplier;
+            if (!snapRampTrigger || snapRampTime <= 0f)
+            {
+                fireStrengthRampMultiplier = 1f;
+            }
+            else
+            {
+                var rampElapsedSeconds = (float)(nowForRamp - snapRampStartedAt).TotalSeconds;
+                fireStrengthRampMultiplier = Math.Clamp(rampElapsedSeconds / snapRampTime, 0f, 1f);
+            }
 
             short mappedLeftTrigger = input.LeftTrigger;
             short mappedRightTrigger = input.RightTrigger;
@@ -649,6 +686,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 aimAssistConfigState.AimBindingIndex,
                 aimAssistConfigState.FireBindingIndex,
                 isAimSnapOverrideWeapon,
+                fireStrengthRampMultiplier,
                 input,
                 aimAssistDetectionState.Boxes));
 
@@ -1015,6 +1053,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
                a.SnapVerticalStrengthFactor.Equals(b.SnapVerticalStrengthFactor) &&
                a.SnapHipfireStrengthFactor.Equals(b.SnapHipfireStrengthFactor) &&
                a.SnapHeight.Equals(b.SnapHeight) &&
+               a.SnapStrengthRampTime.Equals(b.SnapStrengthRampTime) &&
                a.SnapInnerInterpolationTypeIndex == b.SnapInnerInterpolationTypeIndex &&
                a.AimBindingIndex == b.AimBindingIndex &&
                a.FireBindingIndex == b.FireBindingIndex &&
