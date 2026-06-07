@@ -338,6 +338,7 @@ internal sealed class ConfigRepository
     public bool TryCreateEmptyConfigFile(
         string rawName,
         string specialWeaponLogicConfigKey,
+        IReadOnlyList<string> gameKeys,
         string aimSnapWeaponListConfigKey,
         string rapidFireWeaponListConfigKey,
         string releaseFireWeaponListConfigKey,
@@ -363,10 +364,15 @@ internal sealed class ConfigRepository
             }
 
             var root = new JsonObject();
+            root["game"] = gameKeys.Count > 0 ? gameKeys[0] : "Apex Legends";
             var specialWeaponLogicRoot = EnsureObject(root, specialWeaponLogicConfigKey);
-            specialWeaponLogicRoot[aimSnapWeaponListConfigKey] = new JsonArray();
-            specialWeaponLogicRoot[rapidFireWeaponListConfigKey] = new JsonArray();
-            specialWeaponLogicRoot[releaseFireWeaponListConfigKey] = new JsonArray();
+            for (var i = 0; i < gameKeys.Count; i++)
+            {
+                var gameLogicRoot = EnsureObject(specialWeaponLogicRoot, gameKeys[i]);
+                gameLogicRoot[aimSnapWeaponListConfigKey] = new JsonArray();
+                gameLogicRoot[rapidFireWeaponListConfigKey] = new JsonArray();
+                gameLogicRoot[releaseFireWeaponListConfigKey] = new JsonArray();
+            }
             SaveJsonObject(path, root);
             normalizedBaseName = baseName;
             return true;

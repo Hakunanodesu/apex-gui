@@ -93,6 +93,7 @@ public sealed partial class MainWindow
         if (_configRepository.TryCreateEmptyConfigFile(
                 rawName,
                 SpecialWeaponLogicConfigKey,
+                HomeGameOptions,
                 AimSnapWeaponListConfigKey,
                 RapidFireWeaponListConfigKey,
                 ReleaseFireWeaponListConfigKey,

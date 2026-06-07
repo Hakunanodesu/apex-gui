@@ -1,6 +1,9 @@
 internal sealed class HomeViewState
 {
     public int SnapModeIndex { get; set; } = -1;
+    public int RapidFireStrategyIndex { get; set; } = -1;
+    public int RapidFireHz { get; set; } = 25;
+    public int GameIndex { get; set; }
     public int AimBindingIndex { get; set; } = GamepadBindingCatalog.DefaultAimIndex;
     public int FireBindingIndex { get; set; } = GamepadBindingCatalog.DefaultFireIndex;
     public int VoiceBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
@@ -9,8 +12,6 @@ internal sealed class HomeViewState
     public int TouchpadRightBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadRightIndex;
     public string TouchpadLeftCustomKey { get; set; } = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
     public string TouchpadRightCustomKey { get; set; } = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
-    public bool TouchpadLeftRapidEnabled { get; set; }
-    public bool TouchpadRightRapidEnabled { get; set; }
     public int SnapOuterRange { get; set; } = 1;
     public float SnapOuterStrength { get; set; }
     public int SnapInnerRange { get; set; } = 1;
@@ -45,6 +46,8 @@ internal sealed class HomeViewState
 
     public void ResetSnapSettings(
         int snapModeIndex,
+        int rapidFireStrategyIndex,
+        int rapidFireHz,
         int aimBindingIndex,
         int fireBindingIndex,
         int voiceBindingIndex,
@@ -53,8 +56,6 @@ internal sealed class HomeViewState
         int touchpadRightBindingIndex,
         string touchpadLeftCustomKey,
         string touchpadRightCustomKey,
-        bool touchpadLeftRapidEnabled,
-        bool touchpadRightRapidEnabled,
         int outerRange,
         int innerRange,
         float outerStrength,
@@ -67,6 +68,8 @@ internal sealed class HomeViewState
         int interpolationTypeIndex)
     {
         SnapModeIndex = snapModeIndex;
+        RapidFireStrategyIndex = rapidFireStrategyIndex;
+        RapidFireHz = rapidFireHz;
         AimBindingIndex = aimBindingIndex;
         FireBindingIndex = fireBindingIndex;
         VoiceBindingIndex = voiceBindingIndex;
@@ -75,8 +78,6 @@ internal sealed class HomeViewState
         TouchpadRightBindingIndex = touchpadRightBindingIndex;
         TouchpadLeftCustomKey = touchpadLeftCustomKey;
         TouchpadRightCustomKey = touchpadRightCustomKey;
-        TouchpadLeftRapidEnabled = touchpadLeftRapidEnabled;
-        TouchpadRightRapidEnabled = touchpadRightRapidEnabled;
         SnapOuterRange = outerRange;
         SnapInnerRange = innerRange;
         SnapOuterStrength = outerStrength;

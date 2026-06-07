@@ -178,6 +178,7 @@ internal sealed class OnnxWorker : IDisposable
 
                 _ = CountDetections(
                     outputs,
+                    _model.OutputFormat,
                     _model.InputWidth,
                     _model.InputHeight,
                     _model.ConfThreshold,
@@ -312,6 +313,7 @@ internal sealed class OnnxWorker : IDisposable
 
     private static int CountDetections(
         IDisposableReadOnlyCollection<DisposableNamedOnnxValue> outputs,
+        YoloOutputFormat outputFormat,
         int inputWidth,
         int inputHeight,
         float confThres,
@@ -339,7 +341,17 @@ internal sealed class OnnxWorker : IDisposable
 
             var dims = tensor.Dimensions.ToArray();
             var values = tensor.ToArray();
-            if (TryParseDetections(values, dims, inputWidth, inputHeight, confThres, iouThres, allowedClasses, out var count, out boxes))
+            if (TryParseDetections(
+                    values,
+                    dims,
+                    outputFormat,
+                    inputWidth,
+                    inputHeight,
+                    confThres,
+                    iouThres,
+                    allowedClasses,
+                    out var count,
+                    out boxes))
             {
                 return count;
             }
@@ -349,6 +361,43 @@ internal sealed class OnnxWorker : IDisposable
     }
 
     private static bool TryParseDetections(
+        float[] values,
+        int[] dims,
+        YoloOutputFormat outputFormat,
+        int inputWidth,
+        int inputHeight,
+        float confThres,
+        float iouThres,
+        HashSet<int> allowedClasses,
+        out int count,
+        out OnnxDebugBox[] boxes)
+    {
+        return outputFormat switch
+        {
+            YoloOutputFormat.YoloV8 => TryParseYoloV8Detections(
+                values,
+                dims,
+                inputWidth,
+                inputHeight,
+                confThres,
+                iouThres,
+                allowedClasses,
+                out count,
+                out boxes),
+            _ => TryParseYoloV5Detections(
+                values,
+                dims,
+                inputWidth,
+                inputHeight,
+                confThres,
+                iouThres,
+                allowedClasses,
+                out count,
+                out boxes)
+        };
+    }
+
+    private static bool TryParseYoloV5Detections(
         float[] values,
         int[] dims,
         int inputWidth,
@@ -433,13 +482,126 @@ internal sealed class OnnxWorker : IDisposable
             candidateBoxes.Add((Read(0), Read(1), Math.Abs(Read(2)), Math.Abs(Read(3)), score, obj, bestClassScore));
         }
 
+        var nmsCandidates = candidateBoxes
+            .Select(box => (box.x, box.y, box.w, box.h, box.score))
+            .ToList();
+        return ApplyNms(nmsCandidates, iouThres, inputWidth, inputHeight, out count, out boxes);
+    }
+
+    private static bool TryParseYoloV8Detections(
+        float[] values,
+        int[] dims,
+        int inputWidth,
+        int inputHeight,
+        float confThres,
+        float iouThres,
+        HashSet<int> allowedClasses,
+        out int count,
+        out OnnxDebugBox[] boxes)
+    {
+        count = 0;
+        boxes = Array.Empty<OnnxDebugBox>();
+        if (!TryResolveOutputLayout(dims, minFeatures: 4, out var rows, out var cols, out var transposed))
+        {
+            return false;
+        }
+
+        var candidateBoxes = new List<(float x, float y, float w, float h, float score)>();
+        for (var i = 0; i < rows; i++)
+        {
+            var baseIndex = transposed ? i : i * cols;
+            float Read(int c) => transposed ? values[c * rows + baseIndex] : values[baseIndex + c];
+
+            var bestClassScore = 0f;
+            var bestClass = -1;
+            for (var c = 4; c < cols; c++)
+            {
+                var cls = Read(c);
+                if (cls > bestClassScore)
+                {
+                    bestClassScore = cls;
+                    bestClass = c - 4;
+                }
+            }
+
+            if (bestClassScore <= 0f)
+            {
+                continue;
+            }
+
+            if (bestClass >= 0 && allowedClasses.Count > 0 && !allowedClasses.Contains(bestClass))
+            {
+                continue;
+            }
+
+            if (bestClassScore < confThres)
+            {
+                continue;
+            }
+
+            candidateBoxes.Add((Read(0), Read(1), Math.Abs(Read(2)), Math.Abs(Read(3)), bestClassScore));
+        }
+
+        return ApplyNms(candidateBoxes, iouThres, inputWidth, inputHeight, out count, out boxes);
+    }
+
+    private static bool TryResolveOutputLayout(
+        int[] dims,
+        int minFeatures,
+        out int rows,
+        out int cols,
+        out bool transposed)
+    {
+        rows = 0;
+        cols = 0;
+        transposed = false;
+        if (dims.Length != 3)
+        {
+            return false;
+        }
+
+        if (dims[1] <= dims[2])
+        {
+            if (dims[1] < minFeatures)
+            {
+                return false;
+            }
+
+            transposed = true;
+            rows = dims[2];
+            cols = dims[1];
+        }
+        else
+        {
+            if (dims[2] < minFeatures)
+            {
+                return false;
+            }
+
+            rows = dims[1];
+            cols = dims[2];
+        }
+
+        return rows > 0;
+    }
+
+    private static bool ApplyNms(
+        List<(float x, float y, float w, float h, float score)> candidateBoxes,
+        float iouThres,
+        int inputWidth,
+        int inputHeight,
+        out int count,
+        out OnnxDebugBox[] boxes)
+    {
+        count = 0;
+        boxes = Array.Empty<OnnxDebugBox>();
         if (candidateBoxes.Count == 0)
         {
             return true;
         }
 
         candidateBoxes.Sort((a, b) => b.score.CompareTo(a.score));
-        var kept = new List<(float x, float y, float w, float h, float score, float obj, float classScore)>();
+        var kept = new List<(float x, float y, float w, float h, float score)>();
         foreach (var box in candidateBoxes)
         {
             var suppressed = false;

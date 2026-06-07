@@ -77,10 +77,24 @@
             _weaponRecWorker.SetConsumer(_viGEmMappingWorker);
             _dxgiWorker.SetFrameConsumer(_onnxWorker);
             _currentVisionConfig = config;
+            SyncWeaponRecognitionEnabled();
         }
         catch
         {
             StopVisionPipeline();
+        }
+    }
+
+    private void SyncWeaponRecognitionEnabled()
+    {
+        var enabled = _smartCoreMappingState.IsEnabled &&
+                      _weaponRecWorker is not null &&
+                      _homeViewState.RapidFireStrategyIndex == WeaponBasedRapidFireStrategyIndex;
+        _dxgiWorker?.SetWeaponRoiCaptureEnabled(enabled);
+        _weaponRecWorker?.SetProcessingEnabled(enabled);
+        if (!enabled)
+        {
+            _viGEmMappingWorker?.SetWeaponRecognition(WeaponRecognitionResultState.Empty);
         }
     }
 

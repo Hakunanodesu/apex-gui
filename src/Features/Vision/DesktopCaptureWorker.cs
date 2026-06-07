@@ -22,6 +22,7 @@ internal sealed class DesktopCaptureWorker : IDisposable
     private int _latestWeaponRoiHeight;
     private int _latestWeaponRoiFrameId;
     private bool _previewFrameCacheEnabled;
+    private bool _weaponRoiCaptureEnabled = true;
     private string? _lastError;
     private OnnxWorker? _frameConsumer;
 
@@ -133,6 +134,21 @@ internal sealed class DesktopCaptureWorker : IDisposable
         }
     }
 
+    public void SetWeaponRoiCaptureEnabled(bool enabled)
+    {
+        lock (_sync)
+        {
+            _weaponRoiCaptureEnabled = enabled;
+            if (!enabled)
+            {
+                _latestWeaponRoi = Array.Empty<byte>();
+                _latestWeaponRoiWidth = 0;
+                _latestWeaponRoiHeight = 0;
+                _latestWeaponRoiFrameId = 0;
+            }
+        }
+    }
+
     private void CaptureThreadMain()
     {
         try
@@ -154,16 +170,19 @@ internal sealed class DesktopCaptureWorker : IDisposable
 
                 int requestedWidth;
                 int requestedHeight;
+                var weaponRoiCaptureEnabled = false;
                 lock (_sync)
                 {
                     requestedWidth = _requestedCaptureWidth;
                     requestedHeight = _requestedCaptureHeight;
+                    weaponRoiCaptureEnabled = _weaponRoiCaptureEnabled;
                 }
 
                 duplicator.SetCaptureRegion(requestedWidth, requestedHeight);
                 timer.Restart();
                 var ok = duplicator.TryCaptureFrame(
                     1,
+                    weaponRoiCaptureEnabled,
                     out var frameData,
                     out var width,
                     out var height,
@@ -199,7 +218,8 @@ internal sealed class DesktopCaptureWorker : IDisposable
                             _latestFrameId++;
                         }
 
-                        if (weaponRoiWidth > 0 && weaponRoiHeight > 0 && weaponRoiData.Length == weaponRoiWidth * weaponRoiHeight * 3)
+                        if (weaponRoiCaptureEnabled &&
+                            weaponRoiWidth > 0 && weaponRoiHeight > 0 && weaponRoiData.Length == weaponRoiWidth * weaponRoiHeight * 3)
                         {
                             if (_latestWeaponRoi.Length != weaponRoiData.Length)
                             {
@@ -363,6 +383,7 @@ internal sealed class DxgiDesktopDuplicator : IDisposable
 
     public unsafe bool TryCaptureFrame(
         int timeoutMs,
+        bool captureWeaponRoi,
         out byte[] frameData,
         out int width,
         out int height,
@@ -433,7 +454,7 @@ internal sealed class DxgiDesktopDuplicator : IDisposable
                 height = captureHeight;
 
                 var (roiLeft, roiTop, roiWidth, roiHeight) = CalcWeaponRoi(_outputWidth, _outputHeight);
-                if (roiWidth > 0 && roiHeight > 0)
+                if (captureWeaponRoi && roiWidth > 0 && roiHeight > 0)
                 {
                     var requiredBytes = roiWidth * roiHeight * 3;
                     if (_weaponRoiBuffer.Length != requiredBytes)

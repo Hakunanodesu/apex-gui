@@ -36,6 +36,12 @@ public sealed partial class MainWindow : GameWindow
     private readonly List<OnnxModelConfig> _onnxModels = new();
     private int _onnxTopSelectedModelIndex = -1;
     private static readonly string[] HomeSnapModeOptions = { "开火吸附", "瞄准 + 开火吸附" };
+    private static readonly string[] HomeRapidFireStrategyOptions = { "关闭连点", "始终连点", "根据当前武器连点" };
+    private const int AimAndFireSnapModeIndex = 1;
+    private const int WeaponBasedRapidFireStrategyIndex = 2;
+    private const int DefaultRapidFireHz = 25;
+    private const int MinRapidFireHz = 1;
+    private const int MaxRapidFireHz = 30;
     private static readonly string[] SnapInnerInterpolationTypeOptions =
     {
         "Linear",
@@ -45,6 +51,8 @@ public sealed partial class MainWindow : GameWindow
     };
     private static readonly string[] TouchpadBindingOptions =
         GamepadBindingCatalog.Options.Concat(new[] { GamepadBindingCatalog.KeyboardCustomBindingName }).ToArray();
+    private static readonly string[] HomeGameOptions = WeaponTemplateCatalog.GameOptions;
+    private const string GameConfigKey = "game";
     private const string SpecialWeaponLogicConfigKey = "specialWeaponLogic";
     private const string AimSnapWeaponListConfigKey = "aimSnapWeapons";
     private const string RapidFireWeaponListConfigKey = "rapidFireWeapons";
@@ -57,11 +65,9 @@ public sealed partial class MainWindow : GameWindow
     private const string TouchpadRightBindingConfigKey = "touchpadRightBinding";
     private const string TouchpadLeftCustomKeyConfigKey = "touchpadLeftCustomKey";
     private const string TouchpadRightCustomKeyConfigKey = "touchpadRightCustomKey";
-    private const string TouchpadLeftRapidEnabledConfigKey = "touchpadLeftRapidEnabled";
-    private const string TouchpadRightRapidEnabledConfigKey = "touchpadRightRapidEnabled";
     private const string DefaultVoiceCustomKeyName = "V";
     private readonly HomeViewState _homeViewState = new();
-    private readonly string[] _specialWeaponNames;
+    private string[] _specialWeaponNames;
     private bool[] _specialWeaponAimSnapEnabled;
     private bool[] _specialWeaponRapidFireEnabled;
     private bool[] _specialWeaponReleaseFireEnabled;
@@ -94,11 +100,12 @@ public sealed partial class MainWindow : GameWindow
     public MainWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings)
         : base(gameWindowSettings, nativeWindowSettings)
     {
-        _specialWeaponNames = WeaponTemplateCatalog.GetWeaponNames();
-        _specialWeaponAimSnapEnabled = new bool[_specialWeaponNames.Length];
-        _specialWeaponRapidFireEnabled = new bool[_specialWeaponNames.Length];
-        _specialWeaponReleaseFireEnabled = new bool[_specialWeaponNames.Length];
+        _specialWeaponNames = Array.Empty<string>();
+        _specialWeaponAimSnapEnabled = Array.Empty<bool>();
+        _specialWeaponRapidFireEnabled = Array.Empty<bool>();
+        _specialWeaponReleaseFireEnabled = Array.Empty<bool>();
         _configStore = new ConfigStore(_configRepository);
+        RefreshSpecialWeaponNamesForCurrentGame();
     }
 
     protected override void OnLoad()
@@ -416,6 +423,8 @@ public sealed partial class MainWindow : GameWindow
             DefaultSnapHeight,
             DefaultSnapStrengthRampTime,
             HomeSnapModeOptions,
+            HomeRapidFireStrategyOptions,
+            HomeGameOptions,
             SnapInnerInterpolationTypeOptions,
             GamepadBindingCatalog.Options,
             TouchpadBindingOptions,
@@ -425,11 +434,14 @@ public sealed partial class MainWindow : GameWindow
             DefaultVoiceCustomKeyName,
             GamepadBindingCatalog.DefaultTouchpadLeftIndex,
             GamepadBindingCatalog.DefaultTouchpadRightIndex,
-            false,
-            false);
+            DefaultRapidFireHz);
         if (!selectionResult.HasConfig)
         {
             _homeViewState.SnapModeIndex = -1;
+            _homeViewState.RapidFireStrategyIndex = -1;
+            _homeViewState.RapidFireHz = DefaultRapidFireHz;
+            _homeViewState.GameIndex = 0;
+            RefreshSpecialWeaponNamesForCurrentGame();
             _homeViewState.AimBindingIndex = GamepadBindingCatalog.DefaultAimIndex;
             _homeViewState.FireBindingIndex = GamepadBindingCatalog.DefaultFireIndex;
             _homeViewState.VoiceBindingIndex = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
@@ -438,8 +450,6 @@ public sealed partial class MainWindow : GameWindow
             _homeViewState.TouchpadRightBindingIndex = GamepadBindingCatalog.DefaultTouchpadRightIndex;
             _homeViewState.TouchpadLeftCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
             _homeViewState.TouchpadRightCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
-            _homeViewState.TouchpadLeftRapidEnabled = false;
-            _homeViewState.TouchpadRightRapidEnabled = false;
             _onnxTopSelectedModelIndex = -1;
             PushAimAssistConfig();
             SyncSmartCoreVisionPipeline();
@@ -447,6 +457,9 @@ public sealed partial class MainWindow : GameWindow
         }
 
         _homeViewState.SnapModeIndex = selectionResult.SnapModeIndex;
+        _homeViewState.RapidFireStrategyIndex = selectionResult.RapidFireStrategyIndex;
+        _homeViewState.RapidFireHz = selectionResult.RapidFireHz;
+        _homeViewState.GameIndex = selectionResult.GameIndex;
         _homeViewState.AimBindingIndex = selectionResult.AimBindingIndex;
         _homeViewState.FireBindingIndex = selectionResult.FireBindingIndex;
         _homeViewState.VoiceBindingIndex = selectionResult.VoiceBindingIndex;
@@ -455,13 +468,28 @@ public sealed partial class MainWindow : GameWindow
         _homeViewState.TouchpadRightBindingIndex = selectionResult.TouchpadRightBindingIndex;
         _homeViewState.TouchpadLeftCustomKey = selectionResult.TouchpadLeftCustomKey;
         _homeViewState.TouchpadRightCustomKey = selectionResult.TouchpadRightCustomKey;
-        _homeViewState.TouchpadLeftRapidEnabled = selectionResult.TouchpadLeftRapidEnabled;
-        _homeViewState.TouchpadRightRapidEnabled = selectionResult.TouchpadRightRapidEnabled;
+        RefreshSpecialWeaponNamesForCurrentGame();
         ApplySpecialWeaponLogicFromCurrentConfig();
         _onnxTopSelectedModelIndex = selectionResult.ModelIndex;
         _homeViewState.ApplySnapConfig(selectionResult.SnapConfig);
         PushAimAssistConfig();
         SyncSmartCoreVisionPipeline();
+    }
+
+    private string GetSelectedGameName()
+    {
+        _homeViewState.GameIndex = _homeViewState.GameIndex >= 0 && _homeViewState.GameIndex < HomeGameOptions.Length
+            ? _homeViewState.GameIndex
+            : 0;
+        return HomeGameOptions[_homeViewState.GameIndex];
+    }
+
+    private void RefreshSpecialWeaponNamesForCurrentGame()
+    {
+        _specialWeaponNames = WeaponTemplateCatalog.GetWeaponNamesForGame(GetSelectedGameName());
+        _specialWeaponAimSnapEnabled = new bool[_specialWeaponNames.Length];
+        _specialWeaponRapidFireEnabled = new bool[_specialWeaponNames.Length];
+        _specialWeaponReleaseFireEnabled = new bool[_specialWeaponNames.Length];
     }
 
     private void ResetConfigUiStateToDefaults()
@@ -472,6 +500,8 @@ public sealed partial class MainWindow : GameWindow
         _onnxTopSelectedModelIndex = -1;
         _homeViewState.ResetSnapSettings(
             0,
+            WeaponBasedRapidFireStrategyIndex,
+            DefaultRapidFireHz,
             GamepadBindingCatalog.DefaultAimIndex,
             GamepadBindingCatalog.DefaultFireIndex,
             GamepadBindingCatalog.DefaultTouchpadLeftIndex,
@@ -480,8 +510,6 @@ public sealed partial class MainWindow : GameWindow
             GamepadBindingCatalog.DefaultTouchpadRightIndex,
             GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
             GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
-            false,
-            false,
             DefaultSnapOuterRange,
             DefaultSnapInnerRange,
             DefaultSnapOuterStrength,
@@ -492,6 +520,8 @@ public sealed partial class MainWindow : GameWindow
             DefaultSnapHeight,
             DefaultSnapStrengthRampTime,
             0);
+        _homeViewState.GameIndex = 0;
+        RefreshSpecialWeaponNamesForCurrentGame();
         Array.Clear(_specialWeaponAimSnapEnabled);
         Array.Clear(_specialWeaponRapidFireEnabled);
         Array.Clear(_specialWeaponReleaseFireEnabled);
@@ -518,6 +548,7 @@ public sealed partial class MainWindow : GameWindow
             _configFiles,
             _selectedConfigFileIndex,
             SpecialWeaponLogicConfigKey,
+            GetSelectedGameName(),
             AimSnapWeaponListConfigKey,
             RapidFireWeaponListConfigKey,
             ReleaseFireWeaponListConfigKey,
@@ -537,6 +568,7 @@ public sealed partial class MainWindow : GameWindow
             _configFiles,
             _selectedConfigFileIndex,
             SpecialWeaponLogicConfigKey,
+            GetSelectedGameName(),
             AimSnapWeaponListConfigKey,
             RapidFireWeaponListConfigKey,
             ReleaseFireWeaponListConfigKey,
@@ -764,6 +796,8 @@ protected override void OnResize(ResizeEventArgs e)
             _smartCoreMappingState.IsEnabled,
             _smartCoreMappingState.IsMappingActive,
             _homeViewState.SnapModeIndex,
+            _homeViewState.RapidFireStrategyIndex,
+            _homeViewState.RapidFireHz,
             _homeViewState.SnapOuterRange,
             _homeViewState.SnapInnerRange,
             _homeViewState.SnapOuterStrength,
@@ -782,12 +816,11 @@ protected override void OnResize(ResizeEventArgs e)
             _homeViewState.TouchpadRightBindingIndex,
             _homeViewState.TouchpadLeftCustomKey,
             _homeViewState.TouchpadRightCustomKey,
-            _homeViewState.TouchpadLeftRapidEnabled,
-            _homeViewState.TouchpadRightRapidEnabled,
             BuildEnabledWeaponNameList(_specialWeaponAimSnapEnabled),
             BuildEnabledWeaponNameList(_specialWeaponRapidFireEnabled),
             BuildEnabledWeaponNameList(_specialWeaponReleaseFireEnabled));
         _viGEmMappingWorker.SetAimAssistConfig(config);
+        SyncWeaponRecognitionEnabled();
     }
 
     private string[] BuildEnabledWeaponNameList(IReadOnlyList<bool> enabledFlags)

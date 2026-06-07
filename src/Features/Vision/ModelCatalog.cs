@@ -1,5 +1,11 @@
 using System.Text.Json;
 
+internal enum YoloOutputFormat
+{
+    YoloV5,
+    YoloV8
+}
+
 internal readonly struct OnnxModelConfig
 {
     public readonly string DisplayName;
@@ -7,6 +13,7 @@ internal readonly struct OnnxModelConfig
     public readonly string OnnxPath;
     public readonly int InputWidth;
     public readonly int InputHeight;
+    public readonly YoloOutputFormat OutputFormat;
     public readonly float ConfThreshold;
     public readonly float IouThreshold;
     public readonly string ClassesRaw;
@@ -18,6 +25,7 @@ internal readonly struct OnnxModelConfig
         string onnxPath,
         int inputWidth,
         int inputHeight,
+        YoloOutputFormat outputFormat,
         float confThreshold,
         float iouThreshold,
         string classesRaw,
@@ -28,6 +36,7 @@ internal readonly struct OnnxModelConfig
         OnnxPath = onnxPath;
         InputWidth = inputWidth;
         InputHeight = inputHeight;
+        OutputFormat = outputFormat;
         ConfThreshold = confThreshold;
         IouThreshold = iouThreshold;
         ClassesRaw = classesRaw;
@@ -80,6 +89,12 @@ internal static class OnnxModelConfigLoader
                 return false;
             }
 
+            if (!root.TryGetProperty("format", out var formatEl)
+                || !TryParseOutputFormat(formatEl.GetString(), out var outputFormat))
+            {
+                return false;
+            }
+
             var conf = root.TryGetProperty("conf_thres", out var confEl) ? confEl.GetSingle() : 0.25f;
             var iou = root.TryGetProperty("iou_thres", out var iouEl) ? iouEl.GetSingle() : 0.45f;
             var classesRaw = root.TryGetProperty("classes", out var classesEl) ? classesEl.ToString() : string.Empty;
@@ -90,6 +105,7 @@ internal static class OnnxModelConfigLoader
                 onnxPath,
                 size,
                 size,
+                outputFormat,
                 conf,
                 iou,
                 classesRaw,
@@ -99,6 +115,29 @@ internal static class OnnxModelConfigLoader
         catch
         {
             return false;
+        }
+    }
+
+    private static bool TryParseOutputFormat(string? raw, out YoloOutputFormat format)
+    {
+        format = default;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        switch (raw.Trim().ToLowerInvariant())
+        {
+            case "yolov5":
+            case "v5":
+                format = YoloOutputFormat.YoloV5;
+                return true;
+            case "yolov8":
+            case "v8":
+                format = YoloOutputFormat.YoloV8;
+                return true;
+            default:
+                return false;
         }
     }
 

@@ -1,7 +1,7 @@
 using System.Reflection;
 using StbImageSharp;
 
-internal readonly record struct WeaponTemplateEntry(string Name, int Width, int Height, byte[] GrayPixels);
+internal readonly record struct WeaponTemplateEntry(string GameFolder, string Name, int Width, int Height, byte[] GrayPixels);
 
 internal static class WeaponTemplateCatalog
 {
@@ -10,6 +10,14 @@ internal static class WeaponTemplateCatalog
     public const float EmptyHandSsimThreshold = 0.4f;
     public const string EmptyHandName = "empty";
 
+    public static readonly string[] GameOptions = { "Apex Legends", "The Finals" };
+
+    private static readonly Dictionary<string, string> GameFolderByDisplayName = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Apex Legends"] = "apexlegends",
+        ["The Finals"] = "thefinals",
+    };
+
     private static readonly Lazy<IReadOnlyList<WeaponTemplateEntry>> CachedTemplates = new(LoadEmbeddedTemplatesInternal);
 
     public static IReadOnlyList<WeaponTemplateEntry> LoadEmbeddedTemplates()
@@ -17,10 +25,37 @@ internal static class WeaponTemplateCatalog
         return CachedTemplates.Value;
     }
 
-    public static string[] GetWeaponNames()
+    public static string GetGameFolder(string gameDisplayName)
     {
+        return GameFolderByDisplayName.TryGetValue(gameDisplayName, out var folder)
+            ? folder
+            : GameFolderByDisplayName["Apex Legends"];
+    }
+
+    public static int ResolveGameIndex(string? gameDisplayName, int fallback = 0)
+    {
+        if (string.IsNullOrWhiteSpace(gameDisplayName))
+        {
+            return fallback;
+        }
+
+        for (var i = 0; i < GameOptions.Length; i++)
+        {
+            if (string.Equals(GameOptions[i], gameDisplayName, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return fallback;
+    }
+
+    public static string[] GetWeaponNamesForGame(string gameDisplayName)
+    {
+        var gameFolder = GetGameFolder(gameDisplayName);
         return CachedTemplates.Value
-            .Select(t => t.Name)
+            .Where(entry => string.Equals(entry.GameFolder, gameFolder, StringComparison.OrdinalIgnoreCase))
+            .Select(entry => entry.Name)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -38,6 +73,11 @@ internal static class WeaponTemplateCatalog
                 continue;
             }
 
+            if (!TryExtractGameAndWeaponName(resourceName, out var gameFolder, out var weaponName))
+            {
+                continue;
+            }
+
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream is null)
             {
@@ -46,12 +86,6 @@ internal static class WeaponTemplateCatalog
 
             var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlue);
             if (image.Width != TemplateWidth || image.Height != TemplateHeight)
-            {
-                continue;
-            }
-
-            var name = ExtractTemplateName(resourceName);
-            if (string.IsNullOrWhiteSpace(name))
             {
                 continue;
             }
@@ -66,41 +100,47 @@ internal static class WeaponTemplateCatalog
                 gray[i] = ToGray(r, g, b);
             }
 
-            entries.Add(new WeaponTemplateEntry(name, TemplateWidth, TemplateHeight, gray));
+            entries.Add(new WeaponTemplateEntry(gameFolder, weaponName, TemplateWidth, TemplateHeight, gray));
         }
 
-        entries.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+        entries.Sort((a, b) =>
+        {
+            var gameCompare = string.Compare(a.GameFolder, b.GameFolder, StringComparison.OrdinalIgnoreCase);
+            return gameCompare != 0
+                ? gameCompare
+                : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+        });
         return entries;
     }
 
-    private static string ExtractTemplateName(string resourceName)
+    private static bool TryExtractGameAndWeaponName(string resourceName, out string gameFolder, out string weaponName)
     {
+        gameFolder = string.Empty;
+        weaponName = string.Empty;
         var normalized = resourceName.Replace('\\', '/');
-        var slashIndex = normalized.LastIndexOf('/');
-        if (slashIndex >= 0 && slashIndex + 1 < normalized.Length)
+        const string marker = "WeaponTemplates";
+        var markerIndex = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
         {
-            normalized = normalized[(slashIndex + 1)..];
+            return false;
         }
 
-        var pngIndex = normalized.LastIndexOf(".png", StringComparison.OrdinalIgnoreCase);
-        if (pngIndex > 0)
+        var suffix = normalized[(markerIndex + marker.Length)..].TrimStart('/', '.');
+        suffix = suffix.Replace('/', '.');
+        if (suffix.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
         {
-            normalized = normalized[..pngIndex];
+            suffix = suffix[..^4];
         }
 
-        // Handle default manifest name style: apex_imgui.WeaponTemplates.wingman.png
-        var dotPngIndex = resourceName.LastIndexOf(".png", StringComparison.OrdinalIgnoreCase);
-        if (dotPngIndex > 0)
+        var parts = suffix.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 2)
         {
-            var beforePng = resourceName[..dotPngIndex];
-            var lastDot = beforePng.LastIndexOf('.');
-            if (lastDot >= 0 && lastDot + 1 < beforePng.Length)
-            {
-                normalized = beforePng[(lastDot + 1)..];
-            }
+            return false;
         }
 
-        return normalized.Trim();
+        gameFolder = parts[0];
+        weaponName = string.Join('.', parts.Skip(1));
+        return !string.IsNullOrWhiteSpace(gameFolder) && !string.IsNullOrWhiteSpace(weaponName);
     }
 
     private static byte ToGray(byte r, byte g, byte b)

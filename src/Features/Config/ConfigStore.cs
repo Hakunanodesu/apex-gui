@@ -19,6 +19,9 @@ internal readonly record struct ConfigRefreshResult(IReadOnlyList<string> Config
 internal readonly record struct ConfigSelectionResult(
     bool HasConfig,
     int SnapModeIndex,
+    int RapidFireStrategyIndex,
+    int RapidFireHz,
+    int GameIndex,
     int ModelIndex,
     int AimBindingIndex,
     int FireBindingIndex,
@@ -28,13 +31,14 @@ internal readonly record struct ConfigSelectionResult(
     int TouchpadRightBindingIndex,
     string TouchpadLeftCustomKey,
     string TouchpadRightCustomKey,
-    bool TouchpadLeftRapidEnabled,
-    bool TouchpadRightRapidEnabled,
     SnapConfigState SnapConfig)
 {
     public static ConfigSelectionResult Empty => new(
         false,
         -1,
+        -1,
+        25,
+        0,
         -1,
         GamepadBindingCatalog.DefaultAimIndex,
         GamepadBindingCatalog.DefaultFireIndex,
@@ -44,8 +48,6 @@ internal readonly record struct ConfigSelectionResult(
         GamepadBindingCatalog.DefaultTouchpadRightIndex,
         GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
         GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
-        false,
-        false,
         new SnapConfigState());
 }
 
@@ -102,6 +104,8 @@ internal sealed class ConfigStore
         float defaultHeight,
         float defaultStrengthRampTime,
         IReadOnlyList<string> snapModeOptions,
+        IReadOnlyList<string> rapidFireStrategyOptions,
+        IReadOnlyList<string> gameOptions,
         IReadOnlyList<string> interpolationOptions,
         IReadOnlyList<string> bindingOptions,
         IReadOnlyList<string> touchpadBindingOptions,
@@ -111,8 +115,7 @@ internal sealed class ConfigStore
         string defaultVoiceCustomKey,
         int defaultTouchpadLeftBindingIndex,
         int defaultTouchpadRightBindingIndex,
-        bool defaultTouchpadLeftRapidEnabled,
-        bool defaultTouchpadRightRapidEnabled)
+        int defaultRapidFireHz)
     {
         if (!TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
         {
@@ -122,6 +125,15 @@ internal sealed class ConfigStore
         var snapModeIndex = ResolveOptionIndex(
             _repository.TryReadString(configPath, "snap"),
             snapModeOptions,
+            0);
+        var rapidFireStrategyIndex = ResolveOptionIndex(
+            _repository.TryReadString(configPath, "rapidFireStrategy"),
+            rapidFireStrategyOptions,
+            2);
+        var rapidFireHz = Math.Clamp(_repository.TryReadInt(configPath, "rapidFireHz") ?? defaultRapidFireHz, 1, 30);
+        var gameIndex = ResolveOptionIndex(
+            _repository.TryReadString(configPath, "game"),
+            gameOptions,
             0);
         var aimBindingIndex = ResolveOptionIndex(
             _repository.TryReadString(configPath, "aimBinding"),
@@ -148,8 +160,6 @@ internal sealed class ConfigStore
             defaultTouchpadRightBindingIndex);
         var touchpadLeftCustomKey = NormalizeCustomKeyboardKey(_repository.TryReadString(configPath, "touchpadLeftCustomKey"), GamepadBindingCatalog.DefaultCustomKeyboardKeyName);
         var touchpadRightCustomKey = NormalizeCustomKeyboardKey(_repository.TryReadString(configPath, "touchpadRightCustomKey"), GamepadBindingCatalog.DefaultCustomKeyboardKeyName);
-        var touchpadLeftRapidEnabled = _repository.TryReadBool(configPath, "touchpadLeftRapidEnabled") ?? defaultTouchpadLeftRapidEnabled;
-        var touchpadRightRapidEnabled = _repository.TryReadBool(configPath, "touchpadRightRapidEnabled") ?? defaultTouchpadRightRapidEnabled;
         var modelIndex = onnxModels.Count == 0
             ? -1
             : ResolveModelIndex(_repository.TryReadString(configPath, "model"), onnxModels);
@@ -174,6 +184,9 @@ internal sealed class ConfigStore
         return new ConfigSelectionResult(
             true,
             snapModeIndex,
+            rapidFireStrategyIndex,
+            rapidFireHz,
+            gameIndex,
             modelIndex,
             aimBindingIndex,
             fireBindingIndex,
@@ -183,8 +196,6 @@ internal sealed class ConfigStore
             touchpadRightBindingIndex,
             touchpadLeftCustomKey,
             touchpadRightCustomKey,
-            touchpadLeftRapidEnabled,
-            touchpadRightRapidEnabled,
             snapConfig);
     }
 
@@ -252,6 +263,7 @@ internal sealed class ConfigStore
         IReadOnlyList<string> configFiles,
         int selectedConfigFileIndex,
         string rootKey,
+        string gameKey,
         string aimSnapListKey,
         string rapidFireListKey,
         string releaseFireListKey,
@@ -273,42 +285,60 @@ internal sealed class ConfigStore
         {
             var root = _repository.LoadJsonObjectOrEmpty(configPath);
             var specialWeaponLogicRoot = EnsureRoot(root, rootKey);
+            var gameLogicRoot = EnsureRoot(specialWeaponLogicRoot, gameKey);
             var hasAnyChanges = false;
-            var hasAimSnapList = TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[aimSnapListKey], aimSnapFlags, weaponNames);
-            var hasRapidFireList = TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[rapidFireListKey], rapidFireFlags, weaponNames);
-            var hasReleaseFireList = TryApplyEnabledWeaponListFromNode(specialWeaponLogicRoot[releaseFireListKey], releaseFireFlags, weaponNames);
+            var hasAimSnapList = TryApplyEnabledWeaponListFromNode(gameLogicRoot[aimSnapListKey], aimSnapFlags, weaponNames);
+            var hasRapidFireList = TryApplyEnabledWeaponListFromNode(gameLogicRoot[rapidFireListKey], rapidFireFlags, weaponNames);
+            var hasReleaseFireList = TryApplyEnabledWeaponListFromNode(gameLogicRoot[releaseFireListKey], releaseFireFlags, weaponNames);
 
-            if (specialWeaponLogicRoot[aimSnapListKey] is not JsonArray)
+            if (gameLogicRoot[aimSnapListKey] is not JsonArray)
             {
-                specialWeaponLogicRoot[aimSnapListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
+                gameLogicRoot[aimSnapListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
                 hasAnyChanges = true;
             }
 
-            if (specialWeaponLogicRoot[rapidFireListKey] is not JsonArray)
+            if (gameLogicRoot[rapidFireListKey] is not JsonArray)
             {
-                specialWeaponLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
+                gameLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
                 hasAnyChanges = true;
             }
 
-            if (specialWeaponLogicRoot[releaseFireListKey] is not JsonArray)
+            if (gameLogicRoot[releaseFireListKey] is not JsonArray)
             {
-                specialWeaponLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
+                gameLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
                 hasAnyChanges = true;
             }
 
-            if (hasAimSnapList && specialWeaponLogicRoot[aimSnapListKey] is JsonArray)
+            if (hasAimSnapList && gameLogicRoot[aimSnapListKey] is JsonArray)
             {
-                specialWeaponLogicRoot[aimSnapListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
+                gameLogicRoot[aimSnapListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
             }
 
-            if (hasRapidFireList && specialWeaponLogicRoot[rapidFireListKey] is JsonArray)
+            if (hasRapidFireList && gameLogicRoot[rapidFireListKey] is JsonArray)
             {
-                specialWeaponLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
+                gameLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
             }
 
-            if (hasReleaseFireList && specialWeaponLogicRoot[releaseFireListKey] is JsonArray)
+            if (hasReleaseFireList && gameLogicRoot[releaseFireListKey] is JsonArray)
             {
-                specialWeaponLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
+                gameLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
+            }
+
+            for (var i = 0; i < weaponNames.Count; i++)
+            {
+                if (!rapidFireFlags[i] || !releaseFireFlags[i])
+                {
+                    continue;
+                }
+
+                rapidFireFlags[i] = false;
+                hasAnyChanges = true;
+            }
+
+            if (hasAnyChanges)
+            {
+                gameLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
+                gameLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
             }
 
             if (hasAnyChanges)
@@ -328,6 +358,7 @@ internal sealed class ConfigStore
         IReadOnlyList<string> configFiles,
         int selectedConfigFileIndex,
         string rootKey,
+        string gameKey,
         string aimSnapListKey,
         string rapidFireListKey,
         string releaseFireListKey,
@@ -354,12 +385,13 @@ internal sealed class ConfigStore
         {
             var root = _repository.LoadJsonObjectOrEmpty(configPath);
             var specialWeaponLogicRoot = EnsureRoot(root, rootKey);
+            var gameLogicRoot = EnsureRoot(specialWeaponLogicRoot, gameKey);
             aimSnapFlags[weaponIndex] = aimSnapEnabled;
             rapidFireFlags[weaponIndex] = rapidFireEnabled;
             releaseFireFlags[weaponIndex] = releaseFireEnabled;
-            specialWeaponLogicRoot[aimSnapListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
-            specialWeaponLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
-            specialWeaponLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
+            gameLogicRoot[aimSnapListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
+            gameLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
+            gameLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
             _repository.SaveJsonObject(configPath, root);
         }
         catch

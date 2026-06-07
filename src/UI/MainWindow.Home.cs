@@ -44,6 +44,7 @@ public sealed partial class MainWindow
                                    "吸附曲线预览",
                                    "按键绑定",
                                    "开启吸附方式",
+                                   "连点策略",
                                    "特殊武器逻辑")
                                + topPanelStyle.CellPadding.X * 2f;
         var reserveWidth = addButtonWidth + deleteButtonWidth + topPanelStyle.ItemSpacing.X * 2f;
@@ -242,7 +243,8 @@ public sealed partial class MainWindow
         DrawSnapCurveSection(topPanelStyle);
         DrawKeyBindingSection(metrics.ReserveWidth, topPanelStyle);
         DrawSnapModeSection(metrics.ReserveWidth, topPanelStyle);
-        DrawSpecialWeaponLogicSection(topPanelStyle);
+        DrawRapidFireStrategySection(metrics.ReserveWidth, topPanelStyle);
+        DrawSpecialWeaponLogicSection(metrics.ReserveWidth, topPanelStyle);
 
         ImGui.EndTable();
     }
@@ -762,16 +764,6 @@ public sealed partial class MainWindow
                 ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget.Left);
             }
             ImGui.EndDisabled();
-            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-            ImGui.BeginDisabled(!leftCustomSelected || disableTouchpadBindingSelection);
-            var leftRapidEnabled = _homeViewState.TouchpadLeftRapidEnabled;
-            if (ImGui.Checkbox("连点###HomeTouchpadLeftRapidToggle", ref leftRapidEnabled))
-            {
-                _homeViewState.TouchpadLeftRapidEnabled = leftRapidEnabled;
-                TryWriteBoolToCurrentConfig(TouchpadLeftRapidEnabledConfigKey, leftRapidEnabled);
-                PushAimAssistConfig();
-            }
-            ImGui.EndDisabled();
 
             ImGui.TableNextRow();
             ImGui.TableNextRow();
@@ -816,16 +808,6 @@ public sealed partial class MainWindow
             if (ImGui.Button($"{rightButtonLabel}###HomeTouchpadRightCustomKeyCaptureButton", new Vector2(touchpadCaptureButtonWidth, 0f)))
             {
                 ArmTouchpadKeyCapture(TouchpadKeyCaptureTarget.Right);
-            }
-            ImGui.EndDisabled();
-            ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-            ImGui.BeginDisabled(!rightCustomSelected || disableTouchpadBindingSelection);
-            var rightRapidEnabled = _homeViewState.TouchpadRightRapidEnabled;
-            if (ImGui.Checkbox("连点###HomeTouchpadRightRapidToggle", ref rightRapidEnabled))
-            {
-                _homeViewState.TouchpadRightRapidEnabled = rightRapidEnabled;
-                TryWriteBoolToCurrentConfig(TouchpadRightRapidEnabledConfigKey, rightRapidEnabled);
-                PushAimAssistConfig();
             }
             ImGui.EndDisabled();
 
@@ -1008,7 +990,87 @@ public sealed partial class MainWindow
         ImGui.EndDisabled();
     }
 
-    private void DrawSpecialWeaponLogicSection(ImGuiStylePtr topPanelStyle)
+    private void DrawRapidFireStrategySection(float reserveWidth, ImGuiStylePtr topPanelStyle)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextRow();
+
+        ImGui.TableSetColumnIndex(0);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("连点策略");
+        ImGui.TableSetColumnIndex(1);
+        _homeViewState.RapidFireStrategyIndex = _homeViewState.RapidFireStrategyIndex >= 0 && _homeViewState.RapidFireStrategyIndex < HomeRapidFireStrategyOptions.Length ? _homeViewState.RapidFireStrategyIndex : WeaponBasedRapidFireStrategyIndex;
+        _homeViewState.RapidFireHz = Math.Clamp(_homeViewState.RapidFireHz, MinRapidFireHz, MaxRapidFireHz);
+        var selectedRapidFireStrategyLabel = HomeRapidFireStrategyOptions[_homeViewState.RapidFireStrategyIndex];
+        var style = ImGui.GetStyle();
+        var minRapidFireStrategyComboWidth = 0f;
+        for (var i = 0; i < HomeRapidFireStrategyOptions.Length; i++)
+        {
+            minRapidFireStrategyComboWidth = MathF.Max(minRapidFireStrategyComboWidth, ImGui.CalcTextSize(HomeRapidFireStrategyOptions[i]).X);
+        }
+
+        minRapidFireStrategyComboWidth += style.FramePadding.X * 2f + ImGui.GetFrameHeight();
+        var rapidFireHzLabel = "连点频率";
+        const string rapidFireHzTooltip = "按住开火键时的连点速度，表示每秒完整触发几次开火。\n范围：1–30，仅在连点策略非「关闭连点」时生效。";
+        var rapidFireHzInputWidth = ImGui.CalcTextSize("000").X + style.FramePadding.X * 2f + ImGui.GetFrameHeight() * 2f + style.ItemInnerSpacing.X * 2f;
+        var rapidFireHzLabelWidth = ImGui.CalcTextSize(rapidFireHzLabel).X;
+        var rapidFireRowSpacing = style.ItemSpacing.X * 2f;
+        var rapidFireRowContentWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
+        var rapidFireStrategyComboWidth = MathF.Max(
+            minRapidFireStrategyComboWidth,
+            rapidFireRowContentWidth - rapidFireHzInputWidth - rapidFireHzLabelWidth - rapidFireRowSpacing);
+        ImGui.SetNextItemWidth(rapidFireStrategyComboWidth);
+        ImGui.BeginDisabled(_configFiles.Count == 0);
+        if (ImGui.BeginCombo("##HomeRapidFireStrategyCombo", selectedRapidFireStrategyLabel))
+        {
+            for (var i = 0; i < HomeRapidFireStrategyOptions.Length; i++)
+            {
+                var isSelected = i == _homeViewState.RapidFireStrategyIndex;
+                if (ImGui.Selectable(HomeRapidFireStrategyOptions[i], isSelected))
+                {
+                    _homeViewState.RapidFireStrategyIndex = i;
+                    TryWriteStringToCurrentConfig("rapidFireStrategy", HomeRapidFireStrategyOptions[i]);
+                    PushAimAssistConfig();
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.SameLine(0f, style.ItemSpacing.X);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(rapidFireHzLabel);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(rapidFireHzTooltip);
+        }
+
+        ImGui.SameLine(0f, style.ItemSpacing.X);
+        ImGui.SetNextItemWidth(rapidFireHzInputWidth);
+        ImGui.BeginDisabled(_homeViewState.RapidFireStrategyIndex == 0);
+        var rapidFireHz = _homeViewState.RapidFireHz;
+        if (ImGui.InputInt("##HomeRapidFireHz", ref rapidFireHz, 1, 5))
+        {
+            _homeViewState.RapidFireHz = Math.Clamp(rapidFireHz, MinRapidFireHz, MaxRapidFireHz);
+            TryWriteIntToCurrentConfig("rapidFireHz", _homeViewState.RapidFireHz);
+            PushAimAssistConfig();
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip(rapidFireHzTooltip);
+        }
+
+        ImGui.EndDisabled();
+        ImGui.EndDisabled();
+    }
+
+    private void DrawSpecialWeaponLogicSection(float reserveWidth, ImGuiStylePtr topPanelStyle)
     {
         ImGui.TableNextRow();
         ImGui.TableNextRow();
@@ -1018,9 +1080,52 @@ public sealed partial class MainWindow
         ImGui.TextUnformatted("特殊武器逻辑");
         ImGui.TableSetColumnIndex(1);
         ImGui.BeginDisabled(_configFiles.Count == 0);
+        var disableAimSnapColumn = _homeViewState.SnapModeIndex == AimAndFireSnapModeIndex;
+        var disableRapidFireColumn = _homeViewState.RapidFireStrategyIndex != WeaponBasedRapidFireStrategyIndex;
         var (weaponNameColumnWidth, aimSnapColumnWidth, rapidFireColumnWidth, releaseFireColumnWidth) = MeasureSpecialWeaponColumnWidths();
+        var style = ImGui.GetStyle();
+        _homeViewState.GameIndex = _homeViewState.GameIndex >= 0 && _homeViewState.GameIndex < HomeGameOptions.Length ? _homeViewState.GameIndex : 0;
+        var selectedGameLabel = HomeGameOptions[_homeViewState.GameIndex];
+        var gameLabel = "游戏";
+        var gameLabelWidth = ImGui.CalcTextSize(gameLabel).X;
+        var minGameComboWidth = 0f;
+        for (var i = 0; i < HomeGameOptions.Length; i++)
+        {
+            minGameComboWidth = MathF.Max(minGameComboWidth, ImGui.CalcTextSize(HomeGameOptions[i]).X);
+        }
 
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + topPanelStyle.CellPadding.Y);
+        minGameComboWidth += style.FramePadding.X * 2f + ImGui.GetFrameHeight();
+        var gameRowContentWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
+        var gameComboWidth = MathF.Max(minGameComboWidth, gameRowContentWidth - gameLabelWidth - style.ItemSpacing.X);
+
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(gameLabel);
+        ImGui.SameLine(0f, style.ItemSpacing.X);
+        ImGui.SetNextItemWidth(gameComboWidth);
+        if (ImGui.BeginCombo("##HomeGameCombo", selectedGameLabel))
+        {
+            for (var i = 0; i < HomeGameOptions.Length; i++)
+            {
+                var isSelected = i == _homeViewState.GameIndex;
+                if (ImGui.Selectable(HomeGameOptions[i], isSelected))
+                {
+                    _homeViewState.GameIndex = i;
+                    TryWriteStringToCurrentConfig(GameConfigKey, HomeGameOptions[i]);
+                    RefreshSpecialWeaponNamesForCurrentGame();
+                    ApplySpecialWeaponLogicFromCurrentConfig();
+                    PushAimAssistConfig();
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.Spacing();
         if (ImGui.BeginTable(
                 "##SpecialWeaponLogicTable",
                 4,
@@ -1040,9 +1145,23 @@ public sealed partial class MainWindow
                 ImGui.AlignTextToFramePadding();
                 ImGui.TextUnformatted(_specialWeaponNames[i]);
 
+                ImGui.BeginDisabled(disableAimSnapColumn);
                 DrawSpecialWeaponToggleCell(i, 1, $"##SpecialWeaponAimSnap_{i}", ref _specialWeaponAimSnapEnabled[i]);
-                DrawSpecialWeaponToggleCell(i, 2, $"##SpecialWeaponRapidFire_{i}", ref _specialWeaponRapidFireEnabled[i]);
-                DrawSpecialWeaponToggleCell(i, 3, $"##SpecialWeaponReleaseFire_{i}", ref _specialWeaponReleaseFireEnabled[i]);
+                ImGui.EndDisabled();
+                ImGui.BeginDisabled(disableRapidFireColumn);
+                DrawSpecialWeaponToggleCell(
+                    i,
+                    2,
+                    $"##SpecialWeaponRapidFire_{i}",
+                    ref _specialWeaponRapidFireEnabled[i],
+                    ref _specialWeaponReleaseFireEnabled[i]);
+                ImGui.EndDisabled();
+                DrawSpecialWeaponToggleCell(
+                    i,
+                    3,
+                    $"##SpecialWeaponReleaseFire_{i}",
+                    ref _specialWeaponReleaseFireEnabled[i],
+                    ref _specialWeaponRapidFireEnabled[i]);
             }
 
             ImGui.EndTable();
@@ -1073,10 +1192,21 @@ public sealed partial class MainWindow
 
     private void DrawSpecialWeaponToggleCell(int weaponIndex, int columnIndex, string controlId, ref bool flag)
     {
+        var unusedExclusiveFlag = false;
+        DrawSpecialWeaponToggleCell(weaponIndex, columnIndex, controlId, ref flag, ref unusedExclusiveFlag);
+    }
+
+    private void DrawSpecialWeaponToggleCell(int weaponIndex, int columnIndex, string controlId, ref bool flag, ref bool exclusiveFlag)
+    {
         ImGui.TableSetColumnIndex(columnIndex);
         if (!ImGui.Checkbox(controlId, ref flag))
         {
             return;
+        }
+
+        if (flag)
+        {
+            exclusiveFlag = false;
         }
 
         TryWriteSpecialWeaponLogicValueToCurrentConfig(

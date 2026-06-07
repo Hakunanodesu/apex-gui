@@ -17,6 +17,7 @@ internal sealed class WeaponRecognitionWorker : IDisposable
     private readonly IReadOnlyList<WeaponTemplateEntry> _templates;
     private readonly Thread _thread;
     private bool _running = true;
+    private bool _processingEnabled = true;
     private ViGEmMappingWorker? _consumer;
     private WeaponRecognitionResultState _latestResult = WeaponRecognitionResultState.Empty;
     private byte[] _latestSobel = Array.Empty<byte>();
@@ -74,6 +75,35 @@ internal sealed class WeaponRecognitionWorker : IDisposable
         }
     }
 
+    public void SetProcessingEnabled(bool enabled)
+    {
+        ViGEmMappingWorker? consumer;
+        lock (_sync)
+        {
+            if (_processingEnabled == enabled)
+            {
+                return;
+            }
+
+            _processingEnabled = enabled;
+            if (!enabled)
+            {
+                _latestResult = WeaponRecognitionResultState.Empty;
+                _latestSobel = Array.Empty<byte>();
+                _latestSobelWidth = 0;
+                _latestSobelHeight = 0;
+                _latestSobelFrameId = 0;
+            }
+
+            consumer = _consumer;
+        }
+
+        if (!enabled)
+        {
+            consumer?.SetWeaponRecognition(WeaponRecognitionResultState.Empty);
+        }
+    }
+
     private void WorkerMain()
     {
         var loopTimer = Stopwatch.StartNew();
@@ -86,6 +116,17 @@ internal sealed class WeaponRecognitionWorker : IDisposable
             if (!_running)
             {
                 break;
+            }
+
+            var processingEnabled = false;
+            lock (_sync)
+            {
+                processingEnabled = _processingEnabled;
+            }
+
+            if (!processingEnabled)
+            {
+                continue;
             }
 
             if (!_captureService.TryCopyLatestWeaponRoi(ref roiBuffer, ref lastFrameId, out var width, out var height, out _))
