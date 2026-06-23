@@ -39,6 +39,7 @@ public sealed partial class MainWindow
                                    "依赖状态",
                                    "配置选择",
                                    "智慧核心",
+                                   "选择游戏",
                                    "选择模型",
                                    "吸附参数设定",
                                    "吸附曲线预览",
@@ -214,8 +215,6 @@ public sealed partial class MainWindow
 
     private void DrawHomeMainTable(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
     {
-        var modelLineStyle = ImGui.GetStyle();
-        var refreshButtonWidth = ImGui.CalcTextSize("刷新").X + modelLineStyle.FramePadding.X * 2f;
         if (!ImGui.BeginTable("##HomeMainTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
             return;
@@ -224,11 +223,69 @@ public sealed partial class MainWindow
         ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthFixed, metrics.FirstColumnWidth);
         ImGui.TableSetupColumn("Content", ImGuiTableColumnFlags.WidthStretch);
 
+        DrawGameSelectionRow(metrics);
+        DrawModelSelectionRow(metrics);
+
+        DrawSnapSettingsSection(metrics, topPanelStyle);
+        DrawSnapCurveSection(topPanelStyle);
+        DrawKeyBindingSection(metrics.ReserveWidth, topPanelStyle);
+        DrawSnapModeSection(metrics.ReserveWidth, topPanelStyle);
+        DrawRapidFireStrategySection(metrics.ReserveWidth, topPanelStyle);
+        DrawSpecialWeaponLogicSection();
+
+        ImGui.EndTable();
+    }
+
+    private void DrawGameSelectionRow(HomeLayoutMetrics metrics)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("选择游戏");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.BeginDisabled(_configFiles.Count == 0);
+        _homeViewState.GameIndex = _homeViewState.GameIndex >= 0 && _homeViewState.GameIndex < HomeGameOptions.Length
+            ? _homeViewState.GameIndex
+            : 0;
+        var selectedGameLabel = HomeGameOptions[_homeViewState.GameIndex];
+        var gameComboWidth = ImGui.GetContentRegionAvail().X - metrics.ReserveWidth;
+        ImGui.SetNextItemWidth(gameComboWidth);
+        if (ImGui.BeginCombo("##HomeGameCombo", selectedGameLabel))
+        {
+            for (var i = 0; i < HomeGameOptions.Length; i++)
+            {
+                var isSelected = i == _homeViewState.GameIndex;
+                if (ImGui.Selectable(HomeGameOptions[i], isSelected))
+                {
+                    _homeViewState.GameIndex = i;
+                    TryWriteStringToCurrentConfig(GameConfigKey, HomeGameOptions[i]);
+                    RefreshSpecialWeaponNamesForCurrentGame();
+                    ApplySpecialWeaponLogicFromCurrentConfig();
+                    PushAimAssistConfig();
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.EndDisabled();
+    }
+
+    private void DrawModelSelectionRow(HomeLayoutMetrics metrics)
+    {
+        ImGui.TableNextRow();
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("选择模型");
         ImGui.TableSetColumnIndex(1);
+        var style = ImGui.GetStyle();
+        var refreshButtonWidth = ImGui.CalcTextSize("刷新").X + style.FramePadding.X * 2f;
         var modelComboWidth = ImGui.GetContentRegionAvail().X - metrics.ReserveWidth;
         ImGui.BeginDisabled(_smartCoreMappingState.IsEnabled);
         DrawHomeModelCombo("##HomeModelCombo", modelComboWidth);
@@ -238,15 +295,6 @@ public sealed partial class MainWindow
             RefreshOnnxModels();
         }
         ImGui.EndDisabled();
-
-        DrawSnapSettingsSection(metrics, topPanelStyle);
-        DrawSnapCurveSection(topPanelStyle);
-        DrawKeyBindingSection(metrics.ReserveWidth, topPanelStyle);
-        DrawSnapModeSection(metrics.ReserveWidth, topPanelStyle);
-        DrawRapidFireStrategySection(metrics.ReserveWidth, topPanelStyle);
-        DrawSpecialWeaponLogicSection(metrics.ReserveWidth, topPanelStyle);
-
-        ImGui.EndTable();
     }
 
     private void DrawSnapSettingsSection(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
@@ -1070,7 +1118,7 @@ public sealed partial class MainWindow
         ImGui.EndDisabled();
     }
 
-    private void DrawSpecialWeaponLogicSection(float reserveWidth, ImGuiStylePtr topPanelStyle)
+    private void DrawSpecialWeaponLogicSection()
     {
         ImGui.TableNextRow();
         ImGui.TableNextRow();
@@ -1083,49 +1131,6 @@ public sealed partial class MainWindow
         var disableAimSnapColumn = _homeViewState.SnapModeIndex == AimAndFireSnapModeIndex;
         var disableRapidFireColumn = _homeViewState.RapidFireStrategyIndex != WeaponBasedRapidFireStrategyIndex;
         var (weaponNameColumnWidth, aimSnapColumnWidth, rapidFireColumnWidth, releaseFireColumnWidth) = MeasureSpecialWeaponColumnWidths();
-        var style = ImGui.GetStyle();
-        _homeViewState.GameIndex = _homeViewState.GameIndex >= 0 && _homeViewState.GameIndex < HomeGameOptions.Length ? _homeViewState.GameIndex : 0;
-        var selectedGameLabel = HomeGameOptions[_homeViewState.GameIndex];
-        var gameLabel = "游戏";
-        var gameLabelWidth = ImGui.CalcTextSize(gameLabel).X;
-        var minGameComboWidth = 0f;
-        for (var i = 0; i < HomeGameOptions.Length; i++)
-        {
-            minGameComboWidth = MathF.Max(minGameComboWidth, ImGui.CalcTextSize(HomeGameOptions[i]).X);
-        }
-
-        minGameComboWidth += style.FramePadding.X * 2f + ImGui.GetFrameHeight();
-        var gameRowContentWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
-        var gameComboWidth = MathF.Max(minGameComboWidth, gameRowContentWidth - gameLabelWidth - style.ItemSpacing.X);
-
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted(gameLabel);
-        ImGui.SameLine(0f, style.ItemSpacing.X);
-        ImGui.SetNextItemWidth(gameComboWidth);
-        if (ImGui.BeginCombo("##HomeGameCombo", selectedGameLabel))
-        {
-            for (var i = 0; i < HomeGameOptions.Length; i++)
-            {
-                var isSelected = i == _homeViewState.GameIndex;
-                if (ImGui.Selectable(HomeGameOptions[i], isSelected))
-                {
-                    _homeViewState.GameIndex = i;
-                    TryWriteStringToCurrentConfig(GameConfigKey, HomeGameOptions[i]);
-                    RefreshSpecialWeaponNamesForCurrentGame();
-                    ApplySpecialWeaponLogicFromCurrentConfig();
-                    PushAimAssistConfig();
-                }
-
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
-        }
-
-        ImGui.Spacing();
         if (ImGui.BeginTable(
                 "##SpecialWeaponLogicTable",
                 4,

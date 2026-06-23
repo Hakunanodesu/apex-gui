@@ -102,6 +102,7 @@ public sealed partial class MainWindow
         {
             ResetConfigUiStateToDefaults();
             RefreshConfigFiles(baseName);
+            PersistNewConfigDefaultsToFile();
             return true;
         }
 

@@ -2,7 +2,7 @@ internal sealed class HomeViewState
 {
     public int SnapModeIndex { get; set; } = -1;
     public int RapidFireStrategyIndex { get; set; } = -1;
-    public int RapidFireHz { get; set; } = 25;
+    public int RapidFireHz { get; set; } = 30;
     public int GameIndex { get; set; }
     public int AimBindingIndex { get; set; } = GamepadBindingCatalog.DefaultAimIndex;
     public int FireBindingIndex { get; set; } = GamepadBindingCatalog.DefaultFireIndex;

@@ -39,7 +39,7 @@ public sealed partial class MainWindow : GameWindow
     private static readonly string[] HomeRapidFireStrategyOptions = { "关闭连点", "始终连点", "根据当前武器连点" };
     private const int AimAndFireSnapModeIndex = 1;
     private const int WeaponBasedRapidFireStrategyIndex = 2;
-    private const int DefaultRapidFireHz = 25;
+    private const int DefaultRapidFireHz = 30;
     private const int MinRapidFireHz = 1;
     private const int MaxRapidFireHz = 30;
     private static readonly string[] SnapInnerInterpolationTypeOptions =
@@ -541,6 +541,88 @@ public sealed partial class MainWindow : GameWindow
 
     private void TryWriteBoolToCurrentConfig(string key, bool value) =>
         _configStore.TryWriteBool(_configFiles, _selectedConfigFileIndex, key, value);
+
+    private void PersistNewConfigDefaultsToFile()
+    {
+        if (_configFiles.Count == 0)
+        {
+            return;
+        }
+
+        _homeViewState.GameIndex = _homeViewState.GameIndex >= 0 && _homeViewState.GameIndex < HomeGameOptions.Length
+            ? _homeViewState.GameIndex
+            : 0;
+        TryWriteStringToCurrentConfig(GameConfigKey, HomeGameOptions[_homeViewState.GameIndex]);
+
+        if (_homeViewState.SnapModeIndex >= 0 && _homeViewState.SnapModeIndex < HomeSnapModeOptions.Length)
+        {
+            TryWriteStringToCurrentConfig("snap", HomeSnapModeOptions[_homeViewState.SnapModeIndex]);
+        }
+
+        if (_homeViewState.RapidFireStrategyIndex >= 0 && _homeViewState.RapidFireStrategyIndex < HomeRapidFireStrategyOptions.Length)
+        {
+            TryWriteStringToCurrentConfig("rapidFireStrategy", HomeRapidFireStrategyOptions[_homeViewState.RapidFireStrategyIndex]);
+        }
+
+        TryWriteIntToCurrentConfig("rapidFireHz", _homeViewState.RapidFireHz);
+
+        if (_homeViewState.AimBindingIndex >= 0 && _homeViewState.AimBindingIndex < GamepadBindingCatalog.Options.Length)
+        {
+            TryWriteStringToCurrentConfig(AimBindingConfigKey, GamepadBindingCatalog.Options[_homeViewState.AimBindingIndex]);
+        }
+
+        if (_homeViewState.FireBindingIndex >= 0 && _homeViewState.FireBindingIndex < GamepadBindingCatalog.Options.Length)
+        {
+            TryWriteStringToCurrentConfig(FireBindingConfigKey, GamepadBindingCatalog.Options[_homeViewState.FireBindingIndex]);
+        }
+
+        if (_homeViewState.VoiceBindingIndex >= 0 && _homeViewState.VoiceBindingIndex < GamepadBindingCatalog.Options.Length)
+        {
+            TryWriteStringToCurrentConfig(VoiceBindingConfigKey, GamepadBindingCatalog.Options[_homeViewState.VoiceBindingIndex]);
+        }
+
+        TryWriteStringToCurrentConfig(VoiceCustomKeyConfigKey, _homeViewState.VoiceCustomKey);
+
+        if (_homeViewState.TouchpadLeftBindingIndex >= 0 && _homeViewState.TouchpadLeftBindingIndex < TouchpadBindingOptions.Length)
+        {
+            TryWriteStringToCurrentConfig(TouchpadLeftBindingConfigKey, TouchpadBindingOptions[_homeViewState.TouchpadLeftBindingIndex]);
+        }
+
+        if (_homeViewState.TouchpadRightBindingIndex >= 0 && _homeViewState.TouchpadRightBindingIndex < TouchpadBindingOptions.Length)
+        {
+            TryWriteStringToCurrentConfig(TouchpadRightBindingConfigKey, TouchpadBindingOptions[_homeViewState.TouchpadRightBindingIndex]);
+        }
+
+        TryWriteStringToCurrentConfig(TouchpadLeftCustomKeyConfigKey, _homeViewState.TouchpadLeftCustomKey);
+        TryWriteStringToCurrentConfig(TouchpadRightCustomKeyConfigKey, _homeViewState.TouchpadRightCustomKey);
+
+        if (_onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count)
+        {
+            TryWriteSelectedModelNameToCurrentConfig(_onnxModels[_onnxTopSelectedModelIndex].DisplayName);
+        }
+        else
+        {
+            ClearSelectedModelNameFromCurrentConfig();
+        }
+
+        TryWriteIntToCurrentConfig("snapOuterRange", _homeViewState.SnapOuterRange);
+        TryWriteIntToCurrentConfig("snapInnerRange", _homeViewState.SnapInnerRange);
+        TryWriteFloatToCurrentConfig("snapOuterStrength", _homeViewState.SnapOuterStrength);
+        TryWriteFloatToCurrentConfig("snapInnerStrength", _homeViewState.SnapInnerStrength);
+        TryWriteFloatToCurrentConfig("snapStartStrength", _homeViewState.SnapStartStrength);
+        TryWriteFloatToCurrentConfig("snapVerticalStrengthFactor", _homeViewState.SnapVerticalStrengthFactor);
+        TryWriteFloatToCurrentConfig("snapHipfireStrengthFactor", _homeViewState.SnapHipfireStrengthFactor);
+        TryWriteFloatToCurrentConfig("snapHeight", _homeViewState.SnapHeight);
+        TryWriteFloatToCurrentConfig("snapStrengthRampTime", _homeViewState.SnapStrengthRampTime);
+
+        if (_homeViewState.SnapInnerInterpolationTypeIndex >= 0
+            && _homeViewState.SnapInnerInterpolationTypeIndex < SnapInnerInterpolationTypeOptions.Length)
+        {
+            TryWriteStringToCurrentConfig(
+                "snapInnerInterpolationType",
+                SnapInnerInterpolationTypeOptions[_homeViewState.SnapInnerInterpolationTypeIndex]);
+        }
+    }
 
     private void TryWriteSpecialWeaponLogicValueToCurrentConfig(int weaponIndex, bool aimSnapEnabled, bool rapidFireEnabled, bool releaseFireEnabled)
     {
