@@ -43,7 +43,8 @@ public sealed partial class MainWindow
                                    "选择模型",
                                    "吸附参数设定",
                                    "吸附曲线预览",
-                                   "按键绑定",
+                                   "按键设定",
+                                   "宏",
                                    "开启吸附方式",
                                    "连点策略",
                                    "特殊武器逻辑")
@@ -229,6 +230,7 @@ public sealed partial class MainWindow
         DrawSnapSettingsSection(metrics, topPanelStyle);
         DrawSnapCurveSection(topPanelStyle);
         DrawKeyBindingSection(metrics.ReserveWidth, topPanelStyle);
+        DrawMacroSection(topPanelStyle);
         DrawSnapModeSection(metrics.ReserveWidth, topPanelStyle);
         DrawRapidFireStrategySection(metrics.ReserveWidth, topPanelStyle);
         DrawSpecialWeaponLogicSection();
@@ -642,7 +644,7 @@ public sealed partial class MainWindow
 
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("按键绑定");
+        ImGui.TextUnformatted("按键设定");
 
         ImGui.TableSetColumnIndex(1);
         var availableWidth = MathF.Max(0f, ImGui.GetContentRegionAvail().X - reserveWidth);
@@ -913,6 +915,121 @@ public sealed partial class MainWindow
             ImGui.EndDisabled();
 
             ImGui.EndTable();
+        }
+    }
+
+    private void DrawMacroSection(ImGuiStylePtr topPanelStyle)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextRow();
+
+        ImGui.TableSetColumnIndex(0);
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("宏");
+
+        ImGui.TableSetColumnIndex(1);
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
+        if (GetSelectedGameName() != "Apex Legends")
+        {
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextDisabled("无");
+            return;
+        }
+
+        var modeComboWidth = ImGui.CalcTextSize("按住").X + topPanelStyle.FramePadding.X * 2f + ImGui.GetFrameHeight();
+        var bindingComboWidth = MathF.Max(90f, ImGui.CalcTextSize("左摇杆按下").X + topPanelStyle.FramePadding.X * 2f + ImGui.GetFrameHeight());
+        var macroInputWidth = ImGui.CalcTextSize("2000").X + topPanelStyle.FramePadding.X * 2f;
+
+        ImGui.BeginDisabled(_configFiles.Count == 0);
+        var macro = GetPrimaryMacro();
+        MacroConfigCatalog.Normalize(macro);
+
+        ImGui.SetNextItemWidth(modeComboWidth);
+        var selectedModeLabel = HomeMacroTriggerModeOptions[macro.TriggerModeIndex];
+        if (ImGui.BeginCombo("##HomeMacroTriggerModeCombo", selectedModeLabel))
+        {
+            for (var i = 0; i < HomeMacroTriggerModeOptions.Length; i++)
+            {
+                var isSelected = i == macro.TriggerModeIndex;
+                if (ImGui.Selectable(HomeMacroTriggerModeOptions[i], isSelected))
+                {
+                    macro.TriggerModeIndex = i;
+                    OnMacroSettingsChanged();
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+        var macroTriggerBindingIndex = macro.TriggerBindingIndex;
+        DrawMacroGamepadBindingCombo("##HomeMacroTriggerBindingCombo", bindingComboWidth, ref macroTriggerBindingIndex);
+        macro.TriggerBindingIndex = macroTriggerBindingIndex;
+
+        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+        ImGui.SetNextItemWidth(macroInputWidth);
+        var macroDelayMs = macro.DelayMs;
+        if (ImGui.InputInt("##HomeMacroDelayMs", ref macroDelayMs, 0, 0))
+        {
+            macro.DelayMs = Math.Clamp(macroDelayMs, MacroConfigCatalog.MinDelayMs, MacroConfigCatalog.MaxDelayMs);
+            OnMacroSettingsChanged();
+        }
+
+        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("ms 后按下");
+
+        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+        var macroActionBindingIndex = macro.ActionBindingIndex;
+        DrawMacroGamepadBindingCombo("##HomeMacroActionBindingCombo", bindingComboWidth, ref macroActionBindingIndex);
+        macro.ActionBindingIndex = macroActionBindingIndex;
+
+        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+        ImGui.SetNextItemWidth(macroInputWidth);
+        var macroActionDurationMs = macro.ActionDurationMs;
+        if (ImGui.InputInt("##HomeMacroActionDurationMs", ref macroActionDurationMs, 0, 0))
+        {
+            macro.ActionDurationMs = Math.Clamp(
+                macroActionDurationMs,
+                MacroConfigCatalog.MinActionDurationMs,
+                MacroConfigCatalog.MaxActionDurationMs);
+            OnMacroSettingsChanged();
+        }
+
+        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("ms");
+        ImGui.EndDisabled();
+    }
+
+    private void DrawMacroGamepadBindingCombo(string comboId, float width, ref int bindingIndex)
+    {
+        ImGui.SetNextItemWidth(width);
+        var selectedLabel = GamepadBindingCatalog.Options[bindingIndex];
+        if (ImGui.BeginCombo(comboId, selectedLabel))
+        {
+            for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
+            {
+                var isSelected = i == bindingIndex;
+                if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
+                {
+                    bindingIndex = i;
+                    OnMacroSettingsChanged();
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
         }
     }
 

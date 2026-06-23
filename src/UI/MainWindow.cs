@@ -51,6 +51,7 @@ public sealed partial class MainWindow : GameWindow
     };
     private static readonly string[] TouchpadBindingOptions =
         GamepadBindingCatalog.Options.Concat(new[] { GamepadBindingCatalog.KeyboardCustomBindingName }).ToArray();
+    private static readonly string[] HomeMacroTriggerModeOptions = MacroConfigCatalog.TriggerModeOptions;
     private static readonly string[] HomeGameOptions = WeaponTemplateCatalog.GameOptions;
     private const string GameConfigKey = "game";
     private const string SpecialWeaponLogicConfigKey = "specialWeaponLogic";
@@ -451,6 +452,8 @@ public sealed partial class MainWindow : GameWindow
             _homeViewState.TouchpadLeftCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
             _homeViewState.TouchpadRightCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
             _onnxTopSelectedModelIndex = -1;
+            _homeViewState.Macros.Clear();
+            _homeViewState.Macros.Add(MacroConfigCatalog.CreateDefault());
             PushAimAssistConfig();
             SyncSmartCoreVisionPipeline();
             return;
@@ -470,6 +473,7 @@ public sealed partial class MainWindow : GameWindow
         _homeViewState.TouchpadRightCustomKey = selectionResult.TouchpadRightCustomKey;
         RefreshSpecialWeaponNamesForCurrentGame();
         ApplySpecialWeaponLogicFromCurrentConfig();
+        ApplyMacrosFromCurrentConfig();
         _onnxTopSelectedModelIndex = selectionResult.ModelIndex;
         _homeViewState.ApplySnapConfig(selectionResult.SnapConfig);
         PushAimAssistConfig();
@@ -525,6 +529,8 @@ public sealed partial class MainWindow : GameWindow
         Array.Clear(_specialWeaponAimSnapEnabled);
         Array.Clear(_specialWeaponRapidFireEnabled);
         Array.Clear(_specialWeaponReleaseFireEnabled);
+        _homeViewState.Macros.Clear();
+        _homeViewState.Macros.Add(MacroConfigCatalog.CreateDefault());
         PushAimAssistConfig();
         RefreshSmartCoreState();
         SyncSmartCoreVisionPipeline();
@@ -622,6 +628,54 @@ public sealed partial class MainWindow : GameWindow
                 "snapInnerInterpolationType",
                 SnapInnerInterpolationTypeOptions[_homeViewState.SnapInnerInterpolationTypeIndex]);
         }
+
+        TryWriteMacrosToCurrentConfig();
+    }
+
+    private void ApplyMacrosFromCurrentConfig()
+    {
+        _configStore.LoadMacros(_configFiles, _selectedConfigFileIndex, _homeViewState.Macros);
+    }
+
+    private void TryWriteMacrosToCurrentConfig()
+    {
+        if (_homeViewState.Macros.Count == 0)
+        {
+            _homeViewState.Macros.Add(MacroConfigCatalog.CreateDefault());
+        }
+
+        for (var i = 0; i < _homeViewState.Macros.Count; i++)
+        {
+            MacroConfigCatalog.Normalize(_homeViewState.Macros[i]);
+        }
+
+        _configStore.TryWriteMacros(_configFiles, _selectedConfigFileIndex, _homeViewState.Macros);
+    }
+
+    private void OnMacroSettingsChanged()
+    {
+        TryWriteMacrosToCurrentConfig();
+        PushAimAssistConfig();
+    }
+
+    private MacroEntryState GetPrimaryMacro()
+    {
+        if (_homeViewState.Macros.Count == 0)
+        {
+            _homeViewState.Macros.Add(MacroConfigCatalog.CreateDefault());
+        }
+
+        return _homeViewState.Macros[0];
+    }
+
+    private MacroRuntimeState[] BuildMacroRuntimeStates()
+    {
+        if (GetSelectedGameName() != "Apex Legends")
+        {
+            return Array.Empty<MacroRuntimeState>();
+        }
+
+        return MacroConfigCatalog.ToRuntimeStates(_homeViewState.Macros);
     }
 
     private void TryWriteSpecialWeaponLogicValueToCurrentConfig(int weaponIndex, bool aimSnapEnabled, bool rapidFireEnabled, bool releaseFireEnabled)
@@ -900,7 +954,8 @@ protected override void OnResize(ResizeEventArgs e)
             _homeViewState.TouchpadRightCustomKey,
             BuildEnabledWeaponNameList(_specialWeaponAimSnapEnabled),
             BuildEnabledWeaponNameList(_specialWeaponRapidFireEnabled),
-            BuildEnabledWeaponNameList(_specialWeaponReleaseFireEnabled));
+            BuildEnabledWeaponNameList(_specialWeaponReleaseFireEnabled),
+            BuildMacroRuntimeStates());
         _viGEmMappingWorker.SetAimAssistConfig(config);
         SyncWeaponRecognitionEnabled();
     }

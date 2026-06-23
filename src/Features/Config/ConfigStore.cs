@@ -354,6 +354,71 @@ internal sealed class ConfigStore
         }
     }
 
+    public void LoadMacros(
+        IReadOnlyList<string> configFiles,
+        int selectedConfigFileIndex,
+        ICollection<MacroEntryState> target)
+    {
+        target.Clear();
+        if (!TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
+        {
+            target.Add(MacroConfigCatalog.CreateDefault());
+            return;
+        }
+
+        try
+        {
+            var root = _repository.LoadJsonObjectOrEmpty(configPath);
+            if (root[MacroConfigCatalog.ConfigKey] is not JsonArray macrosNode || macrosNode.Count == 0)
+            {
+                target.Add(MacroConfigCatalog.CreateDefault());
+                return;
+            }
+
+            foreach (var item in macrosNode)
+            {
+                if (!MacroConfigCatalog.TryReadEntry(item, out var entry))
+                {
+                    continue;
+                }
+
+                target.Add(entry);
+            }
+
+            if (target.Count == 0)
+            {
+                target.Add(MacroConfigCatalog.CreateDefault());
+            }
+        }
+        catch
+        {
+            target.Clear();
+            target.Add(MacroConfigCatalog.CreateDefault());
+        }
+    }
+
+    public void TryWriteMacros(
+        IReadOnlyList<string> configFiles,
+        int selectedConfigFileIndex,
+        IReadOnlyList<MacroEntryState> macros)
+    {
+        if (!TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var root = _repository.LoadJsonObjectOrEmpty(configPath);
+            root[MacroConfigCatalog.ConfigKey] = MacroConfigCatalog.ToJsonArray(macros);
+            _repository.SaveJsonObject(configPath, root);
+        }
+        catch
+        {
+            // Keep UI responsive if file IO fails.
+        }
+    }
+
     public void TryWriteSpecialWeaponLogic(
         IReadOnlyList<string> configFiles,
         int selectedConfigFileIndex,

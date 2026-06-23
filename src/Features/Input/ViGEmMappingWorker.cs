@@ -37,6 +37,15 @@ internal readonly record struct ControllerOutputState(
 
 internal sealed class ViGEmMappingWorker : IDisposable
 {
+    private sealed class MacroExecutionState
+    {
+        public bool TriggerWasPressed;
+        public DateTime? PressDelayStartedAt;
+        public DateTime? HoldStartedAt;
+        public bool ActionPressed;
+        public DateTime? ActionReleaseAt;
+    }
+
     private const uint InputKeyboard = 1;
     private const uint KeyEventFKeyUp = 0x0002;
     private const uint KeyEventFScancode = 0x0008;
@@ -252,6 +261,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
         var releasePrevPressed = false;
         var snapRampTriggerPrev = false;
         var snapRampStartedAt = DateTime.UtcNow;
+        var macroExecutionStates = Array.Empty<MacroExecutionState>();
         DateTime? releasePulseUntil = null;
         DateTime? sdlInputFailureSinceUtc = null;
         ControllerOutputState? lastSubmittedState = null;
@@ -396,9 +406,9 @@ internal sealed class ViGEmMappingWorker : IDisposable
                     : short.MaxValue;
             }
 
-            void SetFireBindingPressed(bool pressed, short analogValueWhenPressed = short.MaxValue)
+            void SetMappedBindingPressed(int bindingIndex, bool pressed, short analogValueWhenPressed = short.MaxValue)
             {
-                switch (fireBindingIndex)
+                switch (bindingIndex)
                 {
                     case 0:
                         mappedLeftTrigger = pressed ? analogValueWhenPressed : (short)0;
@@ -448,6 +458,144 @@ internal sealed class ViGEmMappingWorker : IDisposable
                     case 15:
                         mappedStart = pressed;
                         break;
+                }
+            }
+
+            void SetFireBindingPressed(bool pressed, short analogValueWhenPressed = short.MaxValue)
+            {
+                SetMappedBindingPressed(fireBindingIndex, pressed, analogValueWhenPressed);
+            }
+
+            void EnsureMacroExecutionStates(int count)
+            {
+                if (macroExecutionStates.Length == count)
+                {
+                    return;
+                }
+
+                macroExecutionStates = new MacroExecutionState[count];
+                for (var i = 0; i < count; i++)
+                {
+                    macroExecutionStates[i] = new MacroExecutionState();
+                }
+            }
+
+            void ApplySingleMacro(in MacroRuntimeState macro, MacroExecutionState state, DateTime now)
+            {
+                if (macro.TriggerBindingIndex == macro.ActionBindingIndex)
+                {
+                    state.TriggerWasPressed = false;
+                    state.PressDelayStartedAt = null;
+                    state.HoldStartedAt = null;
+                    state.ActionPressed = false;
+                    state.ActionReleaseAt = null;
+                    return;
+                }
+
+                var triggerPressed = GamepadBindingCatalog.IsPressed(macro.TriggerBindingIndex, input);
+                var delayMs = Math.Clamp(macro.DelayMs, MacroConfigCatalog.MinDelayMs, MacroConfigCatalog.MaxDelayMs);
+                var actionDurationMs = Math.Clamp(
+                    macro.ActionDurationMs,
+                    MacroConfigCatalog.MinActionDurationMs,
+                    MacroConfigCatalog.MaxActionDurationMs);
+
+                if (macro.TriggerModeIndex == 0)
+                {
+                    if (triggerPressed && !state.TriggerWasPressed)
+                    {
+                        state.PressDelayStartedAt = now;
+                    }
+
+                    if (!triggerPressed && state.PressDelayStartedAt.HasValue && !state.ActionPressed)
+                    {
+                        state.PressDelayStartedAt = null;
+                    }
+
+                    if (state.PressDelayStartedAt.HasValue && !state.ActionPressed)
+                    {
+                        var elapsedMs = (now - state.PressDelayStartedAt.Value).TotalMilliseconds;
+                        if (elapsedMs >= delayMs)
+                        {
+                            state.ActionPressed = true;
+                            state.ActionReleaseAt = actionDurationMs > 0
+                                ? now.AddMilliseconds(actionDurationMs)
+                                : now;
+                        }
+                    }
+
+                    if (state.ActionPressed)
+                    {
+                        SetMappedBindingPressed(macro.ActionBindingIndex, true);
+                        if (state.ActionReleaseAt.HasValue && now >= state.ActionReleaseAt.Value)
+                        {
+                            state.ActionPressed = false;
+                            state.PressDelayStartedAt = null;
+                            state.ActionReleaseAt = null;
+                        }
+                    }
+                }
+                else
+                {
+                    if (triggerPressed)
+                    {
+                        state.HoldStartedAt ??= now;
+                        var holdElapsedMs = (now - state.HoldStartedAt.Value).TotalMilliseconds;
+                        if (holdElapsedMs >= delayMs)
+                        {
+                            if (!state.ActionPressed)
+                            {
+                                state.ActionPressed = true;
+                                state.ActionReleaseAt = actionDurationMs > 0
+                                    ? now.AddMilliseconds(actionDurationMs)
+                                    : null;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        state.HoldStartedAt = null;
+                        state.ActionPressed = false;
+                        state.ActionReleaseAt = null;
+                    }
+
+                    if (state.ActionPressed)
+                    {
+                        var shouldRelease = !triggerPressed;
+                        if (actionDurationMs > 0 && state.ActionReleaseAt.HasValue && now >= state.ActionReleaseAt.Value)
+                        {
+                            shouldRelease = true;
+                        }
+
+                        if (shouldRelease)
+                        {
+                            state.ActionPressed = false;
+                            state.HoldStartedAt = null;
+                            state.ActionReleaseAt = null;
+                        }
+                        else
+                        {
+                            SetMappedBindingPressed(macro.ActionBindingIndex, true);
+                        }
+                    }
+                }
+
+                state.TriggerWasPressed = triggerPressed;
+            }
+
+            void ApplyMacros()
+            {
+                var macros = aimAssistConfigState.Macros;
+                if (macros.Length == 0)
+                {
+                    macroExecutionStates = Array.Empty<MacroExecutionState>();
+                    return;
+                }
+
+                EnsureMacroExecutionStates(macros.Length);
+                var now = DateTime.UtcNow;
+                for (var i = 0; i < macros.Length; i++)
+                {
+                    ApplySingleMacro(macros[i], macroExecutionStates[i], now);
                 }
             }
 
@@ -609,6 +757,8 @@ internal sealed class ViGEmMappingWorker : IDisposable
             {
                 AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.VoiceCustomKey);
             }
+
+            ApplyMacros();
 
             UpdateKeyboardInjections(desiredKeyboardVirtualKeys, injectedKeyboardVirtualKeys);
 
@@ -1015,7 +1165,35 @@ internal sealed class ViGEmMappingWorker : IDisposable
                string.Equals(a.TouchpadRightCustomKey, b.TouchpadRightCustomKey, StringComparison.Ordinal) &&
                AreSameList(a.AimSnapWeapons, b.AimSnapWeapons) &&
                AreSameList(a.RapidFireWeapons, b.RapidFireWeapons) &&
-               AreSameList(a.ReleaseFireWeapons, b.ReleaseFireWeapons);
+               AreSameList(a.ReleaseFireWeapons, b.ReleaseFireWeapons) &&
+               AreSameMacros(a.Macros, b.Macros);
+    }
+
+    private static bool AreSameMacros(MacroRuntimeState[] a, MacroRuntimeState[] b)
+    {
+        if (ReferenceEquals(a, b))
+        {
+            return true;
+        }
+
+        if (a.Length != b.Length)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < a.Length; i++)
+        {
+            if (a[i].TriggerModeIndex != b[i].TriggerModeIndex ||
+                a[i].TriggerBindingIndex != b[i].TriggerBindingIndex ||
+                a[i].DelayMs != b[i].DelayMs ||
+                a[i].ActionBindingIndex != b[i].ActionBindingIndex ||
+                a[i].ActionDurationMs != b[i].ActionDurationMs)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool AreSameList(IReadOnlyList<string>? a, IReadOnlyList<string>? b)

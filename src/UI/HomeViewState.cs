@@ -29,6 +29,7 @@ internal sealed class HomeViewState
     public bool IsAddModalOpenRequested { get; set; }
     public bool IsDeleteModalOpenRequested { get; set; }
     public string? PendingDeleteConfigBaseName { get; set; }
+    public List<MacroEntryState> Macros { get; } = [];
 
     public void ApplySnapConfig(SnapConfigState snapConfig)
     {

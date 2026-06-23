@@ -53,6 +53,7 @@ internal readonly struct SmartCoreAimAssistConfigState
     public readonly string[] AimSnapWeapons;
     public readonly string[] RapidFireWeapons;
     public readonly string[] ReleaseFireWeapons;
+    public readonly MacroRuntimeState[] Macros;
 
     public SmartCoreAimAssistConfigState(
         bool isEnabled,
@@ -80,7 +81,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         string touchpadRightCustomKey,
         string[] aimSnapWeapons,
         string[] rapidFireWeapons,
-        string[] releaseFireWeapons)
+        string[] releaseFireWeapons,
+        MacroRuntimeState[] macros)
     {
         IsEnabled = isEnabled;
         IsMappingActive = isMappingActive;
@@ -108,6 +110,7 @@ internal readonly struct SmartCoreAimAssistConfigState
         AimSnapWeapons = aimSnapWeapons;
         RapidFireWeapons = rapidFireWeapons;
         ReleaseFireWeapons = releaseFireWeapons;
+        Macros = macros;
     }
 
     public static SmartCoreAimAssistConfigState Disabled => new(
@@ -136,7 +139,8 @@ internal readonly struct SmartCoreAimAssistConfigState
         GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
         Array.Empty<string>(),
         Array.Empty<string>(),
-        Array.Empty<string>());
+        Array.Empty<string>(),
+        Array.Empty<MacroRuntimeState>());
 }
 
 internal readonly struct SmartCoreAimAssistContext
