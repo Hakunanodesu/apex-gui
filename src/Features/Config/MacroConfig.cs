@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 
 internal sealed class MacroEntryState
 {
+    public bool Enabled { get; set; } = true;
     public int TriggerModeIndex { get; set; }
     public int TriggerBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
     public int DelayMs { get; set; }
@@ -12,12 +13,14 @@ internal sealed class MacroEntryState
 internal readonly struct MacroRuntimeState
 {
     public MacroRuntimeState(
+        bool enabled,
         int triggerModeIndex,
         int triggerBindingIndex,
         int delayMs,
         int actionBindingIndex,
         int actionDurationMs)
     {
+        Enabled = enabled;
         TriggerModeIndex = triggerModeIndex;
         TriggerBindingIndex = triggerBindingIndex;
         DelayMs = delayMs;
@@ -25,6 +28,7 @@ internal readonly struct MacroRuntimeState
         ActionDurationMs = actionDurationMs;
     }
 
+    public bool Enabled { get; }
     public int TriggerModeIndex { get; }
     public int TriggerBindingIndex { get; }
     public int DelayMs { get; }
@@ -40,6 +44,7 @@ internal static class MacroConfigCatalog
     public const int MinActionDurationMs = 0;
     public const int MaxActionDurationMs = 1000;
 
+    private const string EnabledConfigKey = "enabled";
     private const string TriggerModeConfigKey = "triggerMode";
     private const string TriggerBindingConfigKey = "triggerBinding";
     private const string DelayMsConfigKey = "delayMs";
@@ -69,6 +74,7 @@ internal static class MacroConfigCatalog
     {
         Normalize(entry);
         return new MacroRuntimeState(
+            entry.Enabled,
             entry.TriggerModeIndex,
             entry.TriggerBindingIndex,
             entry.DelayMs,
@@ -86,7 +92,13 @@ internal static class MacroConfigCatalog
         var runtimeStates = new List<MacroRuntimeState>(entries.Count);
         for (var i = 0; i < entries.Count; i++)
         {
-            var runtimeState = ToRuntimeState(entries[i]);
+            var entry = entries[i];
+            if (!entry.Enabled)
+            {
+                continue;
+            }
+
+            var runtimeState = ToRuntimeState(entry);
             if (runtimeState.TriggerBindingIndex == runtimeState.ActionBindingIndex)
             {
                 continue;
@@ -118,6 +130,7 @@ internal static class MacroConfigCatalog
             GamepadBindingCatalog.ResolveIndex("A", 4));
         entry.DelayMs = TryReadInt(obj, DelayMsConfigKey) ?? 0;
         entry.ActionDurationMs = TryReadInt(obj, ActionDurationMsConfigKey) ?? 0;
+        entry.Enabled = TryReadBool(obj, EnabledConfigKey) ?? true;
         Normalize(entry);
         return true;
     }
@@ -127,6 +140,7 @@ internal static class MacroConfigCatalog
         Normalize(entry);
         return new JsonObject
         {
+            [EnabledConfigKey] = entry.Enabled,
             [TriggerModeConfigKey] = TriggerModeOptions[entry.TriggerModeIndex],
             [TriggerBindingConfigKey] = GamepadBindingCatalog.Options[entry.TriggerBindingIndex],
             [DelayMsConfigKey] = entry.DelayMs,
@@ -181,6 +195,18 @@ internal static class MacroConfigCatalog
         try
         {
             return obj[key]?.GetValue<int>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool? TryReadBool(JsonObject obj, string key)
+    {
+        try
+        {
+            return obj[key]?.GetValue<bool>();
         }
         catch
         {

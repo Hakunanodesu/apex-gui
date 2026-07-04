@@ -941,9 +941,20 @@ public sealed partial class MainWindow
         var bindingComboWidth = MathF.Max(90f, ImGui.CalcTextSize("左摇杆按下").X + topPanelStyle.FramePadding.X * 2f + ImGui.GetFrameHeight());
         var macroInputWidth = ImGui.CalcTextSize("2000").X + topPanelStyle.FramePadding.X * 2f;
 
-        ImGui.BeginDisabled(_configFiles.Count == 0);
         var macro = GetPrimaryMacro();
         MacroConfigCatalog.Normalize(macro);
+
+        ImGui.BeginDisabled(_configFiles.Count == 0);
+        var macroEnabled = macro.Enabled;
+        if (ImGui.Checkbox("##HomeMacroEnabled", ref macroEnabled))
+        {
+            macro.Enabled = macroEnabled;
+            OnMacroSettingsChanged();
+        }
+        ImGui.EndDisabled();
+
+        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
+        ImGui.BeginDisabled(_configFiles.Count == 0 || !macro.Enabled);
 
         ImGui.SetNextItemWidth(modeComboWidth);
         var selectedModeLabel = HomeMacroTriggerModeOptions[macro.TriggerModeIndex];
