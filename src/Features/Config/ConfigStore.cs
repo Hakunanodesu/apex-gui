@@ -81,10 +81,10 @@ internal sealed class ConfigStore
             snapModeOptions,
             0);
         var rapidFireStrategyIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, AimAssistOptionCatalog.RapidFireStrategyKey),
+            _repository.TryReadString(configPath, SpecialWeaponLogicCatalog.RapidFireStrategyKey),
             rapidFireStrategyOptions,
             2);
-        var rapidFireHz = Math.Clamp(_repository.TryReadInt(configPath, AimAssistOptionCatalog.RapidFireHzKey) ?? defaultRapidFireHz, 1, 30);
+        var rapidFireHz = Math.Clamp(_repository.TryReadInt(configPath, SpecialWeaponLogicCatalog.RapidFireHzKey) ?? defaultRapidFireHz, 1, 30);
         var gameIndex = ResolveOptionIndex(
             _repository.TryReadString(configPath, WeaponTemplateCatalog.GameConfigKey),
             gameOptions,

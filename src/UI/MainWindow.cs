@@ -44,8 +44,7 @@ public sealed partial class MainWindow : GameWindow
     private ViGEmMappingWorker? _viGEmMappingWorker;
     private readonly ConfigRepository _configRepository = new(ConfigsDirectoryPath);
     private readonly ConfigStore _configStore;
-    private readonly GamepadService _gamepadService = new();
-    private readonly SmartCoreMappingState _smartCoreMappingState = new();
+    private readonly MappingRuntimeState _mappingRuntimeState = new();
     private static readonly WindowStateService WindowStateService = new();
     private (uint InstanceId, string Name)[] _cachedConnectedGamepads = Array.Empty<(uint InstanceId, string Name)>();
     private string[] _cachedGamepadOptions = Array.Empty<string>();
@@ -437,7 +436,7 @@ public sealed partial class MainWindow : GameWindow
 
     private void ResetConfigUiStateToDefaults()
     {
-        _smartCoreMappingState.RequestedEnabled = false;
+        _mappingRuntimeState.RequestedEnabled = false;
         _viGEmMappingWorker?.SetRequestedEnabled(false);
         CloseSmartCorePreviewWindow();
         _onnxTopSelectedModelIndex = -1;
@@ -495,10 +494,10 @@ public sealed partial class MainWindow : GameWindow
 
         if (_homeViewState.RapidFireStrategyIndex >= 0 && _homeViewState.RapidFireStrategyIndex < AimAssistOptionCatalog.RapidFireStrategyOptions.Length)
         {
-            TryWriteStringToCurrentConfig(AimAssistOptionCatalog.RapidFireStrategyKey, AimAssistOptionCatalog.RapidFireStrategyOptions[_homeViewState.RapidFireStrategyIndex]);
+            TryWriteStringToCurrentConfig(SpecialWeaponLogicCatalog.RapidFireStrategyKey, AimAssistOptionCatalog.RapidFireStrategyOptions[_homeViewState.RapidFireStrategyIndex]);
         }
 
-        TryWriteIntToCurrentConfig(AimAssistOptionCatalog.RapidFireHzKey, _homeViewState.RapidFireHz);
+        TryWriteIntToCurrentConfig(SpecialWeaponLogicCatalog.RapidFireHzKey, _homeViewState.RapidFireHz);
 
         _configStore.TryWriteBindings(_configFiles, _selectedConfigFileIndex, _homeViewState.ToBindings());
 
@@ -631,7 +630,7 @@ protected override void OnResize(ResizeEventArgs e)
         }
         catch (Exception ex)
         {
-            _smartCoreMappingState.LastError = $"{ex.GetType().Name}: {ex.Message}";
+            _mappingRuntimeState.LastError = $"{ex.GetType().Name}: {ex.Message}";
         }
     }
 
@@ -786,7 +785,7 @@ protected override void OnResize(ResizeEventArgs e)
 
         var config = new SmartCoreAimAssistConfigState(
             new AimAssistParams(
-                _smartCoreMappingState.IsEnabled,
+                _mappingRuntimeState.IsEnabled,
                 AimAssistOptionCatalog.ResolveSnapMode(_homeViewState.SnapModeIndex),
                 _homeViewState.SnapOuterRange,
                 _homeViewState.SnapInnerRange,
@@ -839,13 +838,13 @@ protected override void OnResize(ResizeEventArgs e)
 
     private void RefreshSmartCoreState()
     {
-        _smartCoreMappingState.IsViGemBusReady = Directory.Exists(ViGemBusInstallPath);
-        _smartCoreMappingState.HasInputDevice = _cachedConnectedGamepads.Length > 0;
-        _smartCoreMappingState.IsEnabled = _smartCoreMappingState.RequestedEnabled && _smartCoreMappingState.IsDependenciesReady;
+        _mappingRuntimeState.IsViGemBusReady = Directory.Exists(ViGemBusInstallPath);
+        _mappingRuntimeState.HasInputDevice = _cachedConnectedGamepads.Length > 0;
+        _mappingRuntimeState.IsEnabled = _mappingRuntimeState.RequestedEnabled && _mappingRuntimeState.IsDependenciesReady;
 
         var snapshot = _viGEmMappingWorker?.GetSnapshot();
-        _smartCoreMappingState.IsMappingActive = snapshot?.IsMappingActive ?? false;
-        _smartCoreMappingState.LastError = snapshot?.LastError ?? string.Empty;
+        _mappingRuntimeState.IsMappingActive = snapshot?.IsMappingActive ?? false;
+        _mappingRuntimeState.LastError = snapshot?.LastError ?? string.Empty;
     }
 }
 

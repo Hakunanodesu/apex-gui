@@ -1,4 +1,4 @@
-internal sealed class SmartCoreMappingState
+internal sealed class MappingRuntimeState
 {
     public bool RequestedEnabled { get; set; }
 

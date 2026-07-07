@@ -20,7 +20,7 @@
 
     private VisionPipelineConfig? BuildTargetVisionConfig()
     {
-        if (!_smartCoreMappingState.IsEnabled)
+        if (!_mappingRuntimeState.IsEnabled)
         {
             return null;
         }
@@ -89,7 +89,7 @@
     private void SyncWeaponRecognitionEnabled()
     {
         var gameHasWeaponTemplates = WeaponTemplateCatalog.GetWeaponNamesForGame(GetSelectedGameName()).Length > 0;
-        var enabled = _smartCoreMappingState.IsEnabled &&
+        var enabled = _mappingRuntimeState.IsEnabled &&
                       _weaponRecWorker is not null &&
                       gameHasWeaponTemplates &&
                       _homeViewState.RapidFireStrategyIndex == (int)RapidFireStrategy.WeaponBased;

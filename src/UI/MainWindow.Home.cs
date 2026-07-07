@@ -94,7 +94,7 @@ public sealed partial class MainWindow
 
     private void DrawHomeTopTable(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
     {
-        var vigemReady = _smartCoreMappingState.IsViGemBusReady;
+        var vigemReady = _mappingRuntimeState.IsViGemBusReady;
         if (!ImGui.BeginTable("##HomeTopTable", 2, ImGuiTableFlags.SizingStretchProp))
         {
             return;
@@ -174,7 +174,7 @@ public sealed partial class MainWindow
 
     private void DrawConfigSelectionRow(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
     {
-        var disableConfigSelection = _smartCoreMappingState.IsEnabled;
+        var disableConfigSelection = _mappingRuntimeState.IsEnabled;
         ImGui.TableNextRow();
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
@@ -217,11 +217,11 @@ public sealed partial class MainWindow
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("智慧核心");
         ImGui.TableSetColumnIndex(1);
-        ImGui.BeginDisabled(!_smartCoreMappingState.IsDependenciesReady);
-        var requestedSmartCoreEnabled = _smartCoreMappingState.RequestedEnabled;
+        ImGui.BeginDisabled(!_mappingRuntimeState.IsDependenciesReady);
+        var requestedSmartCoreEnabled = _mappingRuntimeState.RequestedEnabled;
         if (ImGui.Checkbox("##SmartCoreEnabledCheckbox", ref requestedSmartCoreEnabled))
         {
-            _smartCoreMappingState.RequestedEnabled = requestedSmartCoreEnabled;
+            _mappingRuntimeState.RequestedEnabled = requestedSmartCoreEnabled;
             _viGEmMappingWorker?.SetRequestedEnabled(requestedSmartCoreEnabled);
             if (!requestedSmartCoreEnabled)
             {
@@ -235,7 +235,7 @@ public sealed partial class MainWindow
         ImGui.EndDisabled();
         ImGui.SameLine();
         var smartCorePreviewWindowOpen = IsSmartCorePreviewWindowOpen();
-        ImGui.BeginDisabled(!_smartCoreMappingState.RequestedEnabled || smartCorePreviewWindowOpen);
+        ImGui.BeginDisabled(!_mappingRuntimeState.RequestedEnabled || smartCorePreviewWindowOpen);
         if (ImGui.Button("预览##SmartCorePreviewButton"))
         {
             OpenSmartCorePreviewWindow();
@@ -303,7 +303,7 @@ public sealed partial class MainWindow
         var style = ImGui.GetStyle();
         var refreshButtonWidth = ImGui.CalcTextSize("刷新").X + style.FramePadding.X * 2f;
         var modelComboWidth = ImGui.GetContentRegionAvail().X - metrics.ReserveWidth;
-        ImGui.BeginDisabled(_smartCoreMappingState.IsEnabled);
+        ImGui.BeginDisabled(_mappingRuntimeState.IsEnabled);
         DrawHomeModelCombo("##HomeModelCombo", modelComboWidth);
         ImGui.SameLine();
         if (ImGui.Button("刷新", new Vector2(refreshButtonWidth, 0f)))
@@ -687,7 +687,7 @@ public sealed partial class MainWindow
         _homeViewState.RapidFireStrategyIndex = rapidFireStrategyIndex;
         if (rapidFireStrategyChanged)
         {
-            TryWriteStringToCurrentConfig(AimAssistOptionCatalog.RapidFireStrategyKey, AimAssistOptionCatalog.RapidFireStrategyOptions[rapidFireStrategyIndex]);
+            TryWriteStringToCurrentConfig(SpecialWeaponLogicCatalog.RapidFireStrategyKey, AimAssistOptionCatalog.RapidFireStrategyOptions[rapidFireStrategyIndex]);
             PushAimAssistConfig();
         }
 
@@ -706,7 +706,7 @@ public sealed partial class MainWindow
         if (ImGui.InputInt("##HomeRapidFireHz", ref rapidFireHz, 1, 5))
         {
             _homeViewState.RapidFireHz = Math.Clamp(rapidFireHz, MinRapidFireHz, MaxRapidFireHz);
-            TryWriteIntToCurrentConfig(AimAssistOptionCatalog.RapidFireHzKey, _homeViewState.RapidFireHz);
+            TryWriteIntToCurrentConfig(SpecialWeaponLogicCatalog.RapidFireHzKey, _homeViewState.RapidFireHz);
             PushAimAssistConfig();
         }
 
@@ -847,8 +847,19 @@ public sealed partial class MainWindow
 
     private void UpdateConnectedGamepadCache(bool forceRefresh = false)
     {
-        _cachedConnectedGamepads = _gamepadService.GetConnectedGamepads(_sdlGamepadWorker, forceRefresh);
-        _cachedGamepadOptions = _gamepadService.BuildGamepadOptions(_cachedConnectedGamepads);
+        _cachedConnectedGamepads = _sdlGamepadWorker?.GetConnectedGamepads(forceRefresh)
+                                   ?? Array.Empty<(uint InstanceId, string Name)>();
+        if (_cachedConnectedGamepads.Length == 0)
+        {
+            _cachedGamepadOptions = Array.Empty<string>();
+            return;
+        }
+
+        _cachedGamepadOptions = new string[_cachedConnectedGamepads.Length];
+        for (var i = 0; i < _cachedConnectedGamepads.Length; i++)
+        {
+            _cachedGamepadOptions[i] = _cachedConnectedGamepads[i].Name;
+        }
     }
 
 

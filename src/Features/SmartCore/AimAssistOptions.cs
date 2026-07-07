@@ -13,9 +13,6 @@ internal enum RapidFireStrategy
 
 internal static class AimAssistOptionCatalog
 {
-    public const string RapidFireStrategyKey = "rapidFireStrategy";
-    public const string RapidFireHzKey = "rapidFireHz";
-
     public static readonly string[] SnapModeOptions = { "开火吸附", "瞄准 + 开火吸附" };
     public static readonly string[] RapidFireStrategyOptions = { "关闭连点", "始终连点", "根据当前武器连点" };
     public static readonly string[] SnapInnerInterpolationTypeOptions =
