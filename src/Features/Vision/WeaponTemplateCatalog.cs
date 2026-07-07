@@ -9,6 +9,7 @@ internal static class WeaponTemplateCatalog
     public const int TemplateHeight = 40;
     public const float EmptyHandSsimThreshold = 0.4f;
     public const string EmptyHandName = "empty";
+    public const string GameConfigKey = "game";
 
     public static readonly string[] GameOptions = { "Apex Legends", "The Finals" };
 

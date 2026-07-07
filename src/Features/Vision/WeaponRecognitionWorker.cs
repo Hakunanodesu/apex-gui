@@ -9,16 +9,22 @@ internal readonly record struct WeaponRecognitionResultState(
         new(WeaponTemplateCatalog.EmptyHandName, 0f);
 }
 
+internal interface IWeaponRecognitionSink
+{
+    void SetWeaponRecognition(in WeaponRecognitionResultState state);
+}
+
 internal sealed class WeaponRecognitionWorker : IDisposable
 {
     private const double TargetLoopIntervalMs = 500.0;
     private readonly object _sync = new();
     private readonly DesktopCaptureWorker _captureService;
-    private readonly IReadOnlyList<WeaponTemplateEntry> _templates;
+    private readonly IReadOnlyList<WeaponTemplateEntry> _allTemplates;
+    private IReadOnlyList<WeaponTemplateEntry> _activeTemplates;
     private readonly Thread _thread;
     private bool _running = true;
     private bool _processingEnabled = true;
-    private ViGEmMappingWorker? _consumer;
+    private IWeaponRecognitionSink? _consumer;
     private WeaponRecognitionResultState _latestResult = WeaponRecognitionResultState.Empty;
     private byte[] _latestSobel = Array.Empty<byte>();
     private int _latestSobelWidth;
@@ -28,13 +34,26 @@ internal sealed class WeaponRecognitionWorker : IDisposable
     public WeaponRecognitionWorker(DesktopCaptureWorker captureService)
     {
         _captureService = captureService;
-        _templates = WeaponTemplateCatalog.LoadEmbeddedTemplates();
+        _allTemplates = WeaponTemplateCatalog.LoadEmbeddedTemplates();
+        _activeTemplates = _allTemplates;
         _thread = new Thread(WorkerMain)
         {
             IsBackground = true,
             Name = "Weapon-Recognition-Worker"
         };
         _thread.Start();
+    }
+
+    public void SetCurrentGame(string gameDisplayName)
+    {
+        var gameFolder = WeaponTemplateCatalog.GetGameFolder(gameDisplayName);
+        var filtered = (IReadOnlyList<WeaponTemplateEntry>)_allTemplates
+            .Where(t => string.Equals(t.GameFolder, gameFolder, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        lock (_sync)
+        {
+            _activeTemplates = filtered;
+        }
     }
 
     public WeaponRecognitionResultState GetLatestResult()
@@ -67,7 +86,7 @@ internal sealed class WeaponRecognitionWorker : IDisposable
         }
     }
 
-    public void SetConsumer(ViGEmMappingWorker? consumer)
+    public void SetConsumer(IWeaponRecognitionSink? consumer)
     {
         lock (_sync)
         {
@@ -77,7 +96,7 @@ internal sealed class WeaponRecognitionWorker : IDisposable
 
     public void SetProcessingEnabled(bool enabled)
     {
-        ViGEmMappingWorker? consumer;
+        IWeaponRecognitionSink? consumer;
         lock (_sync)
         {
             if (_processingEnabled == enabled)
@@ -112,16 +131,18 @@ internal sealed class WeaponRecognitionWorker : IDisposable
         byte[] roiBuffer = Array.Empty<byte>();
         while (_running)
         {
-            WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetLoopIntervalMs);
+            FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetLoopIntervalMs);
             if (!_running)
             {
                 break;
             }
 
             var processingEnabled = false;
+            IReadOnlyList<WeaponTemplateEntry> templates;
             lock (_sync)
             {
                 processingEnabled = _processingEnabled;
+                templates = _activeTemplates;
             }
 
             if (!processingEnabled)
@@ -140,7 +161,7 @@ internal sealed class WeaponRecognitionWorker : IDisposable
                 continue;
             }
 
-            if (_templates.Count == 0)
+            if (templates.Count == 0)
             {
                 Publish(WeaponRecognitionResultState.Empty);
                 continue;
@@ -165,7 +186,7 @@ internal sealed class WeaponRecognitionWorker : IDisposable
 
             var bestName = string.Empty;
             var bestSimilarity = 0f;
-            foreach (var template in _templates)
+            foreach (var template in templates)
             {
                 var sim = ComputeSsim(sobel, template.GrayPixels, WeaponTemplateCatalog.TemplateWidth, WeaponTemplateCatalog.TemplateHeight);
                 if (sim <= bestSimilarity)
@@ -187,7 +208,7 @@ internal sealed class WeaponRecognitionWorker : IDisposable
 
     private void Publish(in WeaponRecognitionResultState result)
     {
-        ViGEmMappingWorker? consumer;
+        IWeaponRecognitionSink? consumer;
         lock (_sync)
         {
             _latestResult = result;
@@ -389,30 +410,5 @@ internal sealed class WeaponRecognitionWorker : IDisposable
         }
     }
 
-    private static void WaitForNextTick(Stopwatch loopTimer, ref double nextLoopAtMs, double intervalMs)
-    {
-        if (nextLoopAtMs <= 0.0)
-        {
-            nextLoopAtMs = loopTimer.Elapsed.TotalMilliseconds;
-        }
-
-        nextLoopAtMs += intervalMs;
-        while (true)
-        {
-            var remainingMs = nextLoopAtMs - loopTimer.Elapsed.TotalMilliseconds;
-            if (remainingMs <= 0.0)
-            {
-                break;
-            }
-
-            if (remainingMs >= 1.5)
-            {
-                Thread.Sleep(1);
-                continue;
-            }
-
-            Thread.SpinWait(64);
-        }
-    }
 }
 

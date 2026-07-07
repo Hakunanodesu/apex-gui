@@ -75,6 +75,7 @@
             _onnxWorker.SetDetectionConsumer(_viGEmMappingWorker);
             _weaponRecWorker = new WeaponRecognitionWorker(_dxgiWorker);
             _weaponRecWorker.SetConsumer(_viGEmMappingWorker);
+            _weaponRecWorker.SetCurrentGame(GetSelectedGameName());
             _dxgiWorker.SetFrameConsumer(_onnxWorker);
             _currentVisionConfig = config;
             SyncWeaponRecognitionEnabled();
@@ -87,9 +88,11 @@
 
     private void SyncWeaponRecognitionEnabled()
     {
+        var gameHasWeaponTemplates = WeaponTemplateCatalog.GetWeaponNamesForGame(GetSelectedGameName()).Length > 0;
         var enabled = _smartCoreMappingState.IsEnabled &&
                       _weaponRecWorker is not null &&
-                      _homeViewState.RapidFireStrategyIndex == WeaponBasedRapidFireStrategyIndex;
+                      gameHasWeaponTemplates &&
+                      _homeViewState.RapidFireStrategyIndex == (int)RapidFireStrategy.WeaponBased;
         _dxgiWorker?.SetWeaponRoiCaptureEnabled(enabled);
         _weaponRecWorker?.SetProcessingEnabled(enabled);
         if (!enabled)
@@ -100,8 +103,12 @@
 
     private void StopVisionPipeline()
     {
+        _onnxWorker?.SetDetectionConsumer(null);
+        _weaponRecWorker?.SetConsumer(null);
         _dxgiWorker?.SetPreviewFrameCacheEnabled(false);
         _dxgiWorker?.SetFrameConsumer(null);
+        _viGEmMappingWorker?.SetAimAssistDetections(SmartCoreDetectionState.Empty);
+        _viGEmMappingWorker?.SetWeaponRecognition(WeaponRecognitionResultState.Empty);
         _onnxWorker?.Dispose();
         _onnxWorker = null;
         _weaponRecWorker?.Dispose();
@@ -109,8 +116,6 @@
         _dxgiWorker?.Dispose();
         _dxgiWorker = null;
         _currentVisionConfig = null;
-        _viGEmMappingWorker?.SetAimAssistDetections(SmartCoreDetectionState.Empty);
-        _viGEmMappingWorker?.SetWeaponRecognition(WeaponRecognitionResultState.Empty);
     }
 }
 

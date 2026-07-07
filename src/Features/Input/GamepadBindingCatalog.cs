@@ -73,6 +73,9 @@ internal static class GamepadBindingCatalog
         "Start"
     };
 
+    public static readonly string[] TouchpadOptions =
+        Options.Concat(new[] { KeyboardCustomBindingName }).ToArray();
+
     public const string KeyboardCustomBindingName = "自定义键盘按键";
     public const string DefaultCustomKeyboardKeyName = "=";
 
@@ -201,6 +204,65 @@ internal static class GamepadBindingCatalog
         };
     }
 
+    public static void ApplyBinding(
+        ref MappedGamepadState state,
+        int bindingIndex,
+        bool pressed,
+        short analogValueWhenPressed = short.MaxValue)
+    {
+        switch (NormalizeIndex(bindingIndex))
+        {
+            case 0:
+                state.LeftTrigger = pressed ? analogValueWhenPressed : (short)0;
+                break;
+            case 1:
+                state.RightTrigger = pressed ? analogValueWhenPressed : (short)0;
+                break;
+            case 2:
+                state.LeftShoulder = pressed;
+                break;
+            case 3:
+                state.RightShoulder = pressed;
+                break;
+            case 4:
+                state.A = pressed;
+                break;
+            case 5:
+                state.B = pressed;
+                break;
+            case 6:
+                state.X = pressed;
+                break;
+            case 7:
+                state.Y = pressed;
+                break;
+            case 8:
+                state.LeftThumb = pressed;
+                break;
+            case 9:
+                state.RightThumb = pressed;
+                break;
+            case 10:
+                state.DpadUp = pressed;
+                break;
+            case 11:
+                state.DpadDown = pressed;
+                break;
+            case 12:
+                state.DpadLeft = pressed;
+                break;
+            case 13:
+                state.DpadRight = pressed;
+                break;
+            case 14:
+                state.Back = pressed;
+                break;
+            case 15:
+                state.Start = pressed;
+                break;
+        }
+    }
+
     private static int NormalizeIndex(int index)
     {
         if (index < 0 || index >= Options.Length)
@@ -309,4 +371,46 @@ internal static class GamepadBindingCatalog
         ushort VirtualKey,
         string[] OpenTkKeyCandidates,
         params string[] Aliases);
+}
+
+internal struct MappedGamepadState
+{
+    public short LeftTrigger;
+    public short RightTrigger;
+    public bool LeftShoulder;
+    public bool RightShoulder;
+    public bool A;
+    public bool B;
+    public bool X;
+    public bool Y;
+    public bool LeftThumb;
+    public bool RightThumb;
+    public bool DpadUp;
+    public bool DpadDown;
+    public bool DpadLeft;
+    public bool DpadRight;
+    public bool Back;
+    public bool Start;
+    public bool Guide;
+
+    public MappedGamepadState(in SdlGamepadInputSnapshot input)
+    {
+        LeftTrigger = input.LeftTrigger;
+        RightTrigger = input.RightTrigger;
+        LeftShoulder = input.LeftShoulder;
+        RightShoulder = input.RightShoulder;
+        A = input.A;
+        B = input.B;
+        X = input.X;
+        Y = input.Y;
+        LeftThumb = input.LeftThumb;
+        RightThumb = input.RightThumb;
+        DpadUp = input.DpadUp;
+        DpadDown = input.DpadDown;
+        DpadLeft = input.DpadLeft;
+        DpadRight = input.DpadRight;
+        Back = input.Back;
+        Start = input.Start;
+        Guide = input.Guide;
+    }
 }

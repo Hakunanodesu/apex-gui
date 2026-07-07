@@ -46,6 +46,8 @@ internal readonly struct OnnxModelConfig
 
 internal static class OnnxModelConfigLoader
 {
+    public const string ModelConfigKey = "model";
+
     public static List<OnnxModelConfig> LoadFromDirectory(string directory)
     {
         var result = new List<OnnxModelConfig>();

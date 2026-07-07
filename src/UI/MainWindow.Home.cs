@@ -4,6 +4,45 @@ using Keys = OpenTK.Windowing.GraphicsLibraryFramework.Keys;
 
 public sealed partial class MainWindow
 {
+    private bool DrawConfigBoundCombo(
+        string comboId,
+        IReadOnlyList<string> options,
+        ref int selectedIndex,
+        float width,
+        bool disabled)
+    {
+        if (selectedIndex < 0 || selectedIndex >= options.Count)
+        {
+            selectedIndex = 0;
+        }
+
+        ImGui.SetNextItemWidth(width);
+        ImGui.BeginDisabled(disabled);
+        var changed = false;
+        if (ImGui.BeginCombo(comboId, options[selectedIndex]))
+        {
+            for (var i = 0; i < options.Count; i++)
+            {
+                var isSelected = i == selectedIndex;
+                if (ImGui.Selectable(options[i], isSelected))
+                {
+                    selectedIndex = i;
+                    changed = true;
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.EndDisabled();
+        return changed;
+    }
+
     private enum TouchpadKeyCaptureTarget
     {
         None = 0,
@@ -12,21 +51,11 @@ public sealed partial class MainWindow
         Voice = 3
     }
 
-    private const float SnapFloatStep = 0.01f;
-    private const string SnapFloatFormat = "%.2f";
-
     private readonly record struct HomeLayoutMetrics(
         float FirstColumnWidth,
         float ReserveWidth,
         float AddButtonWidth,
         float DeleteButtonWidth);
-
-    private readonly record struct SnapSettingsLayout(
-        float LabelWidth,
-        float LastLabelWidth,
-        float RangeInputWidth,
-        float StrengthInputWidth,
-        float ExtraInputWidth);
 
     private void DrawHomeTab()
     {
@@ -245,37 +274,22 @@ public sealed partial class MainWindow
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("选择游戏");
         ImGui.TableSetColumnIndex(1);
-        ImGui.BeginDisabled(_configFiles.Count == 0);
-        _homeViewState.GameIndex = _homeViewState.GameIndex >= 0 && _homeViewState.GameIndex < HomeGameOptions.Length
-            ? _homeViewState.GameIndex
-            : 0;
-        var selectedGameLabel = HomeGameOptions[_homeViewState.GameIndex];
         var gameComboWidth = ImGui.GetContentRegionAvail().X - metrics.ReserveWidth;
-        ImGui.SetNextItemWidth(gameComboWidth);
-        if (ImGui.BeginCombo("##HomeGameCombo", selectedGameLabel))
+        var gameIndex = _homeViewState.GameIndex;
+        var gameChanged = DrawConfigBoundCombo(
+            "##HomeGameCombo",
+            HomeGameOptions,
+            ref gameIndex,
+            gameComboWidth,
+            _configFiles.Count == 0);
+        _homeViewState.GameIndex = gameIndex;
+        if (gameChanged)
         {
-            for (var i = 0; i < HomeGameOptions.Length; i++)
-            {
-                var isSelected = i == _homeViewState.GameIndex;
-                if (ImGui.Selectable(HomeGameOptions[i], isSelected))
-                {
-                    _homeViewState.GameIndex = i;
-                    TryWriteStringToCurrentConfig(GameConfigKey, HomeGameOptions[i]);
-                    RefreshSpecialWeaponNamesForCurrentGame();
-                    ApplySpecialWeaponLogicFromCurrentConfig();
-                    PushAimAssistConfig();
-                }
-
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
+            TryWriteStringToCurrentConfig(WeaponTemplateCatalog.GameConfigKey, HomeGameOptions[gameIndex]);
+            RefreshSpecialWeaponNamesForCurrentGame();
+            ApplySpecialWeaponLogicFromCurrentConfig();
+            PushAimAssistConfig();
         }
-
-        ImGui.EndDisabled();
     }
 
     private void DrawModelSelectionRow(HomeLayoutMetrics metrics)
@@ -297,342 +311,6 @@ public sealed partial class MainWindow
             RefreshOnnxModels();
         }
         ImGui.EndDisabled();
-    }
-
-    private void DrawSnapSettingsSection(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
-    {
-        ImGui.TableNextRow();
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("吸附参数设定");
-        ImGui.TableSetColumnIndex(1);
-
-        var selectedModelSize = _onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count
-            ? Math.Max(1, _onnxModels[_onnxTopSelectedModelIndex].InputHeight)
-            : 1;
-        var displayHeightLimit = GetDisplayHeightOrWindowHeight();
-        var snapOuterRangeMax = Math.Max(selectedModelSize, displayHeightLimit);
-        NormalizeSnapSettings(selectedModelSize, snapOuterRangeMax);
-        var layout = BuildSnapSettingsLayout(topPanelStyle);
-
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
-        if (ImGui.BeginTable("##SnapSettingsGrid", 6, ImGuiTableFlags.SizingFixedFit))
-        {
-            SetupSnapSettingsGridColumns(layout);
-            DrawSnapRangeRow(layout, selectedModelSize, snapOuterRangeMax);
-            DrawSnapStrengthRow(layout);
-            DrawSnapExtraRow(layout);
-            DrawSnapStrengthRampRow(layout);
-
-            ImGui.EndTable();
-        }
-
-        DrawSnapInterpolationTypeRow(metrics.ReserveWidth, layout.LabelWidth);
-    }
-
-    private void NormalizeSnapSettings(int selectedModelSize, int snapOuterRangeMax)
-    {
-        _homeViewState.SnapOuterRange = Math.Clamp(_homeViewState.SnapOuterRange, selectedModelSize, snapOuterRangeMax);
-        _homeViewState.SnapInnerRange = Math.Clamp(_homeViewState.SnapInnerRange, 1, _homeViewState.SnapOuterRange);
-        _homeViewState.SnapOuterStrength = Math.Clamp(_homeViewState.SnapOuterStrength, 0f, 1f);
-        _homeViewState.SnapInnerStrength = Math.Clamp(_homeViewState.SnapInnerStrength, 0f, 1f);
-        _homeViewState.SnapStartStrength = Math.Clamp(_homeViewState.SnapStartStrength, 0f, 1f);
-        _homeViewState.SnapVerticalStrengthFactor = Math.Clamp(_homeViewState.SnapVerticalStrengthFactor, 0f, 1f);
-        _homeViewState.SnapHipfireStrengthFactor = Math.Clamp(_homeViewState.SnapHipfireStrengthFactor, 0f, 1f);
-        _homeViewState.SnapHeight = Math.Clamp(_homeViewState.SnapHeight, 0f, 1f);
-    }
-
-    private static SnapSettingsLayout BuildSnapSettingsLayout(ImGuiStylePtr topPanelStyle)
-    {
-        var rangeInputWidth = ImGui.CalcTextSize("0000").X + topPanelStyle.FramePadding.X * 2f;
-        var strengthInputWidth = rangeInputWidth + ImGui.GetFrameHeight() * 2f + topPanelStyle.ItemInnerSpacing.X * 2f;
-        var labelWidth = MeasureMaxTextWidth(
-                             "内圈范围",
-                             "外圈范围",
-                             "内圈强度",
-                             "外圈强度",
-                             "腰射强度系数",
-                             "垂直强度系数")
-                         + topPanelStyle.CellPadding.X * 2f;
-        var lastLabelWidth = MeasureMaxTextWidth("起始强度", "吸附高度") + topPanelStyle.CellPadding.X * 2f;
-        return new SnapSettingsLayout(
-            labelWidth,
-            lastLabelWidth,
-            rangeInputWidth,
-            strengthInputWidth,
-            strengthInputWidth);
-    }
-
-    private static float MeasureMaxTextWidth(params string[] texts)
-    {
-        var maxWidth = 0f;
-        for (var i = 0; i < texts.Length; i++)
-        {
-            maxWidth = MathF.Max(maxWidth, ImGui.CalcTextSize(texts[i]).X);
-        }
-
-        return maxWidth;
-    }
-
-    private static void SetupSnapSettingsGridColumns(in SnapSettingsLayout layout)
-    {
-        ImGui.TableSetupColumn("##SnapLabelCol0", ImGuiTableColumnFlags.WidthFixed, layout.LabelWidth);
-        ImGui.TableSetupColumn("##SnapInputCol0", ImGuiTableColumnFlags.WidthFixed, layout.StrengthInputWidth);
-        ImGui.TableSetupColumn("##SnapLabelCol1", ImGuiTableColumnFlags.WidthFixed, layout.LabelWidth);
-        ImGui.TableSetupColumn("##SnapInputCol1", ImGuiTableColumnFlags.WidthFixed, layout.StrengthInputWidth);
-        ImGui.TableSetupColumn("##SnapLabelCol2", ImGuiTableColumnFlags.WidthFixed, layout.LastLabelWidth);
-        ImGui.TableSetupColumn("##SnapInputCol2", ImGuiTableColumnFlags.WidthFixed, layout.StrengthInputWidth);
-    }
-
-    private void DrawSnapRangeRow(in SnapSettingsLayout layout, int selectedModelSize, int snapOuterRangeMax)
-    {
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("内圈范围");
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip("内圈吸附半径，目标进入该范围后按内圈强度进行吸附。\n单位：像素，需小于等于外圈范围。");
-        }
-
-        ImGui.TableSetColumnIndex(1);
-        ImGui.SetNextItemWidth(layout.RangeInputWidth);
-        var snapInnerRange = _homeViewState.SnapInnerRange;
-        if (ImGui.InputInt("##SnapInnerRange", ref snapInnerRange, 0, 0))
-        {
-            _homeViewState.SnapInnerRange = Math.Clamp(snapInnerRange, 1, _homeViewState.SnapOuterRange);
-            TryWriteIntToCurrentConfig("snapInnerRange", _homeViewState.SnapInnerRange);
-            PushAimAssistConfig();
-        }
-
-        ImGui.TableSetColumnIndex(2);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("外圈范围");
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip("外圈吸附半径，目标进入该范围即开始吸附。\n单位：像素，上限取决于模型尺寸与显示高度。");
-        }
-
-        ImGui.TableSetColumnIndex(3);
-        ImGui.SetNextItemWidth(layout.RangeInputWidth);
-        var snapOuterRange = _homeViewState.SnapOuterRange;
-        if (ImGui.InputInt("##SnapOuterRange", ref snapOuterRange, 0, 0))
-        {
-            _homeViewState.SnapOuterRange = Math.Clamp(snapOuterRange, selectedModelSize, snapOuterRangeMax);
-            _homeViewState.SnapInnerRange = Math.Clamp(_homeViewState.SnapInnerRange, 1, _homeViewState.SnapOuterRange);
-            TryWriteIntToCurrentConfig("snapOuterRange", _homeViewState.SnapOuterRange);
-            TryWriteIntToCurrentConfig("snapInnerRange", _homeViewState.SnapInnerRange);
-            PushAimAssistConfig();
-            SyncSmartCoreVisionPipeline();
-        }
-
-        ImGui.TableSetColumnIndex(5);
-        var snapRangePreviewWindowOpen = IsSnapRangePreviewWindowOpen();
-        ImGui.BeginDisabled(snapRangePreviewWindowOpen);
-        if (ImGui.Button("范围预览##SnapRangePreviewWindowButton", new Vector2(layout.ExtraInputWidth, 0f)))
-        {
-            OpenSnapRangePreviewWindow();
-        }
-        ImGui.EndDisabled();
-    }
-
-    private void DrawSnapStrengthRow(in SnapSettingsLayout layout)
-    {
-        ImGui.TableNextRow();
-        ImGui.TableNextRow();
-
-        ImGui.TableSetColumnIndex(0);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("内圈强度");
-        ImGui.TableSetColumnIndex(1);
-        ImGui.SetNextItemWidth(layout.StrengthInputWidth);
-        DrawClampedConfigFloatInput(
-            "##SnapInnerStrength",
-            "snapInnerStrength",
-            _homeViewState.SnapInnerStrength,
-            value => _homeViewState.SnapInnerStrength = value,
-            0f,
-            1f);
-
-        ImGui.TableSetColumnIndex(2);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("外圈强度");
-        ImGui.TableSetColumnIndex(3);
-        ImGui.SetNextItemWidth(layout.StrengthInputWidth);
-        DrawClampedConfigFloatInput(
-            "##SnapOuterStrength",
-            "snapOuterStrength",
-            _homeViewState.SnapOuterStrength,
-            value => _homeViewState.SnapOuterStrength = value,
-            0f,
-            1f);
-
-        ImGui.TableSetColumnIndex(4);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("起始强度");
-        ImGui.TableSetColumnIndex(5);
-        ImGui.SetNextItemWidth(layout.ExtraInputWidth);
-        DrawClampedConfigFloatInput(
-            "##SnapStartStrength",
-            "snapStartStrength",
-            _homeViewState.SnapStartStrength,
-            value => _homeViewState.SnapStartStrength = value,
-            0f,
-            1f);
-    }
-
-    private void DrawSnapExtraRow(in SnapSettingsLayout layout)
-    {
-        ImGui.TableNextRow();
-        ImGui.TableNextRow();
-
-        ImGui.TableSetColumnIndex(0);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("腰射强度系数");
-        ImGui.TableSetColumnIndex(1);
-        ImGui.SetNextItemWidth(layout.ExtraInputWidth);
-        DrawClampedConfigFloatInput(
-            "##SnapHipfireStrengthFactor",
-            "snapHipfireStrengthFactor",
-            _homeViewState.SnapHipfireStrengthFactor,
-            value => _homeViewState.SnapHipfireStrengthFactor = value,
-            0f,
-            1f);
-
-        ImGui.TableSetColumnIndex(2);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("垂直强度系数");
-        ImGui.TableSetColumnIndex(3);
-        ImGui.SetNextItemWidth(layout.ExtraInputWidth);
-        DrawClampedConfigFloatInput(
-            "##SnapVerticalStrengthFactor",
-            "snapVerticalStrengthFactor",
-            _homeViewState.SnapVerticalStrengthFactor,
-            value => _homeViewState.SnapVerticalStrengthFactor = value,
-            0f,
-            1f);
-
-        ImGui.TableSetColumnIndex(4);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("吸附高度");
-        ImGui.TableSetColumnIndex(5);
-        ImGui.SetNextItemWidth(layout.ExtraInputWidth);
-        DrawClampedConfigFloatInput(
-            "##SnapHeight",
-            "snapHeight",
-            _homeViewState.SnapHeight,
-            value => _homeViewState.SnapHeight = value,
-            0f,
-            1f);
-    }
-
-    private void DrawSnapStrengthRampRow(in SnapSettingsLayout layout)
-    {
-        ImGui.TableNextRow();
-        ImGui.TableNextRow();
-
-        ImGui.TableSetColumnIndex(0);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("强度爬升时间");
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip("吸附强度从起始强度爬升到目标强度所需的时间（秒）。\n0 表示瞬间到达目标强度，数值越大爬升越平缓。");
-        }
-
-        ImGui.TableSetColumnIndex(1);
-        ImGui.SetNextItemWidth(layout.StrengthInputWidth);
-        DrawClampedConfigFloatInput(
-            "##SnapStrengthRampTime",
-            "snapStrengthRampTime",
-            _homeViewState.SnapStrengthRampTime,
-            value => _homeViewState.SnapStrengthRampTime = value,
-            0f,
-            1f,
-            0.1f,
-            "%.1f");
-    }
-
-    private void DrawSnapInterpolationTypeRow(float reserveWidth, float labelWidth)
-    {
-        if (!ImGui.BeginTable("##SnapInterpolationRow", 2, ImGuiTableFlags.SizingStretchProp))
-        {
-            return;
-        }
-
-        ImGui.TableSetupColumn("##SnapInterpolationLabel", ImGuiTableColumnFlags.WidthFixed, labelWidth);
-        ImGui.TableSetupColumn("##SnapInterpolationInput", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableNextRow();
-        _homeViewState.SnapInnerInterpolationTypeIndex =
-            _homeViewState.SnapInnerInterpolationTypeIndex >= 0 && _homeViewState.SnapInnerInterpolationTypeIndex < SnapInnerInterpolationTypeOptions.Length
-                ? _homeViewState.SnapInnerInterpolationTypeIndex
-                : 0;
-
-        ImGui.TableSetColumnIndex(0);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("内圈插值类型");
-
-        ImGui.TableSetColumnIndex(1);
-        var interpolationComboWidth = MathF.Max(90f, ImGui.GetContentRegionAvail().X - reserveWidth);
-        ImGui.SetNextItemWidth(interpolationComboWidth);
-        var selectedSnapInnerInterpolationLabel = SnapInnerInterpolationTypeOptions[_homeViewState.SnapInnerInterpolationTypeIndex];
-        if (ImGui.BeginCombo("##SnapInnerInterpolationTypeCombo", selectedSnapInnerInterpolationLabel))
-        {
-            for (var i = 0; i < SnapInnerInterpolationTypeOptions.Length; i++)
-            {
-                var isSelected = i == _homeViewState.SnapInnerInterpolationTypeIndex;
-                if (ImGui.Selectable(SnapInnerInterpolationTypeOptions[i], isSelected))
-                {
-                    _homeViewState.SnapInnerInterpolationTypeIndex = i;
-                    TryWriteStringToCurrentConfig("snapInnerInterpolationType", SnapInnerInterpolationTypeOptions[i]);
-                    PushAimAssistConfig();
-                }
-
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
-        }
-
-        ImGui.EndTable();
-    }
-
-    private void DrawClampedConfigFloatInput(
-        string controlId,
-        string configKey,
-        float currentValue,
-        Action<float> setValue,
-        float min,
-        float max,
-        float step = SnapFloatStep,
-        string format = SnapFloatFormat)
-    {
-        var editedValue = currentValue;
-        if (!ImGui.InputFloat(controlId, ref editedValue, step, step, format))
-        {
-            return;
-        }
-
-        var clampedValue = Math.Clamp(editedValue, min, max);
-        setValue(clampedValue);
-        TryWriteFloatToCurrentConfig(configKey, clampedValue);
-        PushAimAssistConfig();
-    }
-
-    private void DrawSnapCurveSection(ImGuiStylePtr topPanelStyle)
-    {
-        ImGui.TableNextRow();
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        // ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("吸附曲线预览");
-        ImGui.TableSetColumnIndex(1);
-        // ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
-        DrawSnapCurvePreview();
     }
 
     private void DrawKeyBindingSection(float reserveWidth, ImGuiStylePtr topPanelStyle)
@@ -659,10 +337,10 @@ public sealed partial class MainWindow
         _homeViewState.VoiceBindingIndex = _homeViewState.VoiceBindingIndex >= 0 && _homeViewState.VoiceBindingIndex < GamepadBindingCatalog.Options.Length
             ? _homeViewState.VoiceBindingIndex
             : GamepadBindingCatalog.DefaultTouchpadLeftIndex;
-        _homeViewState.TouchpadLeftBindingIndex = _homeViewState.TouchpadLeftBindingIndex >= 0 && _homeViewState.TouchpadLeftBindingIndex < TouchpadBindingOptions.Length
+        _homeViewState.TouchpadLeftBindingIndex = _homeViewState.TouchpadLeftBindingIndex >= 0 && _homeViewState.TouchpadLeftBindingIndex < GamepadBindingCatalog.TouchpadOptions.Length
             ? _homeViewState.TouchpadLeftBindingIndex
             : GamepadBindingCatalog.DefaultTouchpadLeftIndex;
-        _homeViewState.TouchpadRightBindingIndex = _homeViewState.TouchpadRightBindingIndex >= 0 && _homeViewState.TouchpadRightBindingIndex < TouchpadBindingOptions.Length
+        _homeViewState.TouchpadRightBindingIndex = _homeViewState.TouchpadRightBindingIndex >= 0 && _homeViewState.TouchpadRightBindingIndex < GamepadBindingCatalog.TouchpadOptions.Length
             ? _homeViewState.TouchpadRightBindingIndex
             : GamepadBindingCatalog.DefaultTouchpadRightIndex;
         if (!GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(_homeViewState.TouchpadLeftCustomKey, out _, out var normalizedLeftCustomKey))
@@ -676,14 +354,14 @@ public sealed partial class MainWindow
         }
         if (!GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(_homeViewState.VoiceCustomKey, out _, out var normalizedVoiceCustomKey))
         {
-            normalizedVoiceCustomKey = DefaultVoiceCustomKeyName;
+            normalizedVoiceCustomKey = BindingConfigCatalog.DefaultVoiceCustomKey;
         }
 
         _homeViewState.TouchpadLeftCustomKey = normalizedLeftCustomKey;
         _homeViewState.TouchpadRightCustomKey = normalizedRightCustomKey;
         _homeViewState.VoiceCustomKey = normalizedVoiceCustomKey;
         var disableBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.Options.Length == 0;
-        var disableTouchpadBindingSelection = _configFiles.Count == 0 || TouchpadBindingOptions.Length == 0;
+        var disableTouchpadBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.TouchpadOptions.Length == 0;
         var leftCustomSelected = GamepadBindingCatalog.IsKeyboardCustomBinding(_homeViewState.TouchpadLeftBindingIndex);
         var rightCustomSelected = GamepadBindingCatalog.IsKeyboardCustomBinding(_homeViewState.TouchpadRightBindingIndex);
         if ((_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Left && !leftCustomSelected) ||
@@ -709,30 +387,19 @@ public sealed partial class MainWindow
 
             ImGui.TableSetColumnIndex(1);
             var bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
-            ImGui.SetNextItemWidth(bindingContentWidth);
-            var selectedAimLabel = GamepadBindingCatalog.Options[_homeViewState.AimBindingIndex];
-            ImGui.BeginDisabled(disableBindingSelection);
-            if (ImGui.BeginCombo("##HomeAimBindingCombo", selectedAimLabel))
+            var aimIndex = _homeViewState.AimBindingIndex;
+            var aimChanged = DrawConfigBoundCombo(
+                "##HomeAimBindingCombo",
+                GamepadBindingCatalog.Options,
+                ref aimIndex,
+                bindingContentWidth,
+                disableBindingSelection);
+            _homeViewState.AimBindingIndex = aimIndex;
+            if (aimChanged)
             {
-                for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
-                {
-                    var isSelected = i == _homeViewState.AimBindingIndex;
-                    if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
-                    {
-                        _homeViewState.AimBindingIndex = i;
-                        TryWriteStringToCurrentConfig(AimBindingConfigKey, GamepadBindingCatalog.Options[i]);
-                        PushAimAssistConfig();
-                    }
-
-                    if (isSelected)
-                    {
-                        ImGui.SetItemDefaultFocus();
-                    }
-                }
-
-                ImGui.EndCombo();
+                TryWriteStringToCurrentConfig(BindingConfigCatalog.AimBindingKey, GamepadBindingCatalog.Options[aimIndex]);
+                PushAimAssistConfig();
             }
-            ImGui.EndDisabled();
 
             ImGui.TableNextRow();
             ImGui.TableNextRow();
@@ -742,30 +409,19 @@ public sealed partial class MainWindow
 
             ImGui.TableSetColumnIndex(1);
             bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
-            ImGui.SetNextItemWidth(bindingContentWidth);
-            var selectedFireLabel = GamepadBindingCatalog.Options[_homeViewState.FireBindingIndex];
-            ImGui.BeginDisabled(disableBindingSelection);
-            if (ImGui.BeginCombo("##HomeFireBindingCombo", selectedFireLabel))
+            var fireIndex = _homeViewState.FireBindingIndex;
+            var fireChanged = DrawConfigBoundCombo(
+                "##HomeFireBindingCombo",
+                GamepadBindingCatalog.Options,
+                ref fireIndex,
+                bindingContentWidth,
+                disableBindingSelection);
+            _homeViewState.FireBindingIndex = fireIndex;
+            if (fireChanged)
             {
-                for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
-                {
-                    var isSelected = i == _homeViewState.FireBindingIndex;
-                    if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
-                    {
-                        _homeViewState.FireBindingIndex = i;
-                        TryWriteStringToCurrentConfig(FireBindingConfigKey, GamepadBindingCatalog.Options[i]);
-                        PushAimAssistConfig();
-                    }
-
-                    if (isSelected)
-                    {
-                        ImGui.SetItemDefaultFocus();
-                    }
-                }
-
-                ImGui.EndCombo();
+                TryWriteStringToCurrentConfig(BindingConfigCatalog.FireBindingKey, GamepadBindingCatalog.Options[fireIndex]);
+                PushAimAssistConfig();
             }
-            ImGui.EndDisabled();
 
             ImGui.TableNextRow();
             ImGui.TableNextRow();
@@ -776,36 +432,24 @@ public sealed partial class MainWindow
             ImGui.TableSetColumnIndex(1);
             bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
             var touchpadCaptureButtonWidth = ImGui.CalcTextSize("PrintScreen").X + topPanelStyle.FramePadding.X * 2f;
-            var touchpadComboWidth = bindingContentWidth - topPanelStyle.ItemSpacing.X - touchpadCaptureButtonWidth;
-            touchpadComboWidth = MathF.Max(70f, touchpadComboWidth);
-            ImGui.SetNextItemWidth(touchpadComboWidth);
-            var selectedTouchpadLeftLabel = TouchpadBindingOptions[_homeViewState.TouchpadLeftBindingIndex];
-            ImGui.BeginDisabled(disableTouchpadBindingSelection);
-            if (ImGui.BeginCombo("##HomeTouchpadLeftBindingCombo", selectedTouchpadLeftLabel))
+            var touchpadComboWidth = MathF.Max(70f, bindingContentWidth - topPanelStyle.ItemSpacing.X - touchpadCaptureButtonWidth);
+            var touchpadLeftIndex = _homeViewState.TouchpadLeftBindingIndex;
+            var touchpadLeftChanged = DrawConfigBoundCombo(
+                "##HomeTouchpadLeftBindingCombo",
+                GamepadBindingCatalog.TouchpadOptions,
+                ref touchpadLeftIndex,
+                touchpadComboWidth,
+                disableTouchpadBindingSelection);
+            _homeViewState.TouchpadLeftBindingIndex = touchpadLeftIndex;
+            if (touchpadLeftChanged)
             {
-                for (var i = 0; i < TouchpadBindingOptions.Length; i++)
+                TryWriteStringToCurrentConfig(BindingConfigCatalog.TouchpadLeftBindingKey, GamepadBindingCatalog.TouchpadOptions[touchpadLeftIndex]);
+                if (!GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadLeftIndex))
                 {
-                    var isSelected = i == _homeViewState.TouchpadLeftBindingIndex;
-                    if (ImGui.Selectable(TouchpadBindingOptions[i], isSelected))
-                    {
-                        _homeViewState.TouchpadLeftBindingIndex = i;
-                        TryWriteStringToCurrentConfig(TouchpadLeftBindingConfigKey, TouchpadBindingOptions[i]);
-                        if (!GamepadBindingCatalog.IsKeyboardCustomBinding(i))
-                        {
-                            CancelTouchpadKeyCapture();
-                        }
-                        PushAimAssistConfig();
-                    }
-
-                    if (isSelected)
-                    {
-                        ImGui.SetItemDefaultFocus();
-                    }
+                    CancelTouchpadKeyCapture();
                 }
-
-                ImGui.EndCombo();
+                PushAimAssistConfig();
             }
-            ImGui.EndDisabled();
             ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
             ImGui.BeginDisabled(!leftCustomSelected || disableTouchpadBindingSelection);
             var leftButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Left, _homeViewState.TouchpadLeftCustomKey);
@@ -824,34 +468,23 @@ public sealed partial class MainWindow
             ImGui.TableSetColumnIndex(1);
             bindingContentWidth = MathF.Max(minBindingContentWidth, ImGui.GetContentRegionAvail().X - reserveWidth);
             touchpadComboWidth = MathF.Max(70f, bindingContentWidth - topPanelStyle.ItemSpacing.X - touchpadCaptureButtonWidth);
-            ImGui.SetNextItemWidth(touchpadComboWidth);
-            var selectedTouchpadRightLabel = TouchpadBindingOptions[_homeViewState.TouchpadRightBindingIndex];
-            ImGui.BeginDisabled(disableTouchpadBindingSelection);
-            if (ImGui.BeginCombo("##HomeTouchpadRightBindingCombo", selectedTouchpadRightLabel))
+            var touchpadRightIndex = _homeViewState.TouchpadRightBindingIndex;
+            var touchpadRightChanged = DrawConfigBoundCombo(
+                "##HomeTouchpadRightBindingCombo",
+                GamepadBindingCatalog.TouchpadOptions,
+                ref touchpadRightIndex,
+                touchpadComboWidth,
+                disableTouchpadBindingSelection);
+            _homeViewState.TouchpadRightBindingIndex = touchpadRightIndex;
+            if (touchpadRightChanged)
             {
-                for (var i = 0; i < TouchpadBindingOptions.Length; i++)
+                TryWriteStringToCurrentConfig(BindingConfigCatalog.TouchpadRightBindingKey, GamepadBindingCatalog.TouchpadOptions[touchpadRightIndex]);
+                if (!GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadRightIndex))
                 {
-                    var isSelected = i == _homeViewState.TouchpadRightBindingIndex;
-                    if (ImGui.Selectable(TouchpadBindingOptions[i], isSelected))
-                    {
-                        _homeViewState.TouchpadRightBindingIndex = i;
-                        TryWriteStringToCurrentConfig(TouchpadRightBindingConfigKey, TouchpadBindingOptions[i]);
-                        if (!GamepadBindingCatalog.IsKeyboardCustomBinding(i))
-                        {
-                            CancelTouchpadKeyCapture();
-                        }
-                        PushAimAssistConfig();
-                    }
-
-                    if (isSelected)
-                    {
-                        ImGui.SetItemDefaultFocus();
-                    }
+                    CancelTouchpadKeyCapture();
                 }
-
-                ImGui.EndCombo();
+                PushAimAssistConfig();
             }
-            ImGui.EndDisabled();
             ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
             ImGui.BeginDisabled(!rightCustomSelected || disableTouchpadBindingSelection);
             var rightButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Right, _homeViewState.TouchpadRightCustomKey);
@@ -878,30 +511,19 @@ public sealed partial class MainWindow
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("从");
             ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-            ImGui.SetNextItemWidth(voiceComboWidth);
-            var selectedVoiceLabel = GamepadBindingCatalog.Options[_homeViewState.VoiceBindingIndex];
-            ImGui.BeginDisabled(disableBindingSelection);
-            if (ImGui.BeginCombo("##HomeVoiceBindingCombo", selectedVoiceLabel))
+            var voiceIndex = _homeViewState.VoiceBindingIndex;
+            var voiceChanged = DrawConfigBoundCombo(
+                "##HomeVoiceBindingCombo",
+                GamepadBindingCatalog.Options,
+                ref voiceIndex,
+                voiceComboWidth,
+                disableBindingSelection);
+            _homeViewState.VoiceBindingIndex = voiceIndex;
+            if (voiceChanged)
             {
-                for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
-                {
-                    var isSelected = i == _homeViewState.VoiceBindingIndex;
-                    if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
-                    {
-                        _homeViewState.VoiceBindingIndex = i;
-                        TryWriteStringToCurrentConfig(VoiceBindingConfigKey, GamepadBindingCatalog.Options[i]);
-                        PushAimAssistConfig();
-                    }
-
-                    if (isSelected)
-                    {
-                        ImGui.SetItemDefaultFocus();
-                    }
-                }
-
-                ImGui.EndCombo();
+                TryWriteStringToCurrentConfig(BindingConfigCatalog.VoiceBindingKey, GamepadBindingCatalog.Options[voiceIndex]);
+                PushAimAssistConfig();
             }
-            ImGui.EndDisabled();
             ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("映射到");
@@ -915,132 +537,6 @@ public sealed partial class MainWindow
             ImGui.EndDisabled();
 
             ImGui.EndTable();
-        }
-    }
-
-    private void DrawMacroSection(ImGuiStylePtr topPanelStyle)
-    {
-        ImGui.TableNextRow();
-        ImGui.TableNextRow();
-
-        ImGui.TableSetColumnIndex(0);
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("宏");
-
-        ImGui.TableSetColumnIndex(1);
-        ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
-        if (GetSelectedGameName() != "Apex Legends")
-        {
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextDisabled("无");
-            return;
-        }
-
-        var modeComboWidth = ImGui.CalcTextSize("按住").X + topPanelStyle.FramePadding.X * 2f + ImGui.GetFrameHeight();
-        var bindingComboWidth = MathF.Max(90f, ImGui.CalcTextSize("左摇杆按下").X + topPanelStyle.FramePadding.X * 2f + ImGui.GetFrameHeight());
-        var macroInputWidth = ImGui.CalcTextSize("2000").X + topPanelStyle.FramePadding.X * 2f;
-
-        var macro = GetPrimaryMacro();
-        MacroConfigCatalog.Normalize(macro);
-
-        ImGui.BeginDisabled(_configFiles.Count == 0);
-        var macroEnabled = macro.Enabled;
-        if (ImGui.Checkbox("##HomeMacroEnabled", ref macroEnabled))
-        {
-            macro.Enabled = macroEnabled;
-            OnMacroSettingsChanged();
-        }
-        ImGui.EndDisabled();
-
-        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-        ImGui.BeginDisabled(_configFiles.Count == 0 || !macro.Enabled);
-
-        ImGui.SetNextItemWidth(modeComboWidth);
-        var selectedModeLabel = HomeMacroTriggerModeOptions[macro.TriggerModeIndex];
-        if (ImGui.BeginCombo("##HomeMacroTriggerModeCombo", selectedModeLabel))
-        {
-            for (var i = 0; i < HomeMacroTriggerModeOptions.Length; i++)
-            {
-                var isSelected = i == macro.TriggerModeIndex;
-                if (ImGui.Selectable(HomeMacroTriggerModeOptions[i], isSelected))
-                {
-                    macro.TriggerModeIndex = i;
-                    OnMacroSettingsChanged();
-                }
-
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
-        }
-
-        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-        var macroTriggerBindingIndex = macro.TriggerBindingIndex;
-        DrawMacroGamepadBindingCombo("##HomeMacroTriggerBindingCombo", bindingComboWidth, ref macroTriggerBindingIndex);
-        macro.TriggerBindingIndex = macroTriggerBindingIndex;
-
-        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-        ImGui.SetNextItemWidth(macroInputWidth);
-        var macroDelayMs = macro.DelayMs;
-        if (ImGui.InputInt("##HomeMacroDelayMs", ref macroDelayMs, 0, 0))
-        {
-            macro.DelayMs = Math.Clamp(macroDelayMs, MacroConfigCatalog.MinDelayMs, MacroConfigCatalog.MaxDelayMs);
-            OnMacroSettingsChanged();
-        }
-
-        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ms 后按下");
-
-        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-        var macroActionBindingIndex = macro.ActionBindingIndex;
-        DrawMacroGamepadBindingCombo("##HomeMacroActionBindingCombo", bindingComboWidth, ref macroActionBindingIndex);
-        macro.ActionBindingIndex = macroActionBindingIndex;
-
-        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-        ImGui.SetNextItemWidth(macroInputWidth);
-        var macroActionDurationMs = macro.ActionDurationMs;
-        if (ImGui.InputInt("##HomeMacroActionDurationMs", ref macroActionDurationMs, 0, 0))
-        {
-            macro.ActionDurationMs = Math.Clamp(
-                macroActionDurationMs,
-                MacroConfigCatalog.MinActionDurationMs,
-                MacroConfigCatalog.MaxActionDurationMs);
-            OnMacroSettingsChanged();
-        }
-
-        ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("ms");
-        ImGui.EndDisabled();
-    }
-
-    private void DrawMacroGamepadBindingCombo(string comboId, float width, ref int bindingIndex)
-    {
-        ImGui.SetNextItemWidth(width);
-        var selectedLabel = GamepadBindingCatalog.Options[bindingIndex];
-        if (ImGui.BeginCombo(comboId, selectedLabel))
-        {
-            for (var i = 0; i < GamepadBindingCatalog.Options.Length; i++)
-            {
-                var isSelected = i == bindingIndex;
-                if (ImGui.Selectable(GamepadBindingCatalog.Options[i], isSelected))
-                {
-                    bindingIndex = i;
-                    OnMacroSettingsChanged();
-                }
-
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
         }
     }
 
@@ -1081,17 +577,17 @@ public sealed partial class MainWindow
         if (_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Left)
         {
             _homeViewState.TouchpadLeftCustomKey = capturedDisplayName;
-            TryWriteStringToCurrentConfig(TouchpadLeftCustomKeyConfigKey, capturedDisplayName);
+            TryWriteStringToCurrentConfig(BindingConfigCatalog.TouchpadLeftCustomKeyKey, capturedDisplayName);
         }
         else if (_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Right)
         {
             _homeViewState.TouchpadRightCustomKey = capturedDisplayName;
-            TryWriteStringToCurrentConfig(TouchpadRightCustomKeyConfigKey, capturedDisplayName);
+            TryWriteStringToCurrentConfig(BindingConfigCatalog.TouchpadRightCustomKeyKey, capturedDisplayName);
         }
         else
         {
             _homeViewState.VoiceCustomKey = capturedDisplayName;
-            TryWriteStringToCurrentConfig(VoiceCustomKeyConfigKey, capturedDisplayName);
+            TryWriteStringToCurrentConfig(BindingConfigCatalog.VoiceCustomKeyKey, capturedDisplayName);
         }
 
         CancelTouchpadKeyCapture();
@@ -1138,32 +634,20 @@ public sealed partial class MainWindow
         ImGui.TextUnformatted("开启吸附方式");
         ImGui.TableSetColumnIndex(1);
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() - topPanelStyle.CellPadding.Y);
-        _homeViewState.SnapModeIndex = _homeViewState.SnapModeIndex >= 0 && _homeViewState.SnapModeIndex < HomeSnapModeOptions.Length ? _homeViewState.SnapModeIndex : 0;
-        var selectedSnapModeLabel = HomeSnapModeOptions[_homeViewState.SnapModeIndex];
         var snapComboWidth = ImGui.GetContentRegionAvail().X - reserveWidth;
-        ImGui.SetNextItemWidth(snapComboWidth);
-        ImGui.BeginDisabled(_configFiles.Count == 0);
-        if (ImGui.BeginCombo("##HomeSnapModeCombo", selectedSnapModeLabel))
+        var snapModeIndex = _homeViewState.SnapModeIndex;
+        var snapModeChanged = DrawConfigBoundCombo(
+            "##HomeSnapModeCombo",
+            AimAssistOptionCatalog.SnapModeOptions,
+            ref snapModeIndex,
+            snapComboWidth,
+            _configFiles.Count == 0);
+        _homeViewState.SnapModeIndex = snapModeIndex;
+        if (snapModeChanged)
         {
-            for (var i = 0; i < HomeSnapModeOptions.Length; i++)
-            {
-                var isSelected = i == _homeViewState.SnapModeIndex;
-                if (ImGui.Selectable(HomeSnapModeOptions[i], isSelected))
-                {
-                    _homeViewState.SnapModeIndex = i;
-                    TryWriteStringToCurrentConfig("snap", HomeSnapModeOptions[i]);
-                    PushAimAssistConfig();
-                }
-
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
+            TryWriteStringToCurrentConfig(SnapConfigCatalog.SnapModeKey, AimAssistOptionCatalog.SnapModeOptions[snapModeIndex]);
+            PushAimAssistConfig();
         }
-        ImGui.EndDisabled();
     }
 
     private void DrawRapidFireStrategySection(float reserveWidth, ImGuiStylePtr topPanelStyle)
@@ -1175,14 +659,12 @@ public sealed partial class MainWindow
         ImGui.AlignTextToFramePadding();
         ImGui.TextUnformatted("连点策略");
         ImGui.TableSetColumnIndex(1);
-        _homeViewState.RapidFireStrategyIndex = _homeViewState.RapidFireStrategyIndex >= 0 && _homeViewState.RapidFireStrategyIndex < HomeRapidFireStrategyOptions.Length ? _homeViewState.RapidFireStrategyIndex : WeaponBasedRapidFireStrategyIndex;
         _homeViewState.RapidFireHz = Math.Clamp(_homeViewState.RapidFireHz, MinRapidFireHz, MaxRapidFireHz);
-        var selectedRapidFireStrategyLabel = HomeRapidFireStrategyOptions[_homeViewState.RapidFireStrategyIndex];
         var style = ImGui.GetStyle();
         var minRapidFireStrategyComboWidth = 0f;
-        for (var i = 0; i < HomeRapidFireStrategyOptions.Length; i++)
+        for (var i = 0; i < AimAssistOptionCatalog.RapidFireStrategyOptions.Length; i++)
         {
-            minRapidFireStrategyComboWidth = MathF.Max(minRapidFireStrategyComboWidth, ImGui.CalcTextSize(HomeRapidFireStrategyOptions[i]).X);
+            minRapidFireStrategyComboWidth = MathF.Max(minRapidFireStrategyComboWidth, ImGui.CalcTextSize(AimAssistOptionCatalog.RapidFireStrategyOptions[i]).X);
         }
 
         minRapidFireStrategyComboWidth += style.FramePadding.X * 2f + ImGui.GetFrameHeight();
@@ -1195,27 +677,18 @@ public sealed partial class MainWindow
         var rapidFireStrategyComboWidth = MathF.Max(
             minRapidFireStrategyComboWidth,
             rapidFireRowContentWidth - rapidFireHzInputWidth - rapidFireHzLabelWidth - rapidFireRowSpacing);
-        ImGui.SetNextItemWidth(rapidFireStrategyComboWidth);
-        ImGui.BeginDisabled(_configFiles.Count == 0);
-        if (ImGui.BeginCombo("##HomeRapidFireStrategyCombo", selectedRapidFireStrategyLabel))
+        var rapidFireStrategyIndex = _homeViewState.RapidFireStrategyIndex;
+        var rapidFireStrategyChanged = DrawConfigBoundCombo(
+            "##HomeRapidFireStrategyCombo",
+            AimAssistOptionCatalog.RapidFireStrategyOptions,
+            ref rapidFireStrategyIndex,
+            rapidFireStrategyComboWidth,
+            _configFiles.Count == 0);
+        _homeViewState.RapidFireStrategyIndex = rapidFireStrategyIndex;
+        if (rapidFireStrategyChanged)
         {
-            for (var i = 0; i < HomeRapidFireStrategyOptions.Length; i++)
-            {
-                var isSelected = i == _homeViewState.RapidFireStrategyIndex;
-                if (ImGui.Selectable(HomeRapidFireStrategyOptions[i], isSelected))
-                {
-                    _homeViewState.RapidFireStrategyIndex = i;
-                    TryWriteStringToCurrentConfig("rapidFireStrategy", HomeRapidFireStrategyOptions[i]);
-                    PushAimAssistConfig();
-                }
-
-                if (isSelected)
-                {
-                    ImGui.SetItemDefaultFocus();
-                }
-            }
-
-            ImGui.EndCombo();
+            TryWriteStringToCurrentConfig(AimAssistOptionCatalog.RapidFireStrategyKey, AimAssistOptionCatalog.RapidFireStrategyOptions[rapidFireStrategyIndex]);
+            PushAimAssistConfig();
         }
 
         ImGui.SameLine(0f, style.ItemSpacing.X);
@@ -1228,12 +701,12 @@ public sealed partial class MainWindow
 
         ImGui.SameLine(0f, style.ItemSpacing.X);
         ImGui.SetNextItemWidth(rapidFireHzInputWidth);
-        ImGui.BeginDisabled(_homeViewState.RapidFireStrategyIndex == 0);
+        ImGui.BeginDisabled(_homeViewState.RapidFireStrategyIndex == (int)RapidFireStrategy.Off);
         var rapidFireHz = _homeViewState.RapidFireHz;
         if (ImGui.InputInt("##HomeRapidFireHz", ref rapidFireHz, 1, 5))
         {
             _homeViewState.RapidFireHz = Math.Clamp(rapidFireHz, MinRapidFireHz, MaxRapidFireHz);
-            TryWriteIntToCurrentConfig("rapidFireHz", _homeViewState.RapidFireHz);
+            TryWriteIntToCurrentConfig(AimAssistOptionCatalog.RapidFireHzKey, _homeViewState.RapidFireHz);
             PushAimAssistConfig();
         }
 
@@ -1242,7 +715,6 @@ public sealed partial class MainWindow
             ImGui.SetTooltip(rapidFireHzTooltip);
         }
 
-        ImGui.EndDisabled();
         ImGui.EndDisabled();
     }
 
@@ -1256,8 +728,8 @@ public sealed partial class MainWindow
         ImGui.TextUnformatted("特殊武器逻辑");
         ImGui.TableSetColumnIndex(1);
         ImGui.BeginDisabled(_configFiles.Count == 0);
-        var disableAimSnapColumn = _homeViewState.SnapModeIndex == AimAndFireSnapModeIndex;
-        var disableRapidFireColumn = _homeViewState.RapidFireStrategyIndex != WeaponBasedRapidFireStrategyIndex;
+        var disableAimSnapColumn = _homeViewState.SnapModeIndex == (int)SnapMode.AimAndFire;
+        var disableRapidFireColumn = _homeViewState.RapidFireStrategyIndex != (int)RapidFireStrategy.WeaponBased;
         var (weaponNameColumnWidth, aimSnapColumnWidth, rapidFireColumnWidth, releaseFireColumnWidth) = MeasureSpecialWeaponColumnWidths();
         if (ImGui.BeginTable(
                 "##SpecialWeaponLogicTable",

@@ -20,53 +20,16 @@ public sealed partial class MainWindow : GameWindow
     private const string ViGemBusInstallPath = @"C:\Program Files\Nefarius Software Solutions";
     private const string ViGemBusInstallerUrl = "https://github.com/nefarius/ViGEmBus/releases/download/v1.22.0/ViGEmBus_1.22.0_x64_x86_arm64.exe";
     private const string WindowStateFileName = "window_state.ini";
-    private const int DefaultSnapOuterRange = 1;
-    private const int DefaultSnapInnerRange = 1;
-    private const float DefaultSnapOuterStrength = 0f;
-    private const float DefaultSnapInnerStrength = 0f;
-    private const float DefaultSnapStartStrength = 0f;
-    private const float DefaultSnapVerticalStrengthFactor = 0f;
-    private const float DefaultSnapHipfireStrengthFactor = 0f;
-    private const float DefaultSnapHeight = 0f;
-    private const float DefaultSnapStrengthRampTime = 0f;
 
     private ImGuiController? _controller;
     private float _dpiScale = 1.0f;
 
     private readonly List<OnnxModelConfig> _onnxModels = new();
     private int _onnxTopSelectedModelIndex = -1;
-    private static readonly string[] HomeSnapModeOptions = { "开火吸附", "瞄准 + 开火吸附" };
-    private static readonly string[] HomeRapidFireStrategyOptions = { "关闭连点", "始终连点", "根据当前武器连点" };
-    private const int AimAndFireSnapModeIndex = 1;
-    private const int WeaponBasedRapidFireStrategyIndex = 2;
     private const int DefaultRapidFireHz = 30;
     private const int MinRapidFireHz = 1;
     private const int MaxRapidFireHz = 30;
-    private static readonly string[] SnapInnerInterpolationTypeOptions =
-    {
-        "Linear",
-        "Quadratic Ease-In",
-        "Quadratic Ease-Out",
-        "Quadratic Ease-In-Out"
-    };
-    private static readonly string[] TouchpadBindingOptions =
-        GamepadBindingCatalog.Options.Concat(new[] { GamepadBindingCatalog.KeyboardCustomBindingName }).ToArray();
-    private static readonly string[] HomeMacroTriggerModeOptions = MacroConfigCatalog.TriggerModeOptions;
     private static readonly string[] HomeGameOptions = WeaponTemplateCatalog.GameOptions;
-    private const string GameConfigKey = "game";
-    private const string SpecialWeaponLogicConfigKey = "specialWeaponLogic";
-    private const string AimSnapWeaponListConfigKey = "aimSnapWeapons";
-    private const string RapidFireWeaponListConfigKey = "rapidFireWeapons";
-    private const string ReleaseFireWeaponListConfigKey = "releaseFireWeapons";
-    private const string AimBindingConfigKey = "aimBinding";
-    private const string FireBindingConfigKey = "fireBinding";
-    private const string VoiceBindingConfigKey = "voiceBinding";
-    private const string VoiceCustomKeyConfigKey = "voiceCustomKey";
-    private const string TouchpadLeftBindingConfigKey = "touchpadLeftBinding";
-    private const string TouchpadRightBindingConfigKey = "touchpadRightBinding";
-    private const string TouchpadLeftCustomKeyConfigKey = "touchpadLeftCustomKey";
-    private const string TouchpadRightCustomKeyConfigKey = "touchpadRightCustomKey";
-    private const string DefaultVoiceCustomKeyName = "V";
     private readonly HomeViewState _homeViewState = new();
     private string[] _specialWeaponNames;
     private bool[] _specialWeaponAimSnapEnabled;
@@ -223,7 +186,7 @@ public sealed partial class MainWindow : GameWindow
         var lineEnd = MapToPlot(innerRangeForPreview, innerStrengthForPreview);
         var highlightPoint = MapToPlot(innerRangeForPreview, outerStrengthForPreview);
 
-        var interpolationTypeIndexForPreview = _homeViewState.SnapInnerInterpolationTypeIndex >= 0 && _homeViewState.SnapInnerInterpolationTypeIndex < SnapInnerInterpolationTypeOptions.Length
+        var interpolationTypeIndexForPreview = _homeViewState.SnapInnerInterpolationTypeIndex >= 0 && _homeViewState.SnapInnerInterpolationTypeIndex < AimAssistOptionCatalog.SnapInnerInterpolationTypeOptions.Length
             ? _homeViewState.SnapInnerInterpolationTypeIndex
             : 0;
         const int interpolationSegments = 24;
@@ -404,7 +367,7 @@ public sealed partial class MainWindow : GameWindow
 
     private void TryWriteSelectedModelNameToCurrentConfig(string modelName)
     {
-        _configStore.TryWriteString(_configFiles, _selectedConfigFileIndex, "model", modelName);
+        _configStore.TryWriteString(_configFiles, _selectedConfigFileIndex, OnnxModelConfigLoader.ModelConfigKey, modelName);
     }
 
     private void TryApplyModelSelectionFromCurrentConfig()
@@ -414,27 +377,9 @@ public sealed partial class MainWindow : GameWindow
             _selectedConfigFileIndex,
             _onnxModels,
             GetDisplayHeightOrWindowHeight(),
-            DefaultSnapOuterRange,
-            DefaultSnapInnerRange,
-            DefaultSnapOuterStrength,
-            DefaultSnapInnerStrength,
-            DefaultSnapStartStrength,
-            DefaultSnapVerticalStrengthFactor,
-            DefaultSnapHipfireStrengthFactor,
-            DefaultSnapHeight,
-            DefaultSnapStrengthRampTime,
-            HomeSnapModeOptions,
-            HomeRapidFireStrategyOptions,
+            AimAssistOptionCatalog.SnapModeOptions,
+            AimAssistOptionCatalog.RapidFireStrategyOptions,
             HomeGameOptions,
-            SnapInnerInterpolationTypeOptions,
-            GamepadBindingCatalog.Options,
-            TouchpadBindingOptions,
-            GamepadBindingCatalog.DefaultAimIndex,
-            GamepadBindingCatalog.DefaultFireIndex,
-            GamepadBindingCatalog.DefaultTouchpadLeftIndex,
-            DefaultVoiceCustomKeyName,
-            GamepadBindingCatalog.DefaultTouchpadLeftIndex,
-            GamepadBindingCatalog.DefaultTouchpadRightIndex,
             DefaultRapidFireHz);
         if (!selectionResult.HasConfig)
         {
@@ -446,14 +391,13 @@ public sealed partial class MainWindow : GameWindow
             _homeViewState.AimBindingIndex = GamepadBindingCatalog.DefaultAimIndex;
             _homeViewState.FireBindingIndex = GamepadBindingCatalog.DefaultFireIndex;
             _homeViewState.VoiceBindingIndex = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
-            _homeViewState.VoiceCustomKey = DefaultVoiceCustomKeyName;
+            _homeViewState.VoiceCustomKey = BindingConfigCatalog.DefaultVoiceCustomKey;
             _homeViewState.TouchpadLeftBindingIndex = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
             _homeViewState.TouchpadRightBindingIndex = GamepadBindingCatalog.DefaultTouchpadRightIndex;
             _homeViewState.TouchpadLeftCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
             _homeViewState.TouchpadRightCustomKey = GamepadBindingCatalog.DefaultCustomKeyboardKeyName;
             _onnxTopSelectedModelIndex = -1;
-            _homeViewState.Macros.Clear();
-            _homeViewState.Macros.Add(MacroConfigCatalog.CreateDefault());
+            _homeViewState.Macro = MacroConfigCatalog.CreateDefault();
             PushAimAssistConfig();
             SyncSmartCoreVisionPipeline();
             return;
@@ -463,19 +407,12 @@ public sealed partial class MainWindow : GameWindow
         _homeViewState.RapidFireStrategyIndex = selectionResult.RapidFireStrategyIndex;
         _homeViewState.RapidFireHz = selectionResult.RapidFireHz;
         _homeViewState.GameIndex = selectionResult.GameIndex;
-        _homeViewState.AimBindingIndex = selectionResult.AimBindingIndex;
-        _homeViewState.FireBindingIndex = selectionResult.FireBindingIndex;
-        _homeViewState.VoiceBindingIndex = selectionResult.VoiceBindingIndex;
-        _homeViewState.VoiceCustomKey = selectionResult.VoiceCustomKey;
-        _homeViewState.TouchpadLeftBindingIndex = selectionResult.TouchpadLeftBindingIndex;
-        _homeViewState.TouchpadRightBindingIndex = selectionResult.TouchpadRightBindingIndex;
-        _homeViewState.TouchpadLeftCustomKey = selectionResult.TouchpadLeftCustomKey;
-        _homeViewState.TouchpadRightCustomKey = selectionResult.TouchpadRightCustomKey;
+        _homeViewState.ApplyBindings(selectionResult.Bindings);
         RefreshSpecialWeaponNamesForCurrentGame();
         ApplySpecialWeaponLogicFromCurrentConfig();
         ApplyMacrosFromCurrentConfig();
         _onnxTopSelectedModelIndex = selectionResult.ModelIndex;
-        _homeViewState.ApplySnapConfig(selectionResult.SnapConfig);
+        _homeViewState.ApplySnapConfig(selectionResult.Snap);
         PushAimAssistConfig();
         SyncSmartCoreVisionPipeline();
     }
@@ -490,10 +427,12 @@ public sealed partial class MainWindow : GameWindow
 
     private void RefreshSpecialWeaponNamesForCurrentGame()
     {
-        _specialWeaponNames = WeaponTemplateCatalog.GetWeaponNamesForGame(GetSelectedGameName());
+        var gameName = GetSelectedGameName();
+        _specialWeaponNames = WeaponTemplateCatalog.GetWeaponNamesForGame(gameName);
         _specialWeaponAimSnapEnabled = new bool[_specialWeaponNames.Length];
         _specialWeaponRapidFireEnabled = new bool[_specialWeaponNames.Length];
         _specialWeaponReleaseFireEnabled = new bool[_specialWeaponNames.Length];
+        _weaponRecWorker?.SetCurrentGame(gameName);
     }
 
     private void ResetConfigUiStateToDefaults()
@@ -503,34 +442,23 @@ public sealed partial class MainWindow : GameWindow
         CloseSmartCorePreviewWindow();
         _onnxTopSelectedModelIndex = -1;
         _homeViewState.ResetSnapSettings(
-            0,
-            WeaponBasedRapidFireStrategyIndex,
+            (int)SnapMode.Fire,
+            (int)RapidFireStrategy.WeaponBased,
             DefaultRapidFireHz,
             GamepadBindingCatalog.DefaultAimIndex,
             GamepadBindingCatalog.DefaultFireIndex,
             GamepadBindingCatalog.DefaultTouchpadLeftIndex,
-            DefaultVoiceCustomKeyName,
+            BindingConfigCatalog.DefaultVoiceCustomKey,
             GamepadBindingCatalog.DefaultTouchpadLeftIndex,
             GamepadBindingCatalog.DefaultTouchpadRightIndex,
             GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
-            GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
-            DefaultSnapOuterRange,
-            DefaultSnapInnerRange,
-            DefaultSnapOuterStrength,
-            DefaultSnapInnerStrength,
-            DefaultSnapStartStrength,
-            DefaultSnapVerticalStrengthFactor,
-            DefaultSnapHipfireStrengthFactor,
-            DefaultSnapHeight,
-            DefaultSnapStrengthRampTime,
-            0);
+            GamepadBindingCatalog.DefaultCustomKeyboardKeyName);
         _homeViewState.GameIndex = 0;
         RefreshSpecialWeaponNamesForCurrentGame();
         Array.Clear(_specialWeaponAimSnapEnabled);
         Array.Clear(_specialWeaponRapidFireEnabled);
         Array.Clear(_specialWeaponReleaseFireEnabled);
-        _homeViewState.Macros.Clear();
-        _homeViewState.Macros.Add(MacroConfigCatalog.CreateDefault());
+        _homeViewState.Macro = MacroConfigCatalog.CreateDefault();
         PushAimAssistConfig();
         RefreshSmartCoreState();
         SyncSmartCoreVisionPipeline();
@@ -558,49 +486,21 @@ public sealed partial class MainWindow : GameWindow
         _homeViewState.GameIndex = _homeViewState.GameIndex >= 0 && _homeViewState.GameIndex < HomeGameOptions.Length
             ? _homeViewState.GameIndex
             : 0;
-        TryWriteStringToCurrentConfig(GameConfigKey, HomeGameOptions[_homeViewState.GameIndex]);
+        TryWriteStringToCurrentConfig(WeaponTemplateCatalog.GameConfigKey, HomeGameOptions[_homeViewState.GameIndex]);
 
-        if (_homeViewState.SnapModeIndex >= 0 && _homeViewState.SnapModeIndex < HomeSnapModeOptions.Length)
+        if (_homeViewState.SnapModeIndex >= 0 && _homeViewState.SnapModeIndex < AimAssistOptionCatalog.SnapModeOptions.Length)
         {
-            TryWriteStringToCurrentConfig("snap", HomeSnapModeOptions[_homeViewState.SnapModeIndex]);
+            TryWriteStringToCurrentConfig(SnapConfigCatalog.SnapModeKey, AimAssistOptionCatalog.SnapModeOptions[_homeViewState.SnapModeIndex]);
         }
 
-        if (_homeViewState.RapidFireStrategyIndex >= 0 && _homeViewState.RapidFireStrategyIndex < HomeRapidFireStrategyOptions.Length)
+        if (_homeViewState.RapidFireStrategyIndex >= 0 && _homeViewState.RapidFireStrategyIndex < AimAssistOptionCatalog.RapidFireStrategyOptions.Length)
         {
-            TryWriteStringToCurrentConfig("rapidFireStrategy", HomeRapidFireStrategyOptions[_homeViewState.RapidFireStrategyIndex]);
+            TryWriteStringToCurrentConfig(AimAssistOptionCatalog.RapidFireStrategyKey, AimAssistOptionCatalog.RapidFireStrategyOptions[_homeViewState.RapidFireStrategyIndex]);
         }
 
-        TryWriteIntToCurrentConfig("rapidFireHz", _homeViewState.RapidFireHz);
+        TryWriteIntToCurrentConfig(AimAssistOptionCatalog.RapidFireHzKey, _homeViewState.RapidFireHz);
 
-        if (_homeViewState.AimBindingIndex >= 0 && _homeViewState.AimBindingIndex < GamepadBindingCatalog.Options.Length)
-        {
-            TryWriteStringToCurrentConfig(AimBindingConfigKey, GamepadBindingCatalog.Options[_homeViewState.AimBindingIndex]);
-        }
-
-        if (_homeViewState.FireBindingIndex >= 0 && _homeViewState.FireBindingIndex < GamepadBindingCatalog.Options.Length)
-        {
-            TryWriteStringToCurrentConfig(FireBindingConfigKey, GamepadBindingCatalog.Options[_homeViewState.FireBindingIndex]);
-        }
-
-        if (_homeViewState.VoiceBindingIndex >= 0 && _homeViewState.VoiceBindingIndex < GamepadBindingCatalog.Options.Length)
-        {
-            TryWriteStringToCurrentConfig(VoiceBindingConfigKey, GamepadBindingCatalog.Options[_homeViewState.VoiceBindingIndex]);
-        }
-
-        TryWriteStringToCurrentConfig(VoiceCustomKeyConfigKey, _homeViewState.VoiceCustomKey);
-
-        if (_homeViewState.TouchpadLeftBindingIndex >= 0 && _homeViewState.TouchpadLeftBindingIndex < TouchpadBindingOptions.Length)
-        {
-            TryWriteStringToCurrentConfig(TouchpadLeftBindingConfigKey, TouchpadBindingOptions[_homeViewState.TouchpadLeftBindingIndex]);
-        }
-
-        if (_homeViewState.TouchpadRightBindingIndex >= 0 && _homeViewState.TouchpadRightBindingIndex < TouchpadBindingOptions.Length)
-        {
-            TryWriteStringToCurrentConfig(TouchpadRightBindingConfigKey, TouchpadBindingOptions[_homeViewState.TouchpadRightBindingIndex]);
-        }
-
-        TryWriteStringToCurrentConfig(TouchpadLeftCustomKeyConfigKey, _homeViewState.TouchpadLeftCustomKey);
-        TryWriteStringToCurrentConfig(TouchpadRightCustomKeyConfigKey, _homeViewState.TouchpadRightCustomKey);
+        _configStore.TryWriteBindings(_configFiles, _selectedConfigFileIndex, _homeViewState.ToBindings());
 
         if (_onnxTopSelectedModelIndex >= 0 && _onnxTopSelectedModelIndex < _onnxModels.Count)
         {
@@ -611,45 +511,19 @@ public sealed partial class MainWindow : GameWindow
             ClearSelectedModelNameFromCurrentConfig();
         }
 
-        TryWriteIntToCurrentConfig("snapOuterRange", _homeViewState.SnapOuterRange);
-        TryWriteIntToCurrentConfig("snapInnerRange", _homeViewState.SnapInnerRange);
-        TryWriteFloatToCurrentConfig("snapOuterStrength", _homeViewState.SnapOuterStrength);
-        TryWriteFloatToCurrentConfig("snapInnerStrength", _homeViewState.SnapInnerStrength);
-        TryWriteFloatToCurrentConfig("snapStartStrength", _homeViewState.SnapStartStrength);
-        TryWriteFloatToCurrentConfig("snapVerticalStrengthFactor", _homeViewState.SnapVerticalStrengthFactor);
-        TryWriteFloatToCurrentConfig("snapHipfireStrengthFactor", _homeViewState.SnapHipfireStrengthFactor);
-        TryWriteFloatToCurrentConfig("snapHeight", _homeViewState.SnapHeight);
-        TryWriteFloatToCurrentConfig("snapStrengthRampTime", _homeViewState.SnapStrengthRampTime);
-
-        if (_homeViewState.SnapInnerInterpolationTypeIndex >= 0
-            && _homeViewState.SnapInnerInterpolationTypeIndex < SnapInnerInterpolationTypeOptions.Length)
-        {
-            TryWriteStringToCurrentConfig(
-                "snapInnerInterpolationType",
-                SnapInnerInterpolationTypeOptions[_homeViewState.SnapInnerInterpolationTypeIndex]);
-        }
+        _configStore.TryWriteSnap(_configFiles, _selectedConfigFileIndex, _homeViewState.ToSnapSettings());
 
         TryWriteMacrosToCurrentConfig();
     }
 
     private void ApplyMacrosFromCurrentConfig()
     {
-        _configStore.LoadMacros(_configFiles, _selectedConfigFileIndex, _homeViewState.Macros);
+        _homeViewState.Macro = _configStore.LoadMacro(_configFiles, _selectedConfigFileIndex);
     }
 
     private void TryWriteMacrosToCurrentConfig()
     {
-        if (_homeViewState.Macros.Count == 0)
-        {
-            _homeViewState.Macros.Add(MacroConfigCatalog.CreateDefault());
-        }
-
-        for (var i = 0; i < _homeViewState.Macros.Count; i++)
-        {
-            MacroConfigCatalog.Normalize(_homeViewState.Macros[i]);
-        }
-
-        _configStore.TryWriteMacros(_configFiles, _selectedConfigFileIndex, _homeViewState.Macros);
+        _configStore.TryWriteMacro(_configFiles, _selectedConfigFileIndex, _homeViewState.Macro);
     }
 
     private void OnMacroSettingsChanged()
@@ -658,24 +532,14 @@ public sealed partial class MainWindow : GameWindow
         PushAimAssistConfig();
     }
 
-    private MacroEntryState GetPrimaryMacro()
-    {
-        if (_homeViewState.Macros.Count == 0)
-        {
-            _homeViewState.Macros.Add(MacroConfigCatalog.CreateDefault());
-        }
-
-        return _homeViewState.Macros[0];
-    }
-
-    private MacroRuntimeState[] BuildMacroRuntimeStates()
+    private MacroRuntimeState? BuildMacroRuntimeState()
     {
         if (GetSelectedGameName() != "Apex Legends")
         {
-            return Array.Empty<MacroRuntimeState>();
+            return null;
         }
 
-        return MacroConfigCatalog.ToRuntimeStates(_homeViewState.Macros);
+        return MacroConfigCatalog.ToRuntimeState(_homeViewState.Macro);
     }
 
     private void TryWriteSpecialWeaponLogicValueToCurrentConfig(int weaponIndex, bool aimSnapEnabled, bool rapidFireEnabled, bool releaseFireEnabled)
@@ -683,11 +547,7 @@ public sealed partial class MainWindow : GameWindow
         _configStore.TryWriteSpecialWeaponLogic(
             _configFiles,
             _selectedConfigFileIndex,
-            SpecialWeaponLogicConfigKey,
             GetSelectedGameName(),
-            AimSnapWeaponListConfigKey,
-            RapidFireWeaponListConfigKey,
-            ReleaseFireWeaponListConfigKey,
             _specialWeaponNames,
             weaponIndex,
             aimSnapEnabled,
@@ -703,11 +563,7 @@ public sealed partial class MainWindow : GameWindow
         _configStore.LoadSpecialWeaponLogic(
             _configFiles,
             _selectedConfigFileIndex,
-            SpecialWeaponLogicConfigKey,
             GetSelectedGameName(),
-            AimSnapWeaponListConfigKey,
-            RapidFireWeaponListConfigKey,
-            ReleaseFireWeaponListConfigKey,
             _specialWeaponNames,
             _specialWeaponAimSnapEnabled,
             _specialWeaponRapidFireEnabled,
@@ -718,7 +574,7 @@ public sealed partial class MainWindow : GameWindow
         _configStore.TryReadString(_configFiles, _selectedConfigFileIndex, key);
 
     private void ClearSelectedModelNameFromCurrentConfig() =>
-        _configStore.TryRemoveKey(_configFiles, _selectedConfigFileIndex, "model");
+        _configStore.TryRemoveKey(_configFiles, _selectedConfigFileIndex, OnnxModelConfigLoader.ModelConfigKey);
 
     private bool TryResolveCurrentConfigPath(out string configPath) =>
         _configStore.TryResolvePath(_configFiles, _selectedConfigFileIndex, out configPath);
@@ -755,11 +611,11 @@ protected override void OnResize(ResizeEventArgs e)
         CloseSnapRangePreviewWindow();
         CloseSmartCorePreviewWindow();
 
+        StopVisionPipeline();
         _viGEmMappingWorker?.Dispose();
         _viGEmMappingWorker = null;
         _sdlGamepadWorker?.Dispose();
         _sdlGamepadWorker = null;
-        StopVisionPipeline();
 
         _controller?.Dispose();
         SaveWindowState();
@@ -929,33 +785,35 @@ protected override void OnResize(ResizeEventArgs e)
         }
 
         var config = new SmartCoreAimAssistConfigState(
-            _smartCoreMappingState.IsEnabled,
-            _smartCoreMappingState.IsMappingActive,
-            _homeViewState.SnapModeIndex,
-            _homeViewState.RapidFireStrategyIndex,
-            _homeViewState.RapidFireHz,
-            _homeViewState.SnapOuterRange,
-            _homeViewState.SnapInnerRange,
-            _homeViewState.SnapOuterStrength,
-            _homeViewState.SnapInnerStrength,
-            _homeViewState.SnapStartStrength,
-            _homeViewState.SnapVerticalStrengthFactor,
-            _homeViewState.SnapHipfireStrengthFactor,
-            _homeViewState.SnapHeight,
-            _homeViewState.SnapStrengthRampTime,
-            _homeViewState.SnapInnerInterpolationTypeIndex,
-            _homeViewState.AimBindingIndex,
-            _homeViewState.FireBindingIndex,
-            _homeViewState.VoiceBindingIndex,
-            _homeViewState.VoiceCustomKey,
-            _homeViewState.TouchpadLeftBindingIndex,
-            _homeViewState.TouchpadRightBindingIndex,
-            _homeViewState.TouchpadLeftCustomKey,
-            _homeViewState.TouchpadRightCustomKey,
-            BuildEnabledWeaponNameList(_specialWeaponAimSnapEnabled),
-            BuildEnabledWeaponNameList(_specialWeaponRapidFireEnabled),
-            BuildEnabledWeaponNameList(_specialWeaponReleaseFireEnabled),
-            BuildMacroRuntimeStates());
+            new AimAssistParams(
+                _smartCoreMappingState.IsEnabled,
+                AimAssistOptionCatalog.ResolveSnapMode(_homeViewState.SnapModeIndex),
+                _homeViewState.SnapOuterRange,
+                _homeViewState.SnapInnerRange,
+                _homeViewState.SnapOuterStrength,
+                _homeViewState.SnapInnerStrength,
+                _homeViewState.SnapStartStrength,
+                _homeViewState.SnapVerticalStrengthFactor,
+                _homeViewState.SnapHipfireStrengthFactor,
+                _homeViewState.SnapHeight,
+                _homeViewState.SnapStrengthRampTime,
+                _homeViewState.SnapInnerInterpolationTypeIndex),
+            new GamepadBindings(
+                _homeViewState.AimBindingIndex,
+                _homeViewState.FireBindingIndex,
+                _homeViewState.VoiceBindingIndex,
+                _homeViewState.VoiceCustomKey,
+                _homeViewState.TouchpadLeftBindingIndex,
+                _homeViewState.TouchpadRightBindingIndex,
+                _homeViewState.TouchpadLeftCustomKey,
+                _homeViewState.TouchpadRightCustomKey),
+            new WeaponPolicy(
+                AimAssistOptionCatalog.ResolveRapidFireStrategy(_homeViewState.RapidFireStrategyIndex),
+                _homeViewState.RapidFireHz,
+                BuildEnabledWeaponNameList(_specialWeaponAimSnapEnabled),
+                BuildEnabledWeaponNameList(_specialWeaponRapidFireEnabled),
+                BuildEnabledWeaponNameList(_specialWeaponReleaseFireEnabled)),
+            BuildMacroRuntimeState());
         _viGEmMappingWorker.SetAimAssistConfig(config);
         SyncWeaponRecognitionEnabled();
     }

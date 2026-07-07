@@ -29,9 +29,9 @@ internal sealed class HomeViewState
     public bool IsAddModalOpenRequested { get; set; }
     public bool IsDeleteModalOpenRequested { get; set; }
     public string? PendingDeleteConfigBaseName { get; set; }
-    public List<MacroEntryState> Macros { get; } = [];
+    public MacroEntryState Macro { get; set; } = MacroConfigCatalog.CreateDefault();
 
-    public void ApplySnapConfig(SnapConfigState snapConfig)
+    public void ApplySnapConfig(SnapSettingsState snapConfig)
     {
         SnapOuterRange = snapConfig.OuterRange;
         SnapInnerRange = snapConfig.InnerRange;
@@ -45,6 +45,40 @@ internal sealed class HomeViewState
         SnapInnerInterpolationTypeIndex = snapConfig.InnerInterpolationTypeIndex;
     }
 
+    public void ApplyBindings(BindingConfigState bindings)
+    {
+        AimBindingIndex = bindings.AimBindingIndex;
+        FireBindingIndex = bindings.FireBindingIndex;
+        VoiceBindingIndex = bindings.VoiceBindingIndex;
+        VoiceCustomKey = bindings.VoiceCustomKey;
+        TouchpadLeftBindingIndex = bindings.TouchpadLeftBindingIndex;
+        TouchpadRightBindingIndex = bindings.TouchpadRightBindingIndex;
+        TouchpadLeftCustomKey = bindings.TouchpadLeftCustomKey;
+        TouchpadRightCustomKey = bindings.TouchpadRightCustomKey;
+    }
+
+    public BindingConfigState ToBindings() => new(
+        AimBindingIndex,
+        FireBindingIndex,
+        VoiceBindingIndex,
+        VoiceCustomKey,
+        TouchpadLeftBindingIndex,
+        TouchpadRightBindingIndex,
+        TouchpadLeftCustomKey,
+        TouchpadRightCustomKey);
+
+    public SnapSettingsState ToSnapSettings() => new(
+        SnapOuterRange,
+        SnapInnerRange,
+        SnapOuterStrength,
+        SnapInnerStrength,
+        SnapStartStrength,
+        SnapVerticalStrengthFactor,
+        SnapHipfireStrengthFactor,
+        SnapHeight,
+        SnapStrengthRampTime,
+        SnapInnerInterpolationTypeIndex);
+
     public void ResetSnapSettings(
         int snapModeIndex,
         int rapidFireStrategyIndex,
@@ -56,17 +90,7 @@ internal sealed class HomeViewState
         int touchpadLeftBindingIndex,
         int touchpadRightBindingIndex,
         string touchpadLeftCustomKey,
-        string touchpadRightCustomKey,
-        int outerRange,
-        int innerRange,
-        float outerStrength,
-        float innerStrength,
-        float startStrength,
-        float verticalStrengthFactor,
-        float hipfireStrengthFactor,
-        float height,
-        float strengthRampTime,
-        int interpolationTypeIndex)
+        string touchpadRightCustomKey)
     {
         SnapModeIndex = snapModeIndex;
         RapidFireStrategyIndex = rapidFireStrategyIndex;
@@ -79,16 +103,7 @@ internal sealed class HomeViewState
         TouchpadRightBindingIndex = touchpadRightBindingIndex;
         TouchpadLeftCustomKey = touchpadLeftCustomKey;
         TouchpadRightCustomKey = touchpadRightCustomKey;
-        SnapOuterRange = outerRange;
-        SnapInnerRange = innerRange;
-        SnapOuterStrength = outerStrength;
-        SnapInnerStrength = innerStrength;
-        SnapStartStrength = startStrength;
-        SnapVerticalStrengthFactor = verticalStrengthFactor;
-        SnapHipfireStrengthFactor = hipfireStrengthFactor;
-        SnapHeight = height;
-        SnapStrengthRampTime = strengthRampTime;
-        SnapInnerInterpolationTypeIndex = interpolationTypeIndex;
+        ApplySnapConfig(SnapSettingsState.Default);
     }
 
     public void OpenAddModal()

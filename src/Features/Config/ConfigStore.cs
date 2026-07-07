@@ -1,19 +1,5 @@
 using System.Text.Json.Nodes;
 
-internal sealed class SnapConfigState
-{
-    public int OuterRange { get; init; }
-    public int InnerRange { get; init; }
-    public float OuterStrength { get; init; }
-    public float InnerStrength { get; init; }
-    public float StartStrength { get; init; }
-    public float VerticalStrengthFactor { get; init; }
-    public float HipfireStrengthFactor { get; init; }
-    public float Height { get; init; }
-    public float StrengthRampTime { get; init; }
-    public int InnerInterpolationTypeIndex { get; init; }
-}
-
 internal readonly record struct ConfigRefreshResult(IReadOnlyList<string> ConfigFiles, int SelectedIndex);
 
 internal readonly record struct ConfigSelectionResult(
@@ -23,15 +9,8 @@ internal readonly record struct ConfigSelectionResult(
     int RapidFireHz,
     int GameIndex,
     int ModelIndex,
-    int AimBindingIndex,
-    int FireBindingIndex,
-    int VoiceBindingIndex,
-    string VoiceCustomKey,
-    int TouchpadLeftBindingIndex,
-    int TouchpadRightBindingIndex,
-    string TouchpadLeftCustomKey,
-    string TouchpadRightCustomKey,
-    SnapConfigState SnapConfig)
+    BindingConfigState Bindings,
+    SnapSettingsState Snap)
 {
     public static ConfigSelectionResult Empty => new(
         false,
@@ -40,15 +19,8 @@ internal readonly record struct ConfigSelectionResult(
         25,
         0,
         -1,
-        GamepadBindingCatalog.DefaultAimIndex,
-        GamepadBindingCatalog.DefaultFireIndex,
-        GamepadBindingCatalog.DefaultTouchpadLeftIndex,
-        "V",
-        GamepadBindingCatalog.DefaultTouchpadLeftIndex,
-        GamepadBindingCatalog.DefaultTouchpadRightIndex,
-        GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
-        GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
-        new SnapConfigState());
+        BindingConfigState.Default,
+        SnapSettingsState.Default);
 }
 
 internal sealed class ConfigStore
@@ -94,27 +66,9 @@ internal sealed class ConfigStore
         int selectedConfigFileIndex,
         IReadOnlyList<OnnxModelConfig> onnxModels,
         int displayHeightLimit,
-        int defaultOuterRange,
-        int defaultInnerRange,
-        float defaultOuterStrength,
-        float defaultInnerStrength,
-        float defaultStartStrength,
-        float defaultVerticalStrengthFactor,
-        float defaultHipfireStrengthFactor,
-        float defaultHeight,
-        float defaultStrengthRampTime,
         IReadOnlyList<string> snapModeOptions,
         IReadOnlyList<string> rapidFireStrategyOptions,
         IReadOnlyList<string> gameOptions,
-        IReadOnlyList<string> interpolationOptions,
-        IReadOnlyList<string> bindingOptions,
-        IReadOnlyList<string> touchpadBindingOptions,
-        int defaultAimBindingIndex,
-        int defaultFireBindingIndex,
-        int defaultVoiceBindingIndex,
-        string defaultVoiceCustomKey,
-        int defaultTouchpadLeftBindingIndex,
-        int defaultTouchpadRightBindingIndex,
         int defaultRapidFireHz)
     {
         if (!TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
@@ -123,63 +77,26 @@ internal sealed class ConfigStore
         }
 
         var snapModeIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, "snap"),
+            _repository.TryReadString(configPath, SnapConfigCatalog.SnapModeKey),
             snapModeOptions,
             0);
         var rapidFireStrategyIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, "rapidFireStrategy"),
+            _repository.TryReadString(configPath, AimAssistOptionCatalog.RapidFireStrategyKey),
             rapidFireStrategyOptions,
             2);
-        var rapidFireHz = Math.Clamp(_repository.TryReadInt(configPath, "rapidFireHz") ?? defaultRapidFireHz, 1, 30);
+        var rapidFireHz = Math.Clamp(_repository.TryReadInt(configPath, AimAssistOptionCatalog.RapidFireHzKey) ?? defaultRapidFireHz, 1, 30);
         var gameIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, "game"),
+            _repository.TryReadString(configPath, WeaponTemplateCatalog.GameConfigKey),
             gameOptions,
             0);
-        var aimBindingIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, "aimBinding"),
-            bindingOptions,
-            defaultAimBindingIndex);
-        var fireBindingIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, "fireBinding"),
-            bindingOptions,
-            defaultFireBindingIndex);
-        var voiceBindingIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, "voiceBinding"),
-            bindingOptions,
-            defaultVoiceBindingIndex);
-        var voiceCustomKey = NormalizeCustomKeyboardKey(
-            _repository.TryReadString(configPath, "voiceCustomKey"),
-            defaultVoiceCustomKey);
-        var touchpadLeftBindingIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, "touchpadLeftBinding"),
-            touchpadBindingOptions,
-            defaultTouchpadLeftBindingIndex);
-        var touchpadRightBindingIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, "touchpadRightBinding"),
-            touchpadBindingOptions,
-            defaultTouchpadRightBindingIndex);
-        var touchpadLeftCustomKey = NormalizeCustomKeyboardKey(_repository.TryReadString(configPath, "touchpadLeftCustomKey"), GamepadBindingCatalog.DefaultCustomKeyboardKeyName);
-        var touchpadRightCustomKey = NormalizeCustomKeyboardKey(_repository.TryReadString(configPath, "touchpadRightCustomKey"), GamepadBindingCatalog.DefaultCustomKeyboardKeyName);
+        var bindings = BindingConfigCatalog.Read(_repository, configPath);
         var modelIndex = onnxModels.Count == 0
             ? -1
-            : ResolveModelIndex(_repository.TryReadString(configPath, "model"), onnxModels);
+            : ResolveModelIndex(_repository.TryReadString(configPath, OnnxModelConfigLoader.ModelConfigKey), onnxModels);
         var selectedModelSize = modelIndex >= 0 && modelIndex < onnxModels.Count
             ? Math.Max(1, onnxModels[modelIndex].InputHeight)
-            : defaultOuterRange;
-        var snapConfig = ReadSnapConfig(
-            configPath,
-            selectedModelSize,
-            displayHeightLimit,
-            defaultOuterRange,
-            defaultInnerRange,
-            defaultOuterStrength,
-            defaultInnerStrength,
-            defaultStartStrength,
-            defaultVerticalStrengthFactor,
-            defaultHipfireStrengthFactor,
-            defaultHeight,
-            defaultStrengthRampTime,
-            interpolationOptions);
+            : SnapSettingsState.Default.OuterRange;
+        var snapConfig = SnapConfigCatalog.Read(_repository, configPath, selectedModelSize, displayHeightLimit);
 
         return new ConfigSelectionResult(
             true,
@@ -188,14 +105,7 @@ internal sealed class ConfigStore
             rapidFireHz,
             gameIndex,
             modelIndex,
-            aimBindingIndex,
-            fireBindingIndex,
-            voiceBindingIndex,
-            voiceCustomKey,
-            touchpadLeftBindingIndex,
-            touchpadRightBindingIndex,
-            touchpadLeftCustomKey,
-            touchpadRightCustomKey,
+            bindings,
             snapConfig);
     }
 
@@ -259,14 +169,26 @@ internal sealed class ConfigStore
         }
     }
 
+    public void TryWriteSnap(IReadOnlyList<string> configFiles, int selectedConfigFileIndex, SnapSettingsState snap)
+    {
+        if (TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
+        {
+            SnapConfigCatalog.Write(_repository, configPath, snap);
+        }
+    }
+
+    public void TryWriteBindings(IReadOnlyList<string> configFiles, int selectedConfigFileIndex, BindingConfigState bindings)
+    {
+        if (TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
+        {
+            BindingConfigCatalog.Write(_repository, configPath, bindings);
+        }
+    }
+
     public void LoadSpecialWeaponLogic(
         IReadOnlyList<string> configFiles,
         int selectedConfigFileIndex,
-        string rootKey,
         string gameKey,
-        string aimSnapListKey,
-        string rapidFireListKey,
-        string releaseFireListKey,
         IReadOnlyList<string> weaponNames,
         bool[] aimSnapFlags,
         bool[] rapidFireFlags,
@@ -284,44 +206,44 @@ internal sealed class ConfigStore
         try
         {
             var root = _repository.LoadJsonObjectOrEmpty(configPath);
-            var specialWeaponLogicRoot = EnsureRoot(root, rootKey);
+            var specialWeaponLogicRoot = EnsureRoot(root, SpecialWeaponLogicCatalog.RootKey);
             var gameLogicRoot = EnsureRoot(specialWeaponLogicRoot, gameKey);
             var hasAnyChanges = false;
-            var hasAimSnapList = TryApplyEnabledWeaponListFromNode(gameLogicRoot[aimSnapListKey], aimSnapFlags, weaponNames);
-            var hasRapidFireList = TryApplyEnabledWeaponListFromNode(gameLogicRoot[rapidFireListKey], rapidFireFlags, weaponNames);
-            var hasReleaseFireList = TryApplyEnabledWeaponListFromNode(gameLogicRoot[releaseFireListKey], releaseFireFlags, weaponNames);
+            var hasAimSnapList = TryApplyEnabledWeaponListFromNode(gameLogicRoot[SpecialWeaponLogicCatalog.AimSnapWeaponListKey], aimSnapFlags, weaponNames);
+            var hasRapidFireList = TryApplyEnabledWeaponListFromNode(gameLogicRoot[SpecialWeaponLogicCatalog.RapidFireWeaponListKey], rapidFireFlags, weaponNames);
+            var hasReleaseFireList = TryApplyEnabledWeaponListFromNode(gameLogicRoot[SpecialWeaponLogicCatalog.ReleaseFireWeaponListKey], releaseFireFlags, weaponNames);
 
-            if (gameLogicRoot[aimSnapListKey] is not JsonArray)
+            if (gameLogicRoot[SpecialWeaponLogicCatalog.AimSnapWeaponListKey] is not JsonArray)
             {
-                gameLogicRoot[aimSnapListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
+                gameLogicRoot[SpecialWeaponLogicCatalog.AimSnapWeaponListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
                 hasAnyChanges = true;
             }
 
-            if (gameLogicRoot[rapidFireListKey] is not JsonArray)
+            if (gameLogicRoot[SpecialWeaponLogicCatalog.RapidFireWeaponListKey] is not JsonArray)
             {
-                gameLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
+                gameLogicRoot[SpecialWeaponLogicCatalog.RapidFireWeaponListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
                 hasAnyChanges = true;
             }
 
-            if (gameLogicRoot[releaseFireListKey] is not JsonArray)
+            if (gameLogicRoot[SpecialWeaponLogicCatalog.ReleaseFireWeaponListKey] is not JsonArray)
             {
-                gameLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
+                gameLogicRoot[SpecialWeaponLogicCatalog.ReleaseFireWeaponListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
                 hasAnyChanges = true;
             }
 
-            if (hasAimSnapList && gameLogicRoot[aimSnapListKey] is JsonArray)
+            if (hasAimSnapList && gameLogicRoot[SpecialWeaponLogicCatalog.AimSnapWeaponListKey] is JsonArray)
             {
-                gameLogicRoot[aimSnapListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
+                gameLogicRoot[SpecialWeaponLogicCatalog.AimSnapWeaponListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
             }
 
-            if (hasRapidFireList && gameLogicRoot[rapidFireListKey] is JsonArray)
+            if (hasRapidFireList && gameLogicRoot[SpecialWeaponLogicCatalog.RapidFireWeaponListKey] is JsonArray)
             {
-                gameLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
+                gameLogicRoot[SpecialWeaponLogicCatalog.RapidFireWeaponListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
             }
 
-            if (hasReleaseFireList && gameLogicRoot[releaseFireListKey] is JsonArray)
+            if (hasReleaseFireList && gameLogicRoot[SpecialWeaponLogicCatalog.ReleaseFireWeaponListKey] is JsonArray)
             {
-                gameLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
+                gameLogicRoot[SpecialWeaponLogicCatalog.ReleaseFireWeaponListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
             }
 
             for (var i = 0; i < weaponNames.Count; i++)
@@ -337,8 +259,8 @@ internal sealed class ConfigStore
 
             if (hasAnyChanges)
             {
-                gameLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
-                gameLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
+                gameLogicRoot[SpecialWeaponLogicCatalog.RapidFireWeaponListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
+                gameLogicRoot[SpecialWeaponLogicCatalog.ReleaseFireWeaponListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
             }
 
             if (hasAnyChanges)
@@ -354,53 +276,36 @@ internal sealed class ConfigStore
         }
     }
 
-    public void LoadMacros(
+    public MacroEntryState LoadMacro(
         IReadOnlyList<string> configFiles,
-        int selectedConfigFileIndex,
-        ICollection<MacroEntryState> target)
+        int selectedConfigFileIndex)
     {
-        target.Clear();
         if (!TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
         {
-            target.Add(MacroConfigCatalog.CreateDefault());
-            return;
+            return MacroConfigCatalog.CreateDefault();
         }
 
         try
         {
             var root = _repository.LoadJsonObjectOrEmpty(configPath);
-            if (root[MacroConfigCatalog.ConfigKey] is not JsonArray macrosNode || macrosNode.Count == 0)
+            if (root[MacroConfigCatalog.ConfigKey] is JsonObject macroNode &&
+                MacroConfigCatalog.TryReadEntry(macroNode, out var entry))
             {
-                target.Add(MacroConfigCatalog.CreateDefault());
-                return;
-            }
-
-            foreach (var item in macrosNode)
-            {
-                if (!MacroConfigCatalog.TryReadEntry(item, out var entry))
-                {
-                    continue;
-                }
-
-                target.Add(entry);
-            }
-
-            if (target.Count == 0)
-            {
-                target.Add(MacroConfigCatalog.CreateDefault());
+                return entry;
             }
         }
         catch
         {
-            target.Clear();
-            target.Add(MacroConfigCatalog.CreateDefault());
+            // Fall through to default on read failure.
         }
+
+        return MacroConfigCatalog.CreateDefault();
     }
 
-    public void TryWriteMacros(
+    public void TryWriteMacro(
         IReadOnlyList<string> configFiles,
         int selectedConfigFileIndex,
-        IReadOnlyList<MacroEntryState> macros)
+        MacroEntryState macro)
     {
         if (!TryResolvePath(configFiles, selectedConfigFileIndex, out var configPath))
         {
@@ -410,7 +315,7 @@ internal sealed class ConfigStore
         try
         {
             var root = _repository.LoadJsonObjectOrEmpty(configPath);
-            root[MacroConfigCatalog.ConfigKey] = MacroConfigCatalog.ToJsonArray(macros);
+            root[MacroConfigCatalog.ConfigKey] = MacroConfigCatalog.ToJsonObject(macro);
             _repository.SaveJsonObject(configPath, root);
         }
         catch
@@ -422,11 +327,7 @@ internal sealed class ConfigStore
     public void TryWriteSpecialWeaponLogic(
         IReadOnlyList<string> configFiles,
         int selectedConfigFileIndex,
-        string rootKey,
         string gameKey,
-        string aimSnapListKey,
-        string rapidFireListKey,
-        string releaseFireListKey,
         IReadOnlyList<string> weaponNames,
         int weaponIndex,
         bool aimSnapEnabled,
@@ -449,14 +350,14 @@ internal sealed class ConfigStore
         try
         {
             var root = _repository.LoadJsonObjectOrEmpty(configPath);
-            var specialWeaponLogicRoot = EnsureRoot(root, rootKey);
+            var specialWeaponLogicRoot = EnsureRoot(root, SpecialWeaponLogicCatalog.RootKey);
             var gameLogicRoot = EnsureRoot(specialWeaponLogicRoot, gameKey);
             aimSnapFlags[weaponIndex] = aimSnapEnabled;
             rapidFireFlags[weaponIndex] = rapidFireEnabled;
             releaseFireFlags[weaponIndex] = releaseFireEnabled;
-            gameLogicRoot[aimSnapListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
-            gameLogicRoot[rapidFireListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
-            gameLogicRoot[releaseFireListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
+            gameLogicRoot[SpecialWeaponLogicCatalog.AimSnapWeaponListKey] = BuildEnabledWeaponListNode(aimSnapFlags, weaponNames);
+            gameLogicRoot[SpecialWeaponLogicCatalog.RapidFireWeaponListKey] = BuildEnabledWeaponListNode(rapidFireFlags, weaponNames);
+            gameLogicRoot[SpecialWeaponLogicCatalog.ReleaseFireWeaponListKey] = BuildEnabledWeaponListNode(releaseFireFlags, weaponNames);
             _repository.SaveJsonObject(configPath, root);
         }
         catch
@@ -483,16 +384,6 @@ internal sealed class ConfigStore
         return fallback;
     }
 
-    private static string NormalizeCustomKeyboardKey(string? key, string fallback)
-    {
-        if (GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(key, out _, out var normalized))
-        {
-            return normalized;
-        }
-
-        return fallback;
-    }
-
     private int ResolveModelIndex(string? modelName, IReadOnlyList<OnnxModelConfig> models)
     {
         if (string.IsNullOrWhiteSpace(modelName))
@@ -509,57 +400,6 @@ internal sealed class ConfigStore
         }
 
         return -1;
-    }
-
-    private SnapConfigState ReadSnapConfig(
-        string configPath,
-        int selectedModelSize,
-        int displayHeightLimit,
-        int defaultOuterRange,
-        int defaultInnerRange,
-        float defaultOuterStrength,
-        float defaultInnerStrength,
-        float defaultStartStrength,
-        float defaultVerticalStrengthFactor,
-        float defaultHipfireStrengthFactor,
-        float defaultHeight,
-        float defaultStrengthRampTime,
-        IReadOnlyList<string> interpolationOptions)
-    {
-        var snapOuterRangeMax = Math.Max(selectedModelSize, displayHeightLimit);
-        var outerRange = Math.Clamp(_repository.TryReadInt(configPath, "snapOuterRange") ?? defaultOuterRange, selectedModelSize, snapOuterRangeMax);
-        var innerRange = Math.Clamp(_repository.TryReadInt(configPath, "snapInnerRange") ?? defaultInnerRange, 1, outerRange);
-        var outerStrength = Math.Clamp(_repository.TryReadFloat(configPath, "snapOuterStrength") ?? defaultOuterStrength, 0f, 1f);
-        var innerStrength = Math.Clamp(_repository.TryReadFloat(configPath, "snapInnerStrength") ?? defaultInnerStrength, 0f, 1f);
-        var startStrength = Math.Clamp(_repository.TryReadFloat(configPath, "snapStartStrength") ?? defaultStartStrength, 0f, 1f);
-        var verticalStrengthFactor = Math.Clamp(_repository.TryReadFloat(configPath, "snapVerticalStrengthFactor") ?? defaultVerticalStrengthFactor, 0f, 1f);
-        var hipfireStrengthFactor = Math.Clamp(_repository.TryReadFloat(configPath, "snapHipfireStrengthFactor") ?? defaultHipfireStrengthFactor, 0f, 1f);
-        var height = Math.Clamp(_repository.TryReadFloat(configPath, "snapHeight") ?? defaultHeight, 0f, 1f);
-        var existingStrengthRampTime = _repository.TryReadFloat(configPath, "snapStrengthRampTime");
-        var strengthRampTime = Math.Clamp(existingStrengthRampTime ?? defaultStrengthRampTime, 0f, 1f);
-        if (existingStrengthRampTime is null)
-        {
-            _repository.TryWriteFloat(configPath, "snapStrengthRampTime", strengthRampTime);
-        }
-
-        var interpolationTypeIndex = ResolveOptionIndex(
-            _repository.TryReadString(configPath, "snapInnerInterpolationType"),
-            interpolationOptions,
-            0);
-
-        return new SnapConfigState
-        {
-            OuterRange = outerRange,
-            InnerRange = innerRange,
-            OuterStrength = outerStrength,
-            InnerStrength = innerStrength,
-            StartStrength = startStrength,
-            VerticalStrengthFactor = verticalStrengthFactor,
-            HipfireStrengthFactor = hipfireStrengthFactor,
-            Height = height,
-            StrengthRampTime = strengthRampTime,
-            InnerInterpolationTypeIndex = interpolationTypeIndex
-        };
     }
 
     private static JsonObject EnsureRoot(JsonObject root, string key)

@@ -1,44 +1,31 @@
 using System.Text.Json.Nodes;
 
+internal enum MacroTriggerMode
+{
+    Press,
+    Hold
+}
+
 internal sealed class MacroEntryState
 {
     public bool Enabled { get; set; } = true;
-    public int TriggerModeIndex { get; set; }
+    public MacroTriggerMode TriggerMode { get; set; }
     public int TriggerBindingIndex { get; set; } = GamepadBindingCatalog.DefaultTouchpadLeftIndex;
     public int DelayMs { get; set; }
     public int ActionBindingIndex { get; set; } = GamepadBindingCatalog.ResolveIndex("A", 4);
     public int ActionDurationMs { get; set; }
 }
 
-internal readonly struct MacroRuntimeState
-{
-    public MacroRuntimeState(
-        bool enabled,
-        int triggerModeIndex,
-        int triggerBindingIndex,
-        int delayMs,
-        int actionBindingIndex,
-        int actionDurationMs)
-    {
-        Enabled = enabled;
-        TriggerModeIndex = triggerModeIndex;
-        TriggerBindingIndex = triggerBindingIndex;
-        DelayMs = delayMs;
-        ActionBindingIndex = actionBindingIndex;
-        ActionDurationMs = actionDurationMs;
-    }
-
-    public bool Enabled { get; }
-    public int TriggerModeIndex { get; }
-    public int TriggerBindingIndex { get; }
-    public int DelayMs { get; }
-    public int ActionBindingIndex { get; }
-    public int ActionDurationMs { get; }
-}
+internal readonly record struct MacroRuntimeState(
+    MacroTriggerMode TriggerMode,
+    int TriggerBindingIndex,
+    int DelayMs,
+    int ActionBindingIndex,
+    int ActionDurationMs);
 
 internal static class MacroConfigCatalog
 {
-    public const string ConfigKey = "macros";
+    public const string ConfigKey = "macro";
     public const int MinDelayMs = 0;
     public const int MaxDelayMs = 2000;
     public const int MinActionDurationMs = 0;
@@ -55,59 +42,34 @@ internal static class MacroConfigCatalog
 
     public static MacroEntryState CreateDefault() => new();
 
-    public static void Normalize(MacroEntryState entry)
+    public static MacroEntryState Normalized(MacroEntryState entry)
     {
-        entry.TriggerModeIndex = entry.TriggerModeIndex >= 0 && entry.TriggerModeIndex < TriggerModeOptions.Length
-            ? entry.TriggerModeIndex
-            : 0;
-        entry.TriggerBindingIndex = entry.TriggerBindingIndex >= 0 && entry.TriggerBindingIndex < GamepadBindingCatalog.Options.Length
-            ? entry.TriggerBindingIndex
-            : GamepadBindingCatalog.DefaultTouchpadLeftIndex;
-        entry.ActionBindingIndex = entry.ActionBindingIndex >= 0 && entry.ActionBindingIndex < GamepadBindingCatalog.Options.Length
-            ? entry.ActionBindingIndex
-            : GamepadBindingCatalog.ResolveIndex("A", 4);
-        entry.DelayMs = Math.Clamp(entry.DelayMs, MinDelayMs, MaxDelayMs);
-        entry.ActionDurationMs = Math.Clamp(entry.ActionDurationMs, MinActionDurationMs, MaxActionDurationMs);
+        var triggerMode = Enum.IsDefined(entry.TriggerMode) ? entry.TriggerMode : MacroTriggerMode.Press;
+        return new MacroEntryState
+        {
+            Enabled = entry.Enabled,
+            TriggerMode = triggerMode,
+            TriggerBindingIndex = ClampIndex(entry.TriggerBindingIndex, GamepadBindingCatalog.DefaultTouchpadLeftIndex),
+            ActionBindingIndex = ClampIndex(entry.ActionBindingIndex, GamepadBindingCatalog.ResolveIndex("A", 4)),
+            DelayMs = Math.Clamp(entry.DelayMs, MinDelayMs, MaxDelayMs),
+            ActionDurationMs = Math.Clamp(entry.ActionDurationMs, MinActionDurationMs, MaxActionDurationMs)
+        };
     }
 
-    public static MacroRuntimeState ToRuntimeState(MacroEntryState entry)
+    public static MacroRuntimeState? ToRuntimeState(MacroEntryState entry)
     {
-        Normalize(entry);
+        var n = Normalized(entry);
+        if (!n.Enabled || n.TriggerBindingIndex == n.ActionBindingIndex)
+        {
+            return null;
+        }
+
         return new MacroRuntimeState(
-            entry.Enabled,
-            entry.TriggerModeIndex,
-            entry.TriggerBindingIndex,
-            entry.DelayMs,
-            entry.ActionBindingIndex,
-            entry.ActionDurationMs);
-    }
-
-    public static MacroRuntimeState[] ToRuntimeStates(IReadOnlyList<MacroEntryState> entries)
-    {
-        if (entries.Count == 0)
-        {
-            return Array.Empty<MacroRuntimeState>();
-        }
-
-        var runtimeStates = new List<MacroRuntimeState>(entries.Count);
-        for (var i = 0; i < entries.Count; i++)
-        {
-            var entry = entries[i];
-            if (!entry.Enabled)
-            {
-                continue;
-            }
-
-            var runtimeState = ToRuntimeState(entry);
-            if (runtimeState.TriggerBindingIndex == runtimeState.ActionBindingIndex)
-            {
-                continue;
-            }
-
-            runtimeStates.Add(runtimeState);
-        }
-
-        return runtimeStates.ToArray();
+            n.TriggerMode,
+            n.TriggerBindingIndex,
+            n.DelayMs,
+            n.ActionBindingIndex,
+            n.ActionDurationMs);
     }
 
     public static bool TryReadEntry(JsonNode? node, out MacroEntryState entry)
@@ -118,10 +80,8 @@ internal static class MacroConfigCatalog
             return false;
         }
 
-        entry.TriggerModeIndex = ResolveOptionIndex(
-            TryReadString(obj, TriggerModeConfigKey),
-            TriggerModeOptions,
-            0);
+        entry.Enabled = TryReadBool(obj, EnabledConfigKey) ?? true;
+        entry.TriggerMode = ResolveTriggerMode(TryReadString(obj, TriggerModeConfigKey));
         entry.TriggerBindingIndex = GamepadBindingCatalog.ResolveIndex(
             TryReadString(obj, TriggerBindingConfigKey),
             GamepadBindingCatalog.DefaultTouchpadLeftIndex);
@@ -130,52 +90,40 @@ internal static class MacroConfigCatalog
             GamepadBindingCatalog.ResolveIndex("A", 4));
         entry.DelayMs = TryReadInt(obj, DelayMsConfigKey) ?? 0;
         entry.ActionDurationMs = TryReadInt(obj, ActionDurationMsConfigKey) ?? 0;
-        entry.Enabled = TryReadBool(obj, EnabledConfigKey) ?? true;
-        Normalize(entry);
+        entry = Normalized(entry);
         return true;
     }
 
     public static JsonObject ToJsonObject(MacroEntryState entry)
     {
-        Normalize(entry);
+        var n = Normalized(entry);
         return new JsonObject
         {
-            [EnabledConfigKey] = entry.Enabled,
-            [TriggerModeConfigKey] = TriggerModeOptions[entry.TriggerModeIndex],
-            [TriggerBindingConfigKey] = GamepadBindingCatalog.Options[entry.TriggerBindingIndex],
-            [DelayMsConfigKey] = entry.DelayMs,
-            [ActionBindingConfigKey] = GamepadBindingCatalog.Options[entry.ActionBindingIndex],
-            [ActionDurationMsConfigKey] = entry.ActionDurationMs
+            [EnabledConfigKey] = n.Enabled,
+            [TriggerModeConfigKey] = TriggerModeOptions[(int)n.TriggerMode],
+            [TriggerBindingConfigKey] = GamepadBindingCatalog.Options[n.TriggerBindingIndex],
+            [DelayMsConfigKey] = n.DelayMs,
+            [ActionBindingConfigKey] = GamepadBindingCatalog.Options[n.ActionBindingIndex],
+            [ActionDurationMsConfigKey] = n.ActionDurationMs
         };
     }
 
-    public static JsonArray ToJsonArray(IReadOnlyList<MacroEntryState> entries)
+    private static int ClampIndex(int value, int fallback)
     {
-        var array = new JsonArray();
-        for (var i = 0; i < entries.Count; i++)
-        {
-            array.Add(ToJsonObject(entries[i]));
-        }
-
-        return array;
+        return value >= 0 && value < GamepadBindingCatalog.Options.Length ? value : fallback;
     }
 
-    private static int ResolveOptionIndex(string? value, IReadOnlyList<string> options, int fallback)
+    private static MacroTriggerMode ResolveTriggerMode(string? value)
     {
-        if (string.IsNullOrWhiteSpace(value))
+        for (var i = 0; i < TriggerModeOptions.Length; i++)
         {
-            return fallback;
-        }
-
-        for (var i = 0; i < options.Count; i++)
-        {
-            if (string.Equals(options[i], value, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(TriggerModeOptions[i], value, StringComparison.OrdinalIgnoreCase))
             {
-                return i;
+                return (MacroTriggerMode)i;
             }
         }
 
-        return fallback;
+        return MacroTriggerMode.Press;
     }
 
     private static string? TryReadString(JsonObject obj, string key)

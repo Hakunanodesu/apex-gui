@@ -54,7 +54,7 @@ internal sealed class OnnxWorker : IDisposable
     private int _pendingFrameHeight;
     private int _pendingFrameId;
     private int _lastProcessedFrameId;
-    private ViGEmMappingWorker? _detectionConsumer;
+    private IAimAssistDetectionSink? _detectionConsumer;
     private OnnxDebugBox[] _latestBoxes = Array.Empty<OnnxDebugBox>();
     private float[] _preprocessBuffer = Array.Empty<float>();
 
@@ -119,7 +119,7 @@ internal sealed class OnnxWorker : IDisposable
         }
     }
 
-    public void SetDetectionConsumer(ViGEmMappingWorker? detectionConsumer)
+    public void SetDetectionConsumer(IAimAssistDetectionSink? detectionConsumer)
     {
         lock (_sync)
         {
@@ -185,8 +185,8 @@ internal sealed class OnnxWorker : IDisposable
                     _model.IouThreshold,
                     _model.AllowedClasses,
                     out var boxes);
-                ViGEmMappingWorker? detectionConsumer;
-                var detectionState = new SmartCoreDetectionState(boxes);
+                IAimAssistDetectionSink? detectionConsumer;
+                var detectionState = new SmartCoreDetectionState(boxes, DateTime.UtcNow);
                 lock (_sync)
                 {
                     _latestBoxes = boxes;
@@ -209,7 +209,19 @@ internal sealed class OnnxWorker : IDisposable
         {
             SetStatus($"推理失败: {ex.GetType().Name}: {ex.Message}");
             _running = false;
+            ClearDetectionsForConsumer();
         }
+    }
+
+    private void ClearDetectionsForConsumer()
+    {
+        IAimAssistDetectionSink? detectionConsumer;
+        lock (_sync)
+        {
+            _latestBoxes = Array.Empty<OnnxDebugBox>();
+            detectionConsumer = _detectionConsumer;
+        }
+        detectionConsumer?.SetAimAssistDetections(SmartCoreDetectionState.Empty);
     }
 
     private void SetStatus(string status)
@@ -665,7 +677,11 @@ internal sealed class OnnxWorker : IDisposable
         {
             _thread.Join(500);
         }
-        _frameArrived.Dispose();
+
+        if (!_thread.IsAlive)
+        {
+            _frameArrived.Dispose();
+        }
     }
 }
 

@@ -25,129 +25,79 @@ internal sealed class SmartCoreAimAssistService
     }
 }
 
-internal readonly struct SmartCoreAimAssistConfigState
+internal readonly record struct AimAssistParams(
+    bool IsEnabled,
+    SnapMode SnapMode,
+    int SnapOuterRange,
+    int SnapInnerRange,
+    float SnapOuterStrength,
+    float SnapInnerStrength,
+    float SnapStartStrength,
+    float SnapVerticalStrengthFactor,
+    float SnapHipfireStrengthFactor,
+    float SnapHeight,
+    float SnapStrengthRampTime,
+    int SnapInnerInterpolationTypeIndex);
+
+internal readonly record struct GamepadBindings(
+    int AimBindingIndex,
+    int FireBindingIndex,
+    int VoiceBindingIndex,
+    string VoiceCustomKey,
+    int TouchpadLeftBindingIndex,
+    int TouchpadRightBindingIndex,
+    string TouchpadLeftCustomKey,
+    string TouchpadRightCustomKey);
+
+internal readonly record struct WeaponPolicy(
+    RapidFireStrategy RapidFireStrategy,
+    int RapidFireHz,
+    string[] AimSnapWeapons,
+    string[] RapidFireWeapons,
+    string[] ReleaseFireWeapons);
+
+internal readonly record struct SmartCoreAimAssistConfigState(
+    AimAssistParams AimAssist,
+    GamepadBindings Bindings,
+    WeaponPolicy WeaponPolicy,
+    MacroRuntimeState? Macro)
 {
-    public readonly bool IsEnabled;
-    public readonly bool IsMappingActive;
-    public readonly int SnapModeIndex;
-    public readonly int RapidFireStrategyIndex;
-    public readonly int RapidFireHz;
-    public readonly int SnapOuterRange;
-    public readonly int SnapInnerRange;
-    public readonly float SnapOuterStrength;
-    public readonly float SnapInnerStrength;
-    public readonly float SnapStartStrength;
-    public readonly float SnapVerticalStrengthFactor;
-    public readonly float SnapHipfireStrengthFactor;
-    public readonly float SnapHeight;
-    public readonly float SnapStrengthRampTime;
-    public readonly int SnapInnerInterpolationTypeIndex;
-    public readonly int AimBindingIndex;
-    public readonly int FireBindingIndex;
-    public readonly int VoiceBindingIndex;
-    public readonly string VoiceCustomKey;
-    public readonly int TouchpadLeftBindingIndex;
-    public readonly int TouchpadRightBindingIndex;
-    public readonly string TouchpadLeftCustomKey;
-    public readonly string TouchpadRightCustomKey;
-    public readonly string[] AimSnapWeapons;
-    public readonly string[] RapidFireWeapons;
-    public readonly string[] ReleaseFireWeapons;
-    public readonly MacroRuntimeState[] Macros;
-
-    public SmartCoreAimAssistConfigState(
-        bool isEnabled,
-        bool isMappingActive,
-        int snapModeIndex,
-        int rapidFireStrategyIndex,
-        int rapidFireHz,
-        int snapOuterRange,
-        int snapInnerRange,
-        float snapOuterStrength,
-        float snapInnerStrength,
-        float snapStartStrength,
-        float snapVerticalStrengthFactor,
-        float snapHipfireStrengthFactor,
-        float snapHeight,
-        float snapStrengthRampTime,
-        int snapInnerInterpolationTypeIndex,
-        int aimBindingIndex,
-        int fireBindingIndex,
-        int voiceBindingIndex,
-        string voiceCustomKey,
-        int touchpadLeftBindingIndex,
-        int touchpadRightBindingIndex,
-        string touchpadLeftCustomKey,
-        string touchpadRightCustomKey,
-        string[] aimSnapWeapons,
-        string[] rapidFireWeapons,
-        string[] releaseFireWeapons,
-        MacroRuntimeState[] macros)
-    {
-        IsEnabled = isEnabled;
-        IsMappingActive = isMappingActive;
-        SnapModeIndex = snapModeIndex;
-        RapidFireStrategyIndex = rapidFireStrategyIndex;
-        RapidFireHz = rapidFireHz;
-        SnapOuterRange = snapOuterRange;
-        SnapInnerRange = snapInnerRange;
-        SnapOuterStrength = snapOuterStrength;
-        SnapInnerStrength = snapInnerStrength;
-        SnapStartStrength = snapStartStrength;
-        SnapVerticalStrengthFactor = snapVerticalStrengthFactor;
-        SnapHipfireStrengthFactor = snapHipfireStrengthFactor;
-        SnapHeight = snapHeight;
-        SnapStrengthRampTime = snapStrengthRampTime;
-        SnapInnerInterpolationTypeIndex = snapInnerInterpolationTypeIndex;
-        AimBindingIndex = aimBindingIndex;
-        FireBindingIndex = fireBindingIndex;
-        VoiceBindingIndex = voiceBindingIndex;
-        VoiceCustomKey = voiceCustomKey;
-        TouchpadLeftBindingIndex = touchpadLeftBindingIndex;
-        TouchpadRightBindingIndex = touchpadRightBindingIndex;
-        TouchpadLeftCustomKey = touchpadLeftCustomKey;
-        TouchpadRightCustomKey = touchpadRightCustomKey;
-        AimSnapWeapons = aimSnapWeapons;
-        RapidFireWeapons = rapidFireWeapons;
-        ReleaseFireWeapons = releaseFireWeapons;
-        Macros = macros;
-    }
-
     public static SmartCoreAimAssistConfigState Disabled => new(
-        false,
-        false,
-        0,
-        2,
-        25,
-        1,
-        1,
-        0f,
-        0f,
-        0f,
-        0f,
-        0f,
-        0f,
-        0f,
-        0,
-        GamepadBindingCatalog.DefaultAimIndex,
-        GamepadBindingCatalog.DefaultFireIndex,
-        GamepadBindingCatalog.DefaultTouchpadLeftIndex,
-        "V",
-        GamepadBindingCatalog.DefaultTouchpadLeftIndex,
-        GamepadBindingCatalog.DefaultTouchpadRightIndex,
-        GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
-        GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
-        Array.Empty<string>(),
-        Array.Empty<string>(),
-        Array.Empty<string>(),
-        Array.Empty<MacroRuntimeState>());
+        new AimAssistParams(
+            IsEnabled: false,
+            SnapMode: SnapMode.Fire,
+            SnapOuterRange: 1,
+            SnapInnerRange: 1,
+            SnapOuterStrength: 0f,
+            SnapInnerStrength: 0f,
+            SnapStartStrength: 0f,
+            SnapVerticalStrengthFactor: 0f,
+            SnapHipfireStrengthFactor: 0f,
+            SnapHeight: 0f,
+            SnapStrengthRampTime: 0f,
+            SnapInnerInterpolationTypeIndex: 0),
+        new GamepadBindings(
+            AimBindingIndex: GamepadBindingCatalog.DefaultAimIndex,
+            FireBindingIndex: GamepadBindingCatalog.DefaultFireIndex,
+            VoiceBindingIndex: GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+            VoiceCustomKey: "V",
+            TouchpadLeftBindingIndex: GamepadBindingCatalog.DefaultTouchpadLeftIndex,
+            TouchpadRightBindingIndex: GamepadBindingCatalog.DefaultTouchpadRightIndex,
+            TouchpadLeftCustomKey: GamepadBindingCatalog.DefaultCustomKeyboardKeyName,
+            TouchpadRightCustomKey: GamepadBindingCatalog.DefaultCustomKeyboardKeyName),
+        new WeaponPolicy(
+            RapidFireStrategy: RapidFireStrategy.WeaponBased,
+            RapidFireHz: 25,
+            AimSnapWeapons: Array.Empty<string>(),
+            RapidFireWeapons: Array.Empty<string>(),
+            ReleaseFireWeapons: Array.Empty<string>()),
+        null);
 }
 
 internal readonly struct SmartCoreAimAssistContext
 {
     public readonly bool IsEnabled;
-    public readonly bool IsMappingActive;
-    public readonly int SnapModeIndex;
+    public readonly SnapMode SnapMode;
     public readonly int SnapOuterRange;
     public readonly int SnapInnerRange;
     public readonly float SnapOuterStrength;
@@ -166,8 +116,7 @@ internal readonly struct SmartCoreAimAssistContext
 
     public SmartCoreAimAssistContext(
         bool isEnabled,
-        bool isMappingActive,
-        int snapModeIndex,
+        SnapMode snapMode,
         int snapOuterRange,
         int snapInnerRange,
         float snapOuterStrength,
@@ -185,8 +134,7 @@ internal readonly struct SmartCoreAimAssistContext
         OnnxDebugBox[] boxes)
     {
         IsEnabled = isEnabled;
-        IsMappingActive = isMappingActive;
-        SnapModeIndex = snapModeIndex;
+        SnapMode = snapMode;
         SnapOuterRange = snapOuterRange;
         SnapInnerRange = snapInnerRange;
         SnapOuterStrength = snapOuterStrength;
@@ -224,20 +172,24 @@ internal readonly struct SmartCoreAimAssistResult
 internal readonly struct SmartCoreDetectionState
 {
     public readonly OnnxDebugBox[] Boxes;
+    public readonly DateTime ReceivedAtUtc;
 
-    public SmartCoreDetectionState(OnnxDebugBox[] boxes)
+    public SmartCoreDetectionState(OnnxDebugBox[] boxes, DateTime receivedAtUtc)
     {
         Boxes = boxes;
+        ReceivedAtUtc = receivedAtUtc;
     }
 
-    public static SmartCoreDetectionState Empty => new(Array.Empty<OnnxDebugBox>());
+    public static SmartCoreDetectionState Empty => new(Array.Empty<OnnxDebugBox>(), DateTime.MinValue);
+}
+
+internal interface IAimAssistDetectionSink
+{
+    void SetAimAssistDetections(in SmartCoreDetectionState state);
 }
 
 internal sealed class SmartCoreActivationEvaluator
 {
-    private const int FireSnapModeIndex = 0;
-    private const int AimAndFireSnapModeIndex = 1;
-
     public bool IsActive(in SmartCoreAimAssistContext context)
     {
         if (!context.IsEnabled || context.Boxes is null || context.Boxes.Length == 0)
@@ -245,20 +197,9 @@ internal sealed class SmartCoreActivationEvaluator
             return false;
         }
 
-        if (context.IsAimSnapOverrideWeapon)
-        {
-            return GamepadBindingCatalog.IsPressed(context.FireBindingIndex, context.Input) ||
-                   GamepadBindingCatalog.IsPressed(context.AimBindingIndex, context.Input);
-        }
-
-        return context.SnapModeIndex switch
-        {
-            FireSnapModeIndex => GamepadBindingCatalog.IsPressed(context.FireBindingIndex, context.Input),
-            AimAndFireSnapModeIndex =>
-                GamepadBindingCatalog.IsPressed(context.AimBindingIndex, context.Input) ||
-                GamepadBindingCatalog.IsPressed(context.FireBindingIndex, context.Input),
-            _ => false
-        };
+        var firePressed = GamepadBindingCatalog.IsPressed(context.FireBindingIndex, context.Input);
+        var aimPressed = GamepadBindingCatalog.IsPressed(context.AimBindingIndex, context.Input);
+        return SnapActivationPolicy.IsActive(context.IsAimSnapOverrideWeapon, context.SnapMode, firePressed, aimPressed);
     }
 }
 

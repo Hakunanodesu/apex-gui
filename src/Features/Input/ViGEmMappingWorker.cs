@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
 using System.Threading;
 using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
@@ -35,7 +34,7 @@ internal readonly record struct ControllerOutputState(
     bool DpadLeft,
     bool DpadRight);
 
-internal sealed class ViGEmMappingWorker : IDisposable
+internal sealed partial class ViGEmMappingWorker : IAimAssistDetectionSink, IWeaponRecognitionSink, IDisposable
 {
     private sealed class MacroExecutionState
     {
@@ -44,16 +43,23 @@ internal sealed class ViGEmMappingWorker : IDisposable
         public DateTime? HoldStartedAt;
         public bool ActionPressed;
         public DateTime? ActionReleaseAt;
+
+        public void Reset()
+        {
+            TriggerWasPressed = false;
+            PressDelayStartedAt = null;
+            HoldStartedAt = null;
+            ActionPressed = false;
+            ActionReleaseAt = null;
+        }
     }
 
-    private const uint InputKeyboard = 1;
-    private const uint KeyEventFKeyUp = 0x0002;
-    private const uint KeyEventFScancode = 0x0008;
     private const double TargetLoopIntervalMs = 1000.0 / 500.0;
     private static readonly TimeSpan SdlInputFailureGrace = TimeSpan.FromSeconds(1);
     private const int ReleaseToFirePulseMs = 100;
     private const int MinRapidFireHz = 1;
     private const int MaxRapidFireHz = 30;
+    private const int DetectionStaleAfterMs = 1000;
     private readonly object _sync = new();
     private readonly Thread _thread;
     private readonly SmartCoreAimAssistService _smartCoreAimAssistService = new();
@@ -256,12 +262,12 @@ internal sealed class ViGEmMappingWorker : IDisposable
         var loopTimer = Stopwatch.StartNew();
         var nextLoopAtMs = 0.0;
         var releasePulseDuration = TimeSpan.FromMilliseconds(ReleaseToFirePulseMs);
-        var rapidHigh = false;
-        var rapidLastToggleAt = DateTime.UtcNow;
+        var rapidFireLoop = new FixedRateLoop(DateTime.UtcNow);
         var releasePrevPressed = false;
         var snapRampTriggerPrev = false;
         var snapRampStartedAt = DateTime.UtcNow;
-        var macroExecutionStates = Array.Empty<MacroExecutionState>();
+        var macroState = new MacroExecutionState();
+        var lastMacro = (MacroRuntimeState?)null;
         DateTime? releasePulseUntil = null;
         DateTime? sdlInputFailureSinceUtc = null;
         ControllerOutputState? lastSubmittedState = null;
@@ -269,7 +275,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
         var desiredKeyboardVirtualKeys = new HashSet<ushort>();
         while (_running)
         {
-            WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetLoopIntervalMs);
+            FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetLoopIntervalMs);
             SdlGamepadWorker? sdlWorker;
             bool isConnected;
             bool requestedEnabled;
@@ -330,37 +336,31 @@ internal sealed class ViGEmMappingWorker : IDisposable
             sdlInputFailureSinceUtc = null;
 
             var recognizedWeaponName = weaponRecognitionState.WeaponName;
-            var isAimSnapOverrideWeapon = ContainsWeaponName(aimAssistConfigState.AimSnapWeapons, recognizedWeaponName);
-            var isRapidFireWeapon = ContainsWeaponName(aimAssistConfigState.RapidFireWeapons, recognizedWeaponName);
-            var isReleaseFireWeapon = ContainsWeaponName(aimAssistConfigState.ReleaseFireWeapons, recognizedWeaponName);
-            var shouldApplyRapidFire = aimAssistConfigState.RapidFireStrategyIndex switch
+            var weaponPolicy = aimAssistConfigState.WeaponPolicy;
+            var isAimSnapOverrideWeapon = ContainsWeaponName(weaponPolicy.AimSnapWeapons, recognizedWeaponName);
+            var isRapidFireWeapon = ContainsWeaponName(weaponPolicy.RapidFireWeapons, recognizedWeaponName);
+            var isReleaseFireWeapon = ContainsWeaponName(weaponPolicy.ReleaseFireWeapons, recognizedWeaponName);
+            var shouldApplyRapidFire = weaponPolicy.RapidFireStrategy switch
             {
-                0 => false,
-                1 => true,
-                2 => isRapidFireWeapon,
-                _ => false
+                RapidFireStrategy.Off => false,
+                RapidFireStrategy.Always => true,
+                RapidFireStrategy.WeaponBased => isRapidFireWeapon,
+                _ => throw new InvalidOperationException($"Unhandled rapid-fire strategy: {weaponPolicy.RapidFireStrategy}")
             };
-            var fireBindingIndex = aimAssistConfigState.FireBindingIndex;
-            var voiceBindingIndex = aimAssistConfigState.VoiceBindingIndex;
-            var touchpadLeftBindingIndex = aimAssistConfigState.TouchpadLeftBindingIndex;
-            var touchpadRightBindingIndex = aimAssistConfigState.TouchpadRightBindingIndex;
+            var bindings = aimAssistConfigState.Bindings;
+            var fireBindingIndex = bindings.FireBindingIndex;
+            var voiceBindingIndex = bindings.VoiceBindingIndex;
+            var touchpadLeftBindingIndex = bindings.TouchpadLeftBindingIndex;
+            var touchpadRightBindingIndex = bindings.TouchpadRightBindingIndex;
             var firePressed = GamepadBindingCatalog.IsPressed(fireBindingIndex, input);
 
-            var aimPressedForRamp = GamepadBindingCatalog.IsPressed(aimAssistConfigState.AimBindingIndex, input);
-            bool snapRampTrigger;
-            if (isAimSnapOverrideWeapon)
-            {
-                snapRampTrigger = firePressed || aimPressedForRamp;
-            }
-            else
-            {
-                snapRampTrigger = aimAssistConfigState.SnapModeIndex switch
-                {
-                    0 => firePressed,
-                    1 => aimPressedForRamp || firePressed,
-                    _ => false
-                };
-            }
+            var aimPressedForRamp = GamepadBindingCatalog.IsPressed(bindings.AimBindingIndex, input);
+            var aimAssist = aimAssistConfigState.AimAssist;
+            var snapRampTrigger = SnapActivationPolicy.IsActive(
+                isAimSnapOverrideWeapon,
+                aimAssist.SnapMode,
+                firePressed,
+                aimPressedForRamp);
 
             var nowForRamp = DateTime.UtcNow;
             if (snapRampTrigger && !snapRampTriggerPrev)
@@ -369,7 +369,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
             }
 
             snapRampTriggerPrev = snapRampTrigger;
-            var snapRampTime = aimAssistConfigState.SnapStrengthRampTime;
+            var snapRampTime = aimAssist.SnapStrengthRampTime;
             float fireStrengthRampMultiplier;
             if (!snapRampTrigger || snapRampTime <= 0f)
             {
@@ -381,23 +381,7 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 fireStrengthRampMultiplier = Math.Clamp(rampElapsedSeconds / snapRampTime, 0f, 1f);
             }
 
-            short mappedLeftTrigger = input.LeftTrigger;
-            short mappedRightTrigger = input.RightTrigger;
-            var mappedA = input.A;
-            var mappedB = input.B;
-            var mappedX = input.X;
-            var mappedY = input.Y;
-            var mappedBack = input.Back;
-            var mappedStart = input.Start;
-            var mappedGuide = input.Guide;
-            var mappedLeftShoulder = input.LeftShoulder;
-            var mappedRightShoulder = input.RightShoulder;
-            var mappedLeftThumb = input.LeftThumb;
-            var mappedRightThumb = input.RightThumb;
-            var mappedDpadUp = input.DpadUp;
-            var mappedDpadDown = input.DpadDown;
-            var mappedDpadLeft = input.DpadLeft;
-            var mappedDpadRight = input.DpadRight;
+            var mapped = new MappedGamepadState(input);
 
             short ResolveFireBindingAnalogValue()
             {
@@ -406,92 +390,30 @@ internal sealed class ViGEmMappingWorker : IDisposable
                     : short.MaxValue;
             }
 
-            void SetMappedBindingPressed(int bindingIndex, bool pressed, short analogValueWhenPressed = short.MaxValue)
+            void ApplyMacro()
             {
-                switch (bindingIndex)
+                var macro = aimAssistConfigState.Macro;
+                if (!macro.HasValue)
                 {
-                    case 0:
-                        mappedLeftTrigger = pressed ? analogValueWhenPressed : (short)0;
-                        break;
-                    case 1:
-                        mappedRightTrigger = pressed ? analogValueWhenPressed : (short)0;
-                        break;
-                    case 2:
-                        mappedLeftShoulder = pressed;
-                        break;
-                    case 3:
-                        mappedRightShoulder = pressed;
-                        break;
-                    case 4:
-                        mappedA = pressed;
-                        break;
-                    case 5:
-                        mappedB = pressed;
-                        break;
-                    case 6:
-                        mappedX = pressed;
-                        break;
-                    case 7:
-                        mappedY = pressed;
-                        break;
-                    case 8:
-                        mappedLeftThumb = pressed;
-                        break;
-                    case 9:
-                        mappedRightThumb = pressed;
-                        break;
-                    case 10:
-                        mappedDpadUp = pressed;
-                        break;
-                    case 11:
-                        mappedDpadDown = pressed;
-                        break;
-                    case 12:
-                        mappedDpadLeft = pressed;
-                        break;
-                    case 13:
-                        mappedDpadRight = pressed;
-                        break;
-                    case 14:
-                        mappedBack = pressed;
-                        break;
-                    case 15:
-                        mappedStart = pressed;
-                        break;
-                }
-            }
-
-            void SetFireBindingPressed(bool pressed, short analogValueWhenPressed = short.MaxValue)
-            {
-                SetMappedBindingPressed(fireBindingIndex, pressed, analogValueWhenPressed);
-            }
-
-            void EnsureMacroExecutionStates(int count)
-            {
-                if (macroExecutionStates.Length == count)
-                {
+                    if (lastMacro.HasValue)
+                    {
+                        macroState.Reset();
+                        lastMacro = null;
+                    }
                     return;
                 }
 
-                macroExecutionStates = new MacroExecutionState[count];
-                for (var i = 0; i < count; i++)
+                if (lastMacro != macro)
                 {
-                    macroExecutionStates[i] = new MacroExecutionState();
+                    macroState.Reset();
+                    lastMacro = macro;
                 }
+
+                ApplySingleMacro(macro.Value, macroState, DateTime.UtcNow);
             }
 
             void ApplySingleMacro(in MacroRuntimeState macro, MacroExecutionState state, DateTime now)
             {
-                if (macro.TriggerBindingIndex == macro.ActionBindingIndex)
-                {
-                    state.TriggerWasPressed = false;
-                    state.PressDelayStartedAt = null;
-                    state.HoldStartedAt = null;
-                    state.ActionPressed = false;
-                    state.ActionReleaseAt = null;
-                    return;
-                }
-
                 var triggerPressed = GamepadBindingCatalog.IsPressed(macro.TriggerBindingIndex, input);
                 var delayMs = Math.Clamp(macro.DelayMs, MacroConfigCatalog.MinDelayMs, MacroConfigCatalog.MaxDelayMs);
                 var actionDurationMs = Math.Clamp(
@@ -499,50 +421,49 @@ internal sealed class ViGEmMappingWorker : IDisposable
                     MacroConfigCatalog.MinActionDurationMs,
                     MacroConfigCatalog.MaxActionDurationMs);
 
-                if (macro.TriggerModeIndex == 0)
+                switch (macro.TriggerMode)
                 {
-                    if (triggerPressed && !state.TriggerWasPressed)
-                    {
-                        state.PressDelayStartedAt = now;
-                    }
-
-                    if (!triggerPressed && state.PressDelayStartedAt.HasValue && !state.ActionPressed)
-                    {
-                        state.PressDelayStartedAt = null;
-                    }
-
-                    if (state.PressDelayStartedAt.HasValue && !state.ActionPressed)
-                    {
-                        var elapsedMs = (now - state.PressDelayStartedAt.Value).TotalMilliseconds;
-                        if (elapsedMs >= delayMs)
+                    case MacroTriggerMode.Press:
+                        if (triggerPressed && !state.TriggerWasPressed)
                         {
-                            state.ActionPressed = true;
-                            state.ActionReleaseAt = actionDurationMs > 0
-                                ? now.AddMilliseconds(actionDurationMs)
-                                : now;
+                            state.PressDelayStartedAt = now;
                         }
-                    }
 
-                    if (state.ActionPressed)
-                    {
-                        SetMappedBindingPressed(macro.ActionBindingIndex, true);
-                        if (state.ActionReleaseAt.HasValue && now >= state.ActionReleaseAt.Value)
+                        if (!triggerPressed && state.PressDelayStartedAt.HasValue && !state.ActionPressed)
                         {
-                            state.ActionPressed = false;
                             state.PressDelayStartedAt = null;
-                            state.ActionReleaseAt = null;
                         }
-                    }
-                }
-                else
-                {
-                    if (triggerPressed)
-                    {
-                        state.HoldStartedAt ??= now;
-                        var holdElapsedMs = (now - state.HoldStartedAt.Value).TotalMilliseconds;
-                        if (holdElapsedMs >= delayMs)
+
+                        if (state.PressDelayStartedAt.HasValue && !state.ActionPressed)
                         {
-                            if (!state.ActionPressed)
+                            var elapsedMs = (now - state.PressDelayStartedAt.Value).TotalMilliseconds;
+                            if (elapsedMs >= delayMs)
+                            {
+                                state.ActionPressed = true;
+                                state.ActionReleaseAt = actionDurationMs > 0
+                                    ? now.AddMilliseconds(actionDurationMs)
+                                    : now;
+                            }
+                        }
+
+                        if (state.ActionPressed)
+                        {
+                            GamepadBindingCatalog.ApplyBinding(ref mapped, macro.ActionBindingIndex, true);
+                            if (state.ActionReleaseAt.HasValue && now >= state.ActionReleaseAt.Value)
+                            {
+                                state.ActionPressed = false;
+                                state.PressDelayStartedAt = null;
+                                state.ActionReleaseAt = null;
+                            }
+                        }
+                        break;
+
+                    case MacroTriggerMode.Hold:
+                        if (triggerPressed)
+                        {
+                            state.HoldStartedAt ??= now;
+                            var holdElapsedMs = (now - state.HoldStartedAt.Value).TotalMilliseconds;
+                            if (holdElapsedMs >= delayMs && !state.ActionPressed)
                             {
                                 state.ActionPressed = true;
                                 state.ActionReleaseAt = actionDurationMs > 0
@@ -550,120 +471,46 @@ internal sealed class ViGEmMappingWorker : IDisposable
                                     : null;
                             }
                         }
-                    }
-                    else
-                    {
-                        state.HoldStartedAt = null;
-                        state.ActionPressed = false;
-                        state.ActionReleaseAt = null;
-                    }
-
-                    if (state.ActionPressed)
-                    {
-                        var shouldRelease = !triggerPressed;
-                        if (actionDurationMs > 0 && state.ActionReleaseAt.HasValue && now >= state.ActionReleaseAt.Value)
-                        {
-                            shouldRelease = true;
-                        }
-
-                        if (shouldRelease)
-                        {
-                            state.ActionPressed = false;
-                            state.HoldStartedAt = null;
-                            state.ActionReleaseAt = null;
-                        }
                         else
                         {
-                            SetMappedBindingPressed(macro.ActionBindingIndex, true);
+                            state.HoldStartedAt = null;
+                            state.ActionPressed = false;
+                            state.ActionReleaseAt = null;
                         }
-                    }
+
+                        if (state.ActionPressed)
+                        {
+                            var shouldRelease = !triggerPressed;
+                            if (actionDurationMs > 0 && state.ActionReleaseAt.HasValue && now >= state.ActionReleaseAt.Value)
+                            {
+                                shouldRelease = true;
+                            }
+
+                            if (shouldRelease)
+                            {
+                                state.ActionPressed = false;
+                                state.HoldStartedAt = null;
+                                state.ActionReleaseAt = null;
+                            }
+                            else
+                            {
+                                GamepadBindingCatalog.ApplyBinding(ref mapped, macro.ActionBindingIndex, true);
+                            }
+                        }
+                        break;
+
+                    default:
+                        throw new InvalidOperationException($"Unhandled macro trigger mode: {macro.TriggerMode}");
                 }
 
                 state.TriggerWasPressed = triggerPressed;
-            }
-
-            void ApplyMacros()
-            {
-                var macros = aimAssistConfigState.Macros;
-                if (macros.Length == 0)
-                {
-                    macroExecutionStates = Array.Empty<MacroExecutionState>();
-                    return;
-                }
-
-                EnsureMacroExecutionStates(macros.Length);
-                var now = DateTime.UtcNow;
-                for (var i = 0; i < macros.Length; i++)
-                {
-                    ApplySingleMacro(macros[i], macroExecutionStates[i], now);
-                }
-            }
-
-            void OverlayBindingPressed(int bindingIndex, bool pressed)
-            {
-                if (!pressed)
-                {
-                    return;
-                }
-
-                switch (bindingIndex)
-                {
-                    case 0:
-                        mappedLeftTrigger = short.MaxValue;
-                        break;
-                    case 1:
-                        mappedRightTrigger = short.MaxValue;
-                        break;
-                    case 2:
-                        mappedLeftShoulder = true;
-                        break;
-                    case 3:
-                        mappedRightShoulder = true;
-                        break;
-                    case 4:
-                        mappedA = true;
-                        break;
-                    case 5:
-                        mappedB = true;
-                        break;
-                    case 6:
-                        mappedX = true;
-                        break;
-                    case 7:
-                        mappedY = true;
-                        break;
-                    case 8:
-                        mappedLeftThumb = true;
-                        break;
-                    case 9:
-                        mappedRightThumb = true;
-                        break;
-                    case 10:
-                        mappedDpadUp = true;
-                        break;
-                    case 11:
-                        mappedDpadDown = true;
-                        break;
-                    case 12:
-                        mappedDpadLeft = true;
-                        break;
-                    case 13:
-                        mappedDpadRight = true;
-                        break;
-                    case 14:
-                        mappedBack = true;
-                        break;
-                    case 15:
-                        mappedStart = true;
-                        break;
-                }
             }
 
             if (isReleaseFireWeapon)
             {
                 if (firePressed)
                 {
-                    SetFireBindingPressed(false);
+                    GamepadBindingCatalog.ApplyBinding(ref mapped, fireBindingIndex, false);
                     releasePrevPressed = true;
                     releasePulseUntil = null;
                 }
@@ -677,11 +524,11 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
                     if (releasePulseUntil.HasValue && DateTime.UtcNow < releasePulseUntil.Value)
                     {
-                        SetFireBindingPressed(true, short.MaxValue);
+                        GamepadBindingCatalog.ApplyBinding(ref mapped, fireBindingIndex, true, short.MaxValue);
                     }
                     else
                     {
-                        SetFireBindingPressed(false);
+                        GamepadBindingCatalog.ApplyBinding(ref mapped, fireBindingIndex, false);
                         releasePulseUntil = null;
                     }
                 }
@@ -694,33 +541,19 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
             if (shouldApplyRapidFire && firePressed && !isReleaseFireWeapon)
             {
-                var rapidFireHalfPeriod = ResolveRapidFireHalfPeriod(aimAssistConfigState.RapidFireHz);
-                var now = DateTime.UtcNow;
-                var elapsed = now - rapidLastToggleAt;
-                if (elapsed >= rapidFireHalfPeriod)
+                rapidFireLoop.Tick(DateTime.UtcNow, ResolveRapidFireHalfPeriod(aimAssistConfigState.WeaponPolicy.RapidFireHz));
+                if (rapidFireLoop.IsHigh)
                 {
-                    var steps = Math.Max(1, (int)(elapsed.Ticks / rapidFireHalfPeriod.Ticks));
-                    if ((steps & 1) == 1)
-                    {
-                        rapidHigh = !rapidHigh;
-                    }
-
-                    rapidLastToggleAt = rapidLastToggleAt.AddTicks(rapidFireHalfPeriod.Ticks * steps);
-                }
-
-                if (rapidHigh)
-                {
-                    SetFireBindingPressed(true, ResolveFireBindingAnalogValue());
+                    GamepadBindingCatalog.ApplyBinding(ref mapped, fireBindingIndex, true, ResolveFireBindingAnalogValue());
                 }
                 else
                 {
-                    SetFireBindingPressed(false);
+                    GamepadBindingCatalog.ApplyBinding(ref mapped, fireBindingIndex, false);
                 }
             }
             else
             {
-                rapidHigh = false;
-                rapidLastToggleAt = DateTime.UtcNow;
+                rapidFireLoop.Reset(DateTime.UtcNow);
             }
 
             desiredKeyboardVirtualKeys.Clear();
@@ -734,76 +567,75 @@ internal sealed class ViGEmMappingWorker : IDisposable
                 touchpadRightPressed = !isLeftTouchRegion;
                 if (touchpadLeftPressed && GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadLeftBindingIndex))
                 {
-                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadLeftCustomKey);
+                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.Bindings.TouchpadLeftCustomKey);
                 }
 
                 if (touchpadRightPressed && GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadRightBindingIndex))
                 {
-                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.TouchpadRightCustomKey);
+                    AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.Bindings.TouchpadRightCustomKey);
                 }
 
-                if (!GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadLeftBindingIndex))
+                if (!GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadLeftBindingIndex) && touchpadLeftPressed)
                 {
-                    OverlayBindingPressed(touchpadLeftBindingIndex, touchpadLeftPressed);
+                    GamepadBindingCatalog.ApplyBinding(ref mapped, touchpadLeftBindingIndex, true);
                 }
 
-                if (!GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadRightBindingIndex))
+                if (!GamepadBindingCatalog.IsKeyboardCustomBinding(touchpadRightBindingIndex) && touchpadRightPressed)
                 {
-                    OverlayBindingPressed(touchpadRightBindingIndex, touchpadRightPressed);
+                    GamepadBindingCatalog.ApplyBinding(ref mapped, touchpadRightBindingIndex, true);
                 }
             }
 
             if (GamepadBindingCatalog.IsPressed(voiceBindingIndex, input))
             {
-                AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.VoiceCustomKey);
+                AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.Bindings.VoiceCustomKey);
             }
 
-            ApplyMacros();
+            ApplyMacro();
 
             UpdateKeyboardInjections(desiredKeyboardVirtualKeys, injectedKeyboardVirtualKeys);
 
             var aimAssistResult = _smartCoreAimAssistService.Evaluate(new SmartCoreAimAssistContext(
-                aimAssistConfigState.IsEnabled,
-                aimAssistConfigState.IsMappingActive,
-                aimAssistConfigState.SnapModeIndex,
-                aimAssistConfigState.SnapOuterRange,
-                aimAssistConfigState.SnapInnerRange,
-                aimAssistConfigState.SnapOuterStrength,
-                aimAssistConfigState.SnapInnerStrength,
-                aimAssistConfigState.SnapStartStrength,
-                aimAssistConfigState.SnapVerticalStrengthFactor,
-                aimAssistConfigState.SnapHipfireStrengthFactor,
-                aimAssistConfigState.SnapHeight,
-                aimAssistConfigState.SnapInnerInterpolationTypeIndex,
-                aimAssistConfigState.AimBindingIndex,
-                aimAssistConfigState.FireBindingIndex,
+                aimAssist.IsEnabled,
+                aimAssist.SnapMode,
+                aimAssist.SnapOuterRange,
+                aimAssist.SnapInnerRange,
+                aimAssist.SnapOuterStrength,
+                aimAssist.SnapInnerStrength,
+                aimAssist.SnapStartStrength,
+                aimAssist.SnapVerticalStrengthFactor,
+                aimAssist.SnapHipfireStrengthFactor,
+                aimAssist.SnapHeight,
+                aimAssist.SnapInnerInterpolationTypeIndex,
+                bindings.AimBindingIndex,
+                bindings.FireBindingIndex,
                 isAimSnapOverrideWeapon,
                 fireStrengthRampMultiplier,
                 input,
-                aimAssistDetectionState.Boxes));
+                GetFreshDetectionBoxes(in aimAssistDetectionState)));
 
             var outputState = new ControllerOutputState(
                 input.LeftX,
                 InvertStickY(input.LeftY),
                 CombineStickAxis(input.RightX, aimAssistResult.IsActive ? aimAssistResult.RightX : (short)0),
                 InvertStickY(CombineStickAxis(input.RightY, aimAssistResult.IsActive ? aimAssistResult.RightY : (short)0)),
-                ToXboxTrigger(mappedLeftTrigger),
-                ToXboxTrigger(mappedRightTrigger),
-                mappedA,
-                mappedB,
-                mappedX,
-                mappedY,
-                mappedBack,
-                mappedStart,
-                mappedGuide,
-                mappedLeftShoulder,
-                mappedRightShoulder,
-                mappedLeftThumb,
-                mappedRightThumb,
-                mappedDpadUp,
-                mappedDpadDown,
-                mappedDpadLeft,
-                mappedDpadRight);
+                ToXboxTrigger(mapped.LeftTrigger),
+                ToXboxTrigger(mapped.RightTrigger),
+                mapped.A,
+                mapped.B,
+                mapped.X,
+                mapped.Y,
+                mapped.Back,
+                mapped.Start,
+                mapped.Guide,
+                mapped.LeftShoulder,
+                mapped.RightShoulder,
+                mapped.LeftThumb,
+                mapped.RightThumb,
+                mapped.DpadUp,
+                mapped.DpadDown,
+                mapped.DpadLeft,
+                mapped.DpadRight);
 
             if (lastSubmittedState.HasValue && lastSubmittedState.Value.Equals(outputState))
             {
@@ -861,124 +693,6 @@ internal sealed class ViGEmMappingWorker : IDisposable
         {
             desiredKeyboardVirtualKeys.Clear();
             UpdateKeyboardInjections(desiredKeyboardVirtualKeys, injectedKeyboardVirtualKeys);
-        }
-    }
-
-    private void UpdateKeyboardInjections(HashSet<ushort> desiredVirtualKeys, HashSet<ushort> injectedVirtualKeys)
-    {
-        if (injectedVirtualKeys.Count == desiredVirtualKeys.Count)
-        {
-            var isSameSet = true;
-            foreach (var key in desiredVirtualKeys)
-            {
-                if (!injectedVirtualKeys.Contains(key))
-                {
-                    isSameSet = false;
-                    break;
-                }
-            }
-
-            if (isSameSet)
-            {
-                return;
-            }
-        }
-
-        var releaseKeys = new List<ushort>();
-        foreach (var key in injectedVirtualKeys)
-        {
-            if (!desiredVirtualKeys.Contains(key))
-            {
-                releaseKeys.Add(key);
-            }
-        }
-
-        foreach (var key in releaseKeys)
-        {
-            if (!TrySendKeyboardKey(key, keyDown: false, out var releaseError))
-            {
-                if (!string.IsNullOrWhiteSpace(releaseError))
-                {
-                    lock (_sync)
-                    {
-                        _lastError = releaseError;
-                    }
-                }
-                return;
-            }
-
-            injectedVirtualKeys.Remove(key);
-        }
-
-        foreach (var key in desiredVirtualKeys)
-        {
-            if (injectedVirtualKeys.Contains(key))
-            {
-                continue;
-            }
-
-            if (!TrySendKeyboardKey(key, keyDown: true, out var pressError))
-            {
-                if (!string.IsNullOrWhiteSpace(pressError))
-                {
-                    lock (_sync)
-                    {
-                        _lastError = pressError;
-                    }
-                }
-                return;
-            }
-
-            injectedVirtualKeys.Add(key);
-        }
-    }
-
-    private static bool TrySendKeyboardKey(ushort virtualKey, bool keyDown, out string? error)
-    {
-        var scanCode = (ushort)MapVirtualKey(virtualKey, 0);
-        var flags = KeyEventFScancode | (keyDown ? 0u : KeyEventFKeyUp);
-        var input = new INPUT
-        {
-            Type = InputKeyboard,
-            Data = new InputData
-            {
-                Keyboard = new KEYBDINPUT
-                {
-                    // Scancode injection is closer to real key hardware events.
-                    VirtualKey = 0,
-                    ScanCode = scanCode,
-                    Flags = flags,
-                    Time = 0,
-                    ExtraInfo = UIntPtr.Zero
-                }
-            }
-        };
-
-        var sent = SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
-        if (sent == 1)
-        {
-            error = null;
-            return true;
-        }
-
-        var win32Error = Marshal.GetLastWin32Error();
-        error = $"键盘按键注入失败(VK={virtualKey}): {win32Error}";
-        return false;
-    }
-
-    private static ushort? ResolveCustomKeyboardVirtualKey(string? customKey)
-    {
-        return GamepadBindingCatalog.TryResolveCustomKeyboardVirtualKey(customKey, out var virtualKey, out _)
-            ? virtualKey
-            : null;
-    }
-
-    private static void AddResolvedCustomKeyboardVirtualKey(HashSet<ushort> keys, string? customKey)
-    {
-        var virtualKey = ResolveCustomKeyboardVirtualKey(customKey);
-        if (virtualKey.HasValue)
-        {
-            keys.Add(virtualKey.Value);
         }
     }
 
@@ -1117,6 +831,17 @@ internal sealed class ViGEmMappingWorker : IDisposable
         return TimeSpan.FromMilliseconds(500.0 / hz);
     }
 
+    private static OnnxDebugBox[] GetFreshDetectionBoxes(in SmartCoreDetectionState state)
+    {
+        if (state.Boxes.Length == 0)
+        {
+            return Array.Empty<OnnxDebugBox>();
+        }
+
+        var ageMs = (DateTime.UtcNow - state.ReceivedAtUtc).TotalMilliseconds;
+        return ageMs <= DetectionStaleAfterMs ? state.Boxes : Array.Empty<OnnxDebugBox>();
+    }
+
     private static bool ContainsWeaponName(IReadOnlyList<string>? weaponNames, string? weaponName)
     {
         if (string.IsNullOrWhiteSpace(weaponName) ||
@@ -1140,60 +865,14 @@ internal sealed class ViGEmMappingWorker : IDisposable
 
     private static bool AreEquivalentConfig(in SmartCoreAimAssistConfigState a, in SmartCoreAimAssistConfigState b)
     {
-        return a.IsEnabled == b.IsEnabled &&
-               a.IsMappingActive == b.IsMappingActive &&
-               a.SnapModeIndex == b.SnapModeIndex &&
-               a.RapidFireStrategyIndex == b.RapidFireStrategyIndex &&
-               a.RapidFireHz == b.RapidFireHz &&
-               a.SnapOuterRange == b.SnapOuterRange &&
-               a.SnapInnerRange == b.SnapInnerRange &&
-               a.SnapOuterStrength.Equals(b.SnapOuterStrength) &&
-               a.SnapInnerStrength.Equals(b.SnapInnerStrength) &&
-               a.SnapStartStrength.Equals(b.SnapStartStrength) &&
-               a.SnapVerticalStrengthFactor.Equals(b.SnapVerticalStrengthFactor) &&
-               a.SnapHipfireStrengthFactor.Equals(b.SnapHipfireStrengthFactor) &&
-               a.SnapHeight.Equals(b.SnapHeight) &&
-               a.SnapStrengthRampTime.Equals(b.SnapStrengthRampTime) &&
-               a.SnapInnerInterpolationTypeIndex == b.SnapInnerInterpolationTypeIndex &&
-               a.AimBindingIndex == b.AimBindingIndex &&
-               a.FireBindingIndex == b.FireBindingIndex &&
-               a.VoiceBindingIndex == b.VoiceBindingIndex &&
-               string.Equals(a.VoiceCustomKey, b.VoiceCustomKey, StringComparison.Ordinal) &&
-               a.TouchpadLeftBindingIndex == b.TouchpadLeftBindingIndex &&
-               a.TouchpadRightBindingIndex == b.TouchpadRightBindingIndex &&
-               string.Equals(a.TouchpadLeftCustomKey, b.TouchpadLeftCustomKey, StringComparison.Ordinal) &&
-               string.Equals(a.TouchpadRightCustomKey, b.TouchpadRightCustomKey, StringComparison.Ordinal) &&
-               AreSameList(a.AimSnapWeapons, b.AimSnapWeapons) &&
-               AreSameList(a.RapidFireWeapons, b.RapidFireWeapons) &&
-               AreSameList(a.ReleaseFireWeapons, b.ReleaseFireWeapons) &&
-               AreSameMacros(a.Macros, b.Macros);
-    }
-
-    private static bool AreSameMacros(MacroRuntimeState[] a, MacroRuntimeState[] b)
-    {
-        if (ReferenceEquals(a, b))
-        {
-            return true;
-        }
-
-        if (a.Length != b.Length)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < a.Length; i++)
-        {
-            if (a[i].TriggerModeIndex != b[i].TriggerModeIndex ||
-                a[i].TriggerBindingIndex != b[i].TriggerBindingIndex ||
-                a[i].DelayMs != b[i].DelayMs ||
-                a[i].ActionBindingIndex != b[i].ActionBindingIndex ||
-                a[i].ActionDurationMs != b[i].ActionDurationMs)
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return a.AimAssist == b.AimAssist &&
+               a.Bindings == b.Bindings &&
+               a.WeaponPolicy.RapidFireStrategy == b.WeaponPolicy.RapidFireStrategy &&
+               a.WeaponPolicy.RapidFireHz == b.WeaponPolicy.RapidFireHz &&
+               AreSameList(a.WeaponPolicy.AimSnapWeapons, b.WeaponPolicy.AimSnapWeapons) &&
+               AreSameList(a.WeaponPolicy.RapidFireWeapons, b.WeaponPolicy.RapidFireWeapons) &&
+               AreSameList(a.WeaponPolicy.ReleaseFireWeapons, b.WeaponPolicy.ReleaseFireWeapons) &&
+               a.Macro == b.Macro;
     }
 
     private static bool AreSameList(IReadOnlyList<string>? a, IReadOnlyList<string>? b)
@@ -1219,85 +898,5 @@ internal sealed class ViGEmMappingWorker : IDisposable
         return true;
     }
 
-    private static void WaitForNextTick(Stopwatch loopTimer, ref double nextLoopAtMs, double intervalMs)
-    {
-        if (nextLoopAtMs <= 0.0)
-        {
-            nextLoopAtMs = loopTimer.Elapsed.TotalMilliseconds;
-        }
-
-        nextLoopAtMs += intervalMs;
-        while (true)
-        {
-            var remainingMs = nextLoopAtMs - loopTimer.Elapsed.TotalMilliseconds;
-            if (remainingMs <= 0.0)
-            {
-                break;
-            }
-
-            if (remainingMs >= 1.5)
-            {
-                Thread.Sleep(1);
-                continue;
-            }
-
-            Thread.SpinWait(64);
-        }
-    }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint SendInput(uint inputCount, INPUT[] inputs, int size);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint MapVirtualKey(uint code, uint mapType);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT
-    {
-        public uint Type;
-        public InputData Data;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct InputData
-    {
-        [FieldOffset(0)]
-        public KEYBDINPUT Keyboard;
-
-        [FieldOffset(0)]
-        public MOUSEINPUT Mouse;
-
-        [FieldOffset(0)]
-        public HARDWAREINPUT Hardware;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KEYBDINPUT
-    {
-        public ushort VirtualKey;
-        public ushort ScanCode;
-        public uint Flags;
-        public uint Time;
-        public UIntPtr ExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MOUSEINPUT
-    {
-        public int Dx;
-        public int Dy;
-        public uint MouseData;
-        public uint DwFlags;
-        public uint Time;
-        public UIntPtr ExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct HARDWAREINPUT
-    {
-        public uint Msg;
-        public ushort ParamL;
-        public ushort ParamH;
-    }
 }
 

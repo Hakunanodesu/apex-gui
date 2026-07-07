@@ -186,7 +186,7 @@ internal sealed class SdlGamepadWorker : IDisposable
         {
             while (_running)
             {
-                WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetLoopIntervalMs);
+                FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetLoopIntervalMs);
                 SDL.PumpEvents();
                 SDL.UpdateJoysticks();
                 SDL.UpdateGamepads();
@@ -212,6 +212,17 @@ internal sealed class SdlGamepadWorker : IDisposable
                     {
                         _connectedGamepads = EnumerateConnectedGamepads();
                         _refreshCompletedVersion = _refreshRequestVersion;
+                    }
+
+                    if (openedGamepad != IntPtr.Zero && !IsInstanceStillConnected(openedInstanceId))
+                    {
+                        SDL.CloseGamepad(openedGamepad);
+                        openedGamepad = IntPtr.Zero;
+                        openedInstanceId = 0;
+                        lock (_sync)
+                        {
+                            _hasLatestInput = false;
+                        }
                     }
                 }
 
@@ -241,7 +252,6 @@ internal sealed class SdlGamepadWorker : IDisposable
                     }
 
                     openedGamepad = SDL.OpenGamepad(selectedInstanceId);
-                    openedInstanceId = selectedInstanceId;
                     if (openedGamepad == IntPtr.Zero)
                     {
                         lock (_sync)
@@ -251,6 +261,8 @@ internal sealed class SdlGamepadWorker : IDisposable
                         }
                         continue;
                     }
+
+                    openedInstanceId = selectedInstanceId;
                 }
 
                 var snapshot = new SdlGamepadInputSnapshot(
@@ -303,6 +315,22 @@ internal sealed class SdlGamepadWorker : IDisposable
                 SDL.CloseGamepad(openedGamepad);
             }
         }
+    }
+
+    private bool IsInstanceStillConnected(uint instanceId)
+    {
+        lock (_sync)
+        {
+            for (var i = 0; i < _connectedGamepads.Length; i++)
+            {
+                if (_connectedGamepads[i].InstanceId == instanceId)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static (uint InstanceId, string Name)[] EnumerateConnectedGamepads()
@@ -410,30 +438,5 @@ internal sealed class SdlGamepadWorker : IDisposable
         }
     }
 
-    private static void WaitForNextTick(Stopwatch loopTimer, ref double nextLoopAtMs, double intervalMs)
-    {
-        if (nextLoopAtMs <= 0.0)
-        {
-            nextLoopAtMs = loopTimer.Elapsed.TotalMilliseconds;
-        }
-
-        nextLoopAtMs += intervalMs;
-        while (true)
-        {
-            var remainingMs = nextLoopAtMs - loopTimer.Elapsed.TotalMilliseconds;
-            if (remainingMs <= 0.0)
-            {
-                break;
-            }
-
-            if (remainingMs >= 1.5)
-            {
-                Thread.Sleep(1);
-                continue;
-            }
-
-            Thread.SpinWait(64);
-        }
-    }
 }
 
