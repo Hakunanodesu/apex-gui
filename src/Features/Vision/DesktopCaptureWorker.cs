@@ -155,18 +155,12 @@ internal sealed class DesktopCaptureWorker : IDisposable
         {
             using var duplicator = new DxgiDesktopDuplicator();
             var timer = Stopwatch.StartNew();
-            var frameBudgetTimer = Stopwatch.StartNew();
+            var loopTimer = Stopwatch.StartNew();
+            var nextLoopAtMs = 0.0;
 
             while (_running)
             {
-                var remainingMs = TargetCaptureIntervalMs - frameBudgetTimer.Elapsed.TotalMilliseconds;
-                if (remainingMs > 1.0)
-                {
-                    Thread.Sleep((int)remainingMs);
-                    continue;
-                }
-
-                frameBudgetTimer.Restart();
+                FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetCaptureIntervalMs);
 
                 int requestedWidth;
                 int requestedHeight;
@@ -191,7 +185,6 @@ internal sealed class DesktopCaptureWorker : IDisposable
                     out var weaponRoiHeight,
                     out var error);
                 timer.Stop();
-                var shouldBackoff = false;
                 OnnxWorker? frameConsumer = null;
                 var frameId = 0;
 
@@ -237,20 +230,11 @@ internal sealed class DesktopCaptureWorker : IDisposable
                         _lastError = error;
                         _running = false;
                     }
-                    else
-                    {
-                        shouldBackoff = true;
-                    }
                 }
 
                 if (ok && frameConsumer is not null)
                 {
                     frameConsumer.SubmitFrame(frameData, width, height, frameId);
-                }
-
-                if (shouldBackoff)
-                {
-                    Thread.Sleep(1);
                 }
             }
         }
