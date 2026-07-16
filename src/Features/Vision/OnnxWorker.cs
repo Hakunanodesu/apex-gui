@@ -132,7 +132,7 @@ internal sealed class OnnxWorker : IDisposable
         try
         {
             using var options = new SessionOptions();
-            options.AppendExecutionProvider_DML();
+            options.AppendExecutionProvider_DML(DmlAdapterInfo.DeviceId);
             using var session = new InferenceSession(_model.OnnxPath, options);
 
             var input = session.InputMetadata.First();

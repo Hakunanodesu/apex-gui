@@ -82,6 +82,7 @@ public sealed partial class MainWindow : GameWindow
         _controller = new ImGuiController(ClientSize.X, ClientSize.Y);
         VSync = VSyncMode.Off;
         RefreshDpiScale();
+        DmlAdapterInfo.Initialize();
         RefreshOnnxModels();
         RefreshConfigFiles();
         RefreshHomeInputDevices();

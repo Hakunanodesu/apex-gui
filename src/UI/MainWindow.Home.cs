@@ -241,6 +241,11 @@ public sealed partial class MainWindow
             OpenSmartCorePreviewWindow();
         }
         ImGui.EndDisabled();
+        ImGui.SameLine();
+        ImGui.AlignTextToFramePadding();
+        ImGui.BeginDisabled();
+        ImGui.TextUnformatted(DmlAdapterInfo.AdapterDescription);
+        ImGui.EndDisabled();
     }
 
     private void DrawHomeMainTable(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
