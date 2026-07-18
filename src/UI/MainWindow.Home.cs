@@ -105,7 +105,7 @@ public sealed partial class MainWindow
 
         DrawDependencyStatusRow(vigemReady, metrics, topPanelStyle);
         DrawConfigSelectionRow(metrics, topPanelStyle);
-        DrawSmartCoreRow();
+        DrawSmartCoreRow(metrics);
 
         ImGui.EndTable();
     }
@@ -209,7 +209,7 @@ public sealed partial class MainWindow
         ImGui.EndDisabled();
     }
 
-    private void DrawSmartCoreRow()
+    private void DrawSmartCoreRow(HomeLayoutMetrics metrics)
     {
         ImGui.TableNextRow();
         ImGui.TableNextRow();
@@ -242,11 +242,59 @@ public sealed partial class MainWindow
         }
         ImGui.EndDisabled();
         ImGui.SameLine();
-        ImGui.AlignTextToFramePadding();
-        ImGui.BeginDisabled();
-        ImGui.TextUnformatted(DmlAdapterInfo.AdapterDescription);
-        ImGui.EndDisabled();
+        DrawDmlAdapterCombo(metrics.ReserveWidth);
     }
+
+    private void DrawDmlAdapterCombo(float reserveWidth)
+    {
+        var adapters = DmlAdapterInfo.Adapters;
+        if (adapters.Count == 0)
+        {
+            ImGui.AlignTextToFramePadding();
+            ImGui.BeginDisabled();
+            ImGui.TextUnformatted("未知");
+            ImGui.EndDisabled();
+            return;
+        }
+
+        var selectedIndex = DmlAdapterInfo.SelectedIndex;
+        if (selectedIndex < 0 || selectedIndex >= adapters.Count)
+        {
+            selectedIndex = 0;
+        }
+
+        ImGui.SetNextItemWidth(MathF.Max(0f, ImGui.GetContentRegionAvail().X - reserveWidth));
+        var changed = false;
+        var previewLabel = FormatDmlAdapterLabel(adapters[selectedIndex]);
+        if (ImGui.BeginCombo("##DmlAdapterCombo", previewLabel))
+        {
+            for (var i = 0; i < adapters.Count; i++)
+            {
+                var isSelected = i == selectedIndex;
+                if (ImGui.Selectable(FormatDmlAdapterLabel(adapters[i]), isSelected))
+                {
+                    selectedIndex = i;
+                    changed = true;
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (changed && DmlAdapterInfo.TrySelectIndex(selectedIndex))
+        {
+            SaveWindowState();
+            SyncSmartCoreVisionPipeline();
+        }
+    }
+
+    private static string FormatDmlAdapterLabel(DmlAdapterEntry adapter) =>
+        $"{adapter.Description} [{adapter.DeviceId}]";
 
     private void DrawHomeMainTable(HomeLayoutMetrics metrics, ImGuiStylePtr topPanelStyle)
     {

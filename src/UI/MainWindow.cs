@@ -51,12 +51,14 @@ public sealed partial class MainWindow : GameWindow
     private readonly HashSet<Keys> _touchpadCapturePreviousDownKeys = new();
     private TouchpadKeyCaptureTarget _activeTouchpadKeyCaptureTarget;
     private static uint? _startupSelectedGamepadInstanceId;
+    private static string? _startupDmlAdapterDescription;
     internal static string WindowStateFilePath => Path.Combine(Environment.CurrentDirectory, WindowStateFileName);
 
     internal static bool TryLoadWindowState(out WindowStateSnapshot snapshot)
     {
         var loaded = WindowStateService.TryLoad(WindowStateFilePath, out snapshot);
         _startupSelectedGamepadInstanceId = loaded ? snapshot.SelectedGamepadInstanceId : null;
+        _startupDmlAdapterDescription = loaded ? snapshot.DmlAdapterDescription : null;
         return loaded;
     }
 
@@ -83,6 +85,7 @@ public sealed partial class MainWindow : GameWindow
         VSync = VSyncMode.Off;
         RefreshDpiScale();
         DmlAdapterInfo.Initialize();
+        DmlAdapterInfo.TrySelectByDescription(_startupDmlAdapterDescription);
         RefreshOnnxModels();
         RefreshConfigFiles();
         RefreshHomeInputDevices();
@@ -730,7 +733,10 @@ protected override void OnResize(ResizeEventArgs e)
                 Width = Math.Max(400, size.X),
                 Height = Math.Max(300, size.Y),
                 IsMaximized = WindowState == WindowState.Maximized,
-                SelectedGamepadInstanceId = _homeSelectedGamepadInstanceId
+                SelectedGamepadInstanceId = _homeSelectedGamepadInstanceId,
+                DmlAdapterDescription = DmlAdapterInfo.Adapters.Count > 0
+                    ? DmlAdapterInfo.SelectedDescription
+                    : null
             };
             WindowStateService.Save(WindowStateFilePath, snapshot);
         }

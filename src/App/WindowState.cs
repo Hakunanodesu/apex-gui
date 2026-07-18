@@ -49,12 +49,17 @@ internal sealed class WindowStateService
                 selectedGamepadInstanceId = parsedInstanceId;
             }
 
+            values.TryGetValue("DmlAdapterDescription", out var dmlAdapterDescription);
+
             snapshot = new WindowStateSnapshot
             {
                 Width = width,
                 Height = height,
                 IsMaximized = isMaximized,
-                SelectedGamepadInstanceId = selectedGamepadInstanceId
+                SelectedGamepadInstanceId = selectedGamepadInstanceId,
+                DmlAdapterDescription = string.IsNullOrWhiteSpace(dmlAdapterDescription)
+                    ? null
+                    : dmlAdapterDescription.Trim()
             };
             return true;
         }
@@ -72,7 +77,8 @@ internal sealed class WindowStateService
             $"Width={snapshot.Width}",
             $"Height={snapshot.Height}",
             $"IsMaximized={snapshot.IsMaximized}",
-            $"SelectedGamepadInstanceId={(snapshot.SelectedGamepadInstanceId.HasValue ? snapshot.SelectedGamepadInstanceId.Value.ToString() : string.Empty)}") + Environment.NewLine;
+            $"SelectedGamepadInstanceId={(snapshot.SelectedGamepadInstanceId.HasValue ? snapshot.SelectedGamepadInstanceId.Value.ToString() : string.Empty)}",
+            $"DmlAdapterDescription={snapshot.DmlAdapterDescription ?? string.Empty}") + Environment.NewLine;
         File.WriteAllText(filePath, content);
     }
 }
@@ -83,4 +89,5 @@ internal sealed class WindowStateSnapshot
     public int Height { get; init; }
     public bool IsMaximized { get; init; }
     public uint? SelectedGamepadInstanceId { get; init; }
+    public string? DmlAdapterDescription { get; init; }
 }

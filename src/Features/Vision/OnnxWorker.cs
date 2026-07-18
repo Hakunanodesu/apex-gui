@@ -45,6 +45,7 @@ internal sealed class OnnxWorker : IDisposable
     private readonly Thread _thread;
     private readonly AutoResetEvent _frameArrived = new(false);
     private readonly OnnxModelConfig _model;
+    private readonly int _dmlDeviceId;
 
     private bool _running = true;
     private readonly byte[][] _frameBuffers = new[] { Array.Empty<byte>(), Array.Empty<byte>() };
@@ -65,9 +66,10 @@ internal sealed class OnnxWorker : IDisposable
         "Not started",
         0.0);
 
-    public OnnxWorker(OnnxModelConfig model)
+    public OnnxWorker(OnnxModelConfig model, int dmlDeviceId)
     {
         _model = model;
+        _dmlDeviceId = dmlDeviceId;
         _thread = new Thread(WorkerMain)
         {
             IsBackground = true,
@@ -132,7 +134,7 @@ internal sealed class OnnxWorker : IDisposable
         try
         {
             using var options = new SessionOptions();
-            options.AppendExecutionProvider_DML(DmlAdapterInfo.DeviceId);
+            options.AppendExecutionProvider_DML(_dmlDeviceId);
             using var session = new InferenceSession(_model.OnnxPath, options);
 
             var input = session.InputMetadata.First();

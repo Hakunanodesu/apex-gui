@@ -1,6 +1,6 @@
 ﻿public sealed partial class MainWindow
 {
-    private readonly record struct VisionPipelineConfig(string ModelPath, int CaptureWidth, int CaptureHeight);
+    private readonly record struct VisionPipelineConfig(string ModelPath, int CaptureWidth, int CaptureHeight, int DmlDeviceId);
 
     private DesktopCaptureWorker? _dxgiWorker;
     private OnnxWorker? _onnxWorker;
@@ -31,7 +31,11 @@
         }
 
         var captureSize = Math.Max(1, _homeViewState.SnapOuterRange);
-        return new VisionPipelineConfig(model.OnnxPath, captureSize, captureSize);
+        return new VisionPipelineConfig(
+            model.OnnxPath,
+            captureSize,
+            captureSize,
+            DmlAdapterInfo.SelectedDeviceId);
     }
 
     private void ApplyVisionPipelineState(VisionPipelineConfig? targetConfig)
@@ -71,7 +75,7 @@
             _dxgiWorker = new DesktopCaptureWorker();
             _dxgiWorker.SetCaptureRegion(config.CaptureWidth, config.CaptureHeight);
             _dxgiWorker.SetPreviewFrameCacheEnabled(IsSmartCorePreviewWindowOpen());
-            _onnxWorker = new OnnxWorker(model);
+            _onnxWorker = new OnnxWorker(model, config.DmlDeviceId);
             _onnxWorker.SetDetectionConsumer(_viGEmMappingWorker);
             _weaponRecWorker = new WeaponRecognitionWorker(_dxgiWorker);
             _weaponRecWorker.SetConsumer(_viGEmMappingWorker);
