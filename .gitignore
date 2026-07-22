@@ -1,13 +1,11 @@
 .vscode/
 .codex/
 .cursor/
-.claude/
 
 bin/
 obj/
-out/
+publish/
 *.ini
-*.sln
 
 Models/*
 !Models/.gitkeep

@@ -1,10 +1,10 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.18362.0</TargetFramework>
     <ApplicationIcon>Assets\Icons\3mz_ds_ver.ico</ApplicationIcon>
-    <Version>5.11.0</Version>
+    <Version>5.11.1</Version>
     <RootNamespace>apex_imgui</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -46,12 +46,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Models\**\*">
+    <Content Include="..\..\Models\**\*">
+      <Link>Models\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
-    <Content Include="Configs\**\*">
+    <Content Include="..\..\Configs\**\*">
+      <Link>Configs\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>

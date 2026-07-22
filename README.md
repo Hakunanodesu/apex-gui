@@ -21,6 +21,17 @@
 
 首次运行时，如果 Windows 安全提示拦截程序，请按提示选择允许运行。
 
+## 仓库结构
+
+```text
+apex-imgui.slnx
+src/
+  apex-imgui/          # 主项目（含 Assets、WeaponTemplates）
+Models/                # 开发时工作目录下的模型
+Configs/               # 开发时工作目录下的配置
+tests/                 # 预留测试目录
+```
+
 ## 下载与运行
 
 1. 打开本仓库的 **Releases** 页面下载最新版本。
@@ -28,9 +39,17 @@
 3. 运行 `apex-imgui.exe`。
 4. 进入程序后，先检查依赖状态、输入设备、配置和模型是否正常显示。
 
+从源码运行：
+
+```bash
+dotnet run --project src/apex-imgui
+```
+
+或打开 `apex-imgui.slnx` 后在 IDE 中启动。
+
 ## 使用前准备
 
-程序主要使用两个目录：
+程序主要使用两个目录（开发时放在仓库根目录，与工作目录一致；发布包中与 exe 同级）：
 
 - `Models`：放置模型文件和模型配置文件
 - `Configs`：放置你的使用配置文件
@@ -71,9 +90,9 @@ Models
 
 ## 基本使用流程
 
-1. 将模型文件放入 `Models` 目录。
-2. 将使用配置放入 `Configs` 目录，或在程序内创建新配置。
-3. 启动 `apex-imgui.exe`。
+1. 将模型文件放入仓库根目录的 `Models`。
+2. 将使用配置放入仓库根目录的 `Configs`，或在程序内创建新配置。
+3. 启动 `apex-imgui.exe`（或在仓库根目录执行 `dotnet run --project src/apex-imgui`）。
 4. 在界面中选择输入设备。
 5. 选择配置文件。
 6. 选择模型。
