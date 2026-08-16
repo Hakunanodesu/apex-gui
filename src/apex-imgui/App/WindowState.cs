@@ -106,13 +106,6 @@ internal static class OnnxLatencySettings
     public const int MinMs = 0;
     public const int MaxMs = 10;
     public const int DefaultMs = 0;
-    public const double DefaultCaptureIntervalMs = 1000.0 / 60.0;
 
     public static int Clamp(int value) => Math.Clamp(value, MinMs, MaxMs);
-
-    public static double ResolveCaptureIntervalMs(int unifiedLatencyMs)
-    {
-        var clamped = Clamp(unifiedLatencyMs);
-        return clamped <= 0 ? DefaultCaptureIntervalMs : clamped;
-    }
 }

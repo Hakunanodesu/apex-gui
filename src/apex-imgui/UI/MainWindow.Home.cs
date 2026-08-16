@@ -68,7 +68,7 @@ public sealed partial class MainWindow
                                    "依赖状态",
                                    "配置选择",
                                    "智慧核心",
-                                   "统一延迟",
+                                   "推理延迟",
                                    "选择游戏",
                                    "选择模型",
                                    "吸附参数设定",
@@ -253,10 +253,10 @@ public sealed partial class MainWindow
         ImGui.TableNextRow();
         ImGui.TableSetColumnIndex(0);
         ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("统一延迟");
+        ImGui.TextUnformatted("推理延迟");
         if (ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip("0：截图保持 60Hz，推理不补齐。\n1–10ms：截图间隔与推理补齐都使用该值；已超过则不额外等待。");
+            ImGui.SetTooltip("0：推理不补齐。\n1–10ms：推理在交出检测前补齐到该值；已超过则不额外等待。\n截图固定 60Hz。");
         }
 
         ImGui.TableSetColumnIndex(1);

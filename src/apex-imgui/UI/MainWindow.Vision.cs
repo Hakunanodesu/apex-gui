@@ -72,7 +72,7 @@
         try
         {
             StopVisionPipeline();
-            _dxgiWorker = new DesktopCaptureWorker(OnnxLatencySettings.ResolveCaptureIntervalMs(_onnxLatencyMs));
+            _dxgiWorker = new DesktopCaptureWorker();
             _dxgiWorker.SetCaptureRegion(config.CaptureWidth, config.CaptureHeight);
             _dxgiWorker.SetPreviewFrameCacheEnabled(IsSmartCorePreviewWindowOpen());
             _onnxWorker = new OnnxWorker(model, config.DmlDeviceId);
@@ -125,9 +125,7 @@
 
     private void PushUnifiedLatency()
     {
-        var latencyMs = OnnxLatencySettings.Clamp(_onnxLatencyMs);
-        _dxgiWorker?.SetLoopIntervalMs(OnnxLatencySettings.ResolveCaptureIntervalMs(latencyMs));
-        _onnxWorker?.SetPadTargetMs(latencyMs);
+        _onnxWorker?.SetPadTargetMs(OnnxLatencySettings.Clamp(_onnxLatencyMs));
     }
 }
 

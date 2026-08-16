@@ -8,6 +8,7 @@ using static Vortice.DXGI.DXGI;
 
 internal sealed class DesktopCaptureWorker : IDisposable
 {
+    private const double TargetCaptureIntervalMs = 1000.0 / 60.0;
     private readonly object _sync = new();
     private readonly Thread _thread;
     private bool _running = true;
@@ -28,25 +29,15 @@ internal sealed class DesktopCaptureWorker : IDisposable
     private readonly Queue<double> _pendingCaptureMs = new();
     private int _requestedCaptureWidth = 320;
     private int _requestedCaptureHeight = 320;
-    private double _loopIntervalMs = OnnxLatencySettings.DefaultCaptureIntervalMs;
 
-    public DesktopCaptureWorker(double loopIntervalMs)
+    public DesktopCaptureWorker()
     {
-        _loopIntervalMs = loopIntervalMs > 0.0 ? loopIntervalMs : OnnxLatencySettings.DefaultCaptureIntervalMs;
         _thread = new Thread(CaptureThreadMain)
         {
             IsBackground = true,
             Name = "DXGI-Capture-Worker"
         };
         _thread.Start();
-    }
-
-    public void SetLoopIntervalMs(double intervalMs)
-    {
-        lock (_sync)
-        {
-            _loopIntervalMs = intervalMs > 0.0 ? intervalMs : OnnxLatencySettings.DefaultCaptureIntervalMs;
-        }
     }
 
     public bool TryCopyLatestFrame(ref byte[] uploadBuffer, ref int lastFrameId, out int width, out int height, out string? error)
@@ -166,23 +157,10 @@ internal sealed class DesktopCaptureWorker : IDisposable
             var timer = Stopwatch.StartNew();
             var loopTimer = Stopwatch.StartNew();
             var nextLoopAtMs = 0.0;
-            var lastIntervalMs = 0.0;
 
             while (_running)
             {
-                double intervalMs;
-                lock (_sync)
-                {
-                    intervalMs = _loopIntervalMs;
-                }
-
-                if (intervalMs != lastIntervalMs)
-                {
-                    nextLoopAtMs = 0.0;
-                    lastIntervalMs = intervalMs;
-                }
-
-                FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, intervalMs);
+                FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetCaptureIntervalMs);
 
                 int requestedWidth;
                 int requestedHeight;
@@ -412,21 +390,12 @@ internal sealed class DxgiDesktopDuplicator : IDisposable
             return false;
         }
 
-        IDXGIResource? desktopResource = null;
-        var acquired = false;
         try
         {
-            var result = _duplication.AcquireNextFrame((uint)Math.Max(0, timeoutMs), out _, out desktopResource);
-            if (result == Vortice.DXGI.ResultCode.WaitTimeout)
+            if (!TryAcquireLatestFrameToStaging(timeoutMs))
             {
                 return false;
             }
-
-            result.CheckError();
-            acquired = true;
-
-            using var texture = desktopResource.QueryInterface<ID3D11Texture2D>();
-            _context.CopyResource(_stagingTexture, texture);
 
             _context.Map(_stagingTexture, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None, out var mapped).CheckError();
             try
@@ -499,6 +468,43 @@ internal sealed class DxgiDesktopDuplicator : IDisposable
         {
             error = ex.Message;
             return false;
+        }
+    }
+
+    private bool TryAcquireLatestFrameToStaging(int timeoutMs)
+    {
+        const int maxAcquires = 8;
+        IDXGIResource? desktopResource = null;
+        var acquired = false;
+        var gotFrame = false;
+        try
+        {
+            for (var i = 0; i < maxAcquires; i++)
+            {
+                var waitMs = gotFrame ? 0u : (uint)Math.Max(0, timeoutMs);
+                var result = _duplication.AcquireNextFrame(waitMs, out _, out desktopResource);
+                if (result == Vortice.DXGI.ResultCode.WaitTimeout)
+                {
+                    return gotFrame;
+                }
+
+                result.CheckError();
+                acquired = true;
+
+                using (var texture = desktopResource.QueryInterface<ID3D11Texture2D>())
+                {
+                    _context.CopyResource(_stagingTexture, texture);
+                    _context.Flush();
+                }
+
+                desktopResource.Dispose();
+                desktopResource = null;
+                _duplication.ReleaseFrame();
+                acquired = false;
+                gotFrame = true;
+            }
+
+            return gotFrame;
         }
         finally
         {
