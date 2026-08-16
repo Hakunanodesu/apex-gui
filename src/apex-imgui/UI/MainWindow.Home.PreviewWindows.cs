@@ -86,6 +86,7 @@ public sealed partial class MainWindow
                 var displayCaptureFps = 0.0;
                 var displayCaptureAvgMs = 0.0;
                 var displayOnnxAvgMs = 0.0;
+                var displayOnnxPadMs = 0.0;
                 var displayWeaponSimilarity = 0.0f;
                 var displayWeaponName = WeaponTemplateCatalog.EmptyHandName;
 
@@ -151,6 +152,7 @@ public sealed partial class MainWindow
                         displayCaptureFps = captureSampleCount / elapsedSeconds;
                         displayCaptureAvgMs = captureSampleCount > 0 ? captureLatencySumMs / captureSampleCount : 0.0;
                         displayOnnxAvgMs = _onnxWorker?.GetSnapshot().AvgInferenceMs ?? 0.0;
+                        displayOnnxPadMs = OnnxLatencySettings.Clamp(_onnxLatencyMs);
                         var weaponResult = _weaponRecWorker?.GetLatestResult() ?? WeaponRecognitionResultState.Empty;
                         displayWeaponSimilarity = weaponResult.Similarity;
                         displayWeaponName = weaponResult.WeaponName;
@@ -306,7 +308,7 @@ public sealed partial class MainWindow
                     var lineHeight = form.Font.GetHeight(e.Graphics);
                     e.Graphics.DrawString($"Capture FPS: {displayCaptureFps:F1}", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY));
                     e.Graphics.DrawString($"Capture Avg: {displayCaptureAvgMs:F2} ms", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY + lineHeight));
-                    e.Graphics.DrawString($"ONNX Avg: {displayOnnxAvgMs:F2} ms", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY + lineHeight * 2f));
+                    e.Graphics.DrawString($"ONNX Avg: {displayOnnxAvgMs:F2}/{displayOnnxPadMs:F2} ms", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY + lineHeight * 2f));
                     e.Graphics.DrawString($"Similarity: {displayWeaponSimilarity:F3}", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY + lineHeight * 3f));
                     e.Graphics.DrawString($"Weapon: {displayWeaponName}", form.Font, metricsBrush, new System.Drawing.PointF(metricsX, metricsY + lineHeight * 4f));
                 };

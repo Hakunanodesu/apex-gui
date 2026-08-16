@@ -10,9 +10,19 @@ internal static class FixedRateWaiter
         }
 
         nextLoopAtMs += intervalMs;
+        WaitUntilElapsed(loopTimer, nextLoopAtMs);
+    }
+
+    public static void WaitUntilElapsed(Stopwatch timer, double targetElapsedMs)
+    {
+        if (targetElapsedMs <= 0.0)
+        {
+            return;
+        }
+
         while (true)
         {
-            var remainingMs = nextLoopAtMs - loopTimer.Elapsed.TotalMilliseconds;
+            var remainingMs = targetElapsedMs - timer.Elapsed.TotalMilliseconds;
             if (remainingMs <= 0.0)
             {
                 break;

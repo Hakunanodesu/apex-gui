@@ -8,7 +8,6 @@ using static Vortice.DXGI.DXGI;
 
 internal sealed class DesktopCaptureWorker : IDisposable
 {
-    private const double TargetCaptureIntervalMs = 1000.0 / 60.0;
     private readonly object _sync = new();
     private readonly Thread _thread;
     private bool _running = true;
@@ -29,15 +28,25 @@ internal sealed class DesktopCaptureWorker : IDisposable
     private readonly Queue<double> _pendingCaptureMs = new();
     private int _requestedCaptureWidth = 320;
     private int _requestedCaptureHeight = 320;
+    private double _loopIntervalMs = OnnxLatencySettings.DefaultCaptureIntervalMs;
 
-    public DesktopCaptureWorker()
+    public DesktopCaptureWorker(double loopIntervalMs)
     {
+        _loopIntervalMs = loopIntervalMs > 0.0 ? loopIntervalMs : OnnxLatencySettings.DefaultCaptureIntervalMs;
         _thread = new Thread(CaptureThreadMain)
         {
             IsBackground = true,
             Name = "DXGI-Capture-Worker"
         };
         _thread.Start();
+    }
+
+    public void SetLoopIntervalMs(double intervalMs)
+    {
+        lock (_sync)
+        {
+            _loopIntervalMs = intervalMs > 0.0 ? intervalMs : OnnxLatencySettings.DefaultCaptureIntervalMs;
+        }
     }
 
     public bool TryCopyLatestFrame(ref byte[] uploadBuffer, ref int lastFrameId, out int width, out int height, out string? error)
@@ -157,10 +166,23 @@ internal sealed class DesktopCaptureWorker : IDisposable
             var timer = Stopwatch.StartNew();
             var loopTimer = Stopwatch.StartNew();
             var nextLoopAtMs = 0.0;
+            var lastIntervalMs = 0.0;
 
             while (_running)
             {
-                FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetCaptureIntervalMs);
+                double intervalMs;
+                lock (_sync)
+                {
+                    intervalMs = _loopIntervalMs;
+                }
+
+                if (intervalMs != lastIntervalMs)
+                {
+                    nextLoopAtMs = 0.0;
+                    lastIntervalMs = intervalMs;
+                }
+
+                FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, intervalMs);
 
                 int requestedWidth;
                 int requestedHeight;

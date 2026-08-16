@@ -68,6 +68,7 @@ public sealed partial class MainWindow
                                    "依赖状态",
                                    "配置选择",
                                    "智慧核心",
+                                   "统一延迟",
                                    "选择游戏",
                                    "选择模型",
                                    "吸附参数设定",
@@ -106,6 +107,7 @@ public sealed partial class MainWindow
         DrawDependencyStatusRow(vigemReady, metrics, topPanelStyle);
         DrawConfigSelectionRow(metrics, topPanelStyle);
         DrawSmartCoreRow(metrics);
+        DrawOnnxLatencyRow(metrics);
 
         ImGui.EndTable();
     }
@@ -243,6 +245,29 @@ public sealed partial class MainWindow
         ImGui.EndDisabled();
         ImGui.SameLine();
         DrawDmlAdapterCombo(metrics.ReserveWidth);
+    }
+
+    private void DrawOnnxLatencyRow(HomeLayoutMetrics metrics)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted("统一延迟");
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("0：截图保持 60Hz，推理不补齐。\n1–10ms：截图间隔与推理补齐都使用该值；已超过则不额外等待。");
+        }
+
+        ImGui.TableSetColumnIndex(1);
+        ImGui.SetNextItemWidth(MathF.Max(0f, ImGui.GetContentRegionAvail().X - metrics.ReserveWidth));
+        var latencyMs = _onnxLatencyMs;
+        if (ImGui.SliderInt("##OnnxLatencyMs", ref latencyMs, OnnxLatencySettings.MinMs, OnnxLatencySettings.MaxMs, "%d ms"))
+        {
+            _onnxLatencyMs = OnnxLatencySettings.Clamp(latencyMs);
+            SaveWindowState();
+            PushUnifiedLatency();
+        }
     }
 
     private void DrawDmlAdapterCombo(float reserveWidth)

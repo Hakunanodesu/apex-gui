@@ -72,7 +72,7 @@
         try
         {
             StopVisionPipeline();
-            _dxgiWorker = new DesktopCaptureWorker();
+            _dxgiWorker = new DesktopCaptureWorker(OnnxLatencySettings.ResolveCaptureIntervalMs(_onnxLatencyMs));
             _dxgiWorker.SetCaptureRegion(config.CaptureWidth, config.CaptureHeight);
             _dxgiWorker.SetPreviewFrameCacheEnabled(IsSmartCorePreviewWindowOpen());
             _onnxWorker = new OnnxWorker(model, config.DmlDeviceId);
@@ -80,6 +80,7 @@
             _weaponRecWorker = new WeaponRecognitionWorker(_dxgiWorker);
             _weaponRecWorker.SetConsumer(_viGEmMappingWorker);
             _weaponRecWorker.SetCurrentGame(GetSelectedGameName());
+            PushUnifiedLatency();
             _dxgiWorker.SetFrameConsumer(_onnxWorker);
             _currentVisionConfig = config;
             SyncWeaponRecognitionEnabled();
@@ -120,6 +121,13 @@
         _dxgiWorker?.Dispose();
         _dxgiWorker = null;
         _currentVisionConfig = null;
+    }
+
+    private void PushUnifiedLatency()
+    {
+        var latencyMs = OnnxLatencySettings.Clamp(_onnxLatencyMs);
+        _dxgiWorker?.SetLoopIntervalMs(OnnxLatencySettings.ResolveCaptureIntervalMs(latencyMs));
+        _onnxWorker?.SetPadTargetMs(latencyMs);
     }
 }
 

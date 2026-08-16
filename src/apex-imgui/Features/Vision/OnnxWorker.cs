@@ -56,6 +56,7 @@ internal sealed class OnnxWorker : IDisposable
     private int _pendingFrameId;
     private int _lastProcessedFrameId;
     private IAimAssistDetectionSink? _detectionConsumer;
+    private int _padTargetMs;
     private OnnxDebugBox[] _latestBoxes = Array.Empty<OnnxDebugBox>();
     private float[] _preprocessBuffer = Array.Empty<float>();
 
@@ -129,6 +130,14 @@ internal sealed class OnnxWorker : IDisposable
         }
     }
 
+    public void SetPadTargetMs(int padTargetMs)
+    {
+        lock (_sync)
+        {
+            _padTargetMs = Math.Max(0, padTargetMs);
+        }
+    }
+
     private void WorkerMain()
     {
         try
@@ -172,11 +181,11 @@ internal sealed class OnnxWorker : IDisposable
                     _processingBufferIndex = bufferIndex;
                 }
 
-                var sw = Stopwatch.StartNew();
+                var cycleTimer = Stopwatch.StartNew();
                 var inputData = Preprocess(frame, frameWidth, frameHeight, _model.InputWidth, _model.InputHeight, layout, ref _preprocessBuffer);
                 var inputTensor = new DenseTensor<float>(inputData, inputDims);
                 using var outputs = session.Run(new[] { NamedOnnxValue.CreateFromTensor(inputName, inputTensor) });
-                sw.Stop();
+                var inferenceMs = cycleTimer.Elapsed.TotalMilliseconds;
 
                 _ = CountDetections(
                     outputs,
@@ -187,6 +196,18 @@ internal sealed class OnnxWorker : IDisposable
                     _model.IouThreshold,
                     _model.AllowedClasses,
                     out var boxes);
+
+                int padTargetMs;
+                lock (_sync)
+                {
+                    padTargetMs = _padTargetMs;
+                }
+
+                if (padTargetMs > 0)
+                {
+                    FixedRateWaiter.WaitUntilElapsed(cycleTimer, padTargetMs);
+                }
+
                 IAimAssistDetectionSink? detectionConsumer;
                 var detectionState = new SmartCoreDetectionState(boxes, DateTime.UtcNow);
                 lock (_sync)
@@ -196,7 +217,7 @@ internal sealed class OnnxWorker : IDisposable
                 }
                 detectionConsumer?.SetAimAssistDetections(detectionState);
 
-                PushInferenceSample(sw.Elapsed.TotalMilliseconds);
+                PushInferenceSample(inferenceMs);
 
                 lock (_sync)
                 {
