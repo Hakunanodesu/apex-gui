@@ -54,7 +54,7 @@ internal sealed partial class ViGEmMappingWorker : IAimAssistDetectionSink, IWea
         }
     }
 
-    private const double TargetLoopIntervalMs = 1000.0 / 500.0;
+    private const double TargetLoopIntervalMs = 1000.0 / 1000.0;
     private static readonly TimeSpan SdlInputFailureGrace = TimeSpan.FromSeconds(1);
     private const int ReleaseToFirePulseMs = 100;
     private const int MinRapidFireHz = 1;

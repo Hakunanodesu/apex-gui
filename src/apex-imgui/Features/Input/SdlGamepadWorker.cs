@@ -84,7 +84,7 @@ internal readonly struct SdlGamepadInputSnapshot
 
 internal sealed class SdlGamepadWorker : IDisposable
 {
-    private const double TargetLoopIntervalMs = 1000.0 / 500.0;
+    private const double TargetLoopIntervalMs = 1000.0 / 1000.0;
     private readonly object _sync = new();
     private readonly Thread _thread;
     private bool _running = true;
