@@ -1,4 +1,4 @@
-﻿using System.Numerics;
+using System.Numerics;
 using System.Diagnostics;
 using System.Linq;
 using ImGuiNET;
@@ -52,8 +52,8 @@ public sealed partial class MainWindow : GameWindow
     private TouchpadKeyCaptureTarget _activeTouchpadKeyCaptureTarget;
     private static uint? _startupSelectedGamepadInstanceId;
     private static string? _startupDmlAdapterDescription;
-    private static int _startupOnnxLatencyMs = OnnxLatencySettings.DefaultMs;
-    private int _onnxLatencyMs = OnnxLatencySettings.DefaultMs;
+    private static bool _startupUseWgcCapture;
+    private bool _useWgcCapture;
     internal static string WindowStateFilePath => Path.Combine(Environment.CurrentDirectory, WindowStateFileName);
 
     internal static bool TryLoadWindowState(out WindowStateSnapshot snapshot)
@@ -61,9 +61,7 @@ public sealed partial class MainWindow : GameWindow
         var loaded = WindowStateService.TryLoad(WindowStateFilePath, out snapshot);
         _startupSelectedGamepadInstanceId = loaded ? snapshot.SelectedGamepadInstanceId : null;
         _startupDmlAdapterDescription = loaded ? snapshot.DmlAdapterDescription : null;
-        _startupOnnxLatencyMs = loaded
-            ? OnnxLatencySettings.Clamp(snapshot.OnnxLatencyMs)
-            : OnnxLatencySettings.DefaultMs;
+        _startupUseWgcCapture = loaded && snapshot.UseWgcCapture;
         return loaded;
     }
 
@@ -83,7 +81,7 @@ public sealed partial class MainWindow : GameWindow
         base.OnLoad();
         SDL.InitSubSystem(SDL.InitFlags.Gamepad);
         _homeSelectedGamepadInstanceId = _startupSelectedGamepadInstanceId;
-        _onnxLatencyMs = _startupOnnxLatencyMs;
+        _useWgcCapture = _startupUseWgcCapture;
         _sdlGamepadWorker = new SdlGamepadWorker();
         _viGEmMappingWorker = new ViGEmMappingWorker();
         _viGEmMappingWorker.SetSdlGamepadWorker(_sdlGamepadWorker);
@@ -743,7 +741,7 @@ protected override void OnResize(ResizeEventArgs e)
                 DmlAdapterDescription = DmlAdapterInfo.Adapters.Count > 0
                     ? DmlAdapterInfo.SelectedDescription
                     : null,
-                OnnxLatencyMs = OnnxLatencySettings.Clamp(_onnxLatencyMs)
+                UseWgcCapture = _useWgcCapture
             };
             WindowStateService.Save(WindowStateFilePath, snapshot);
         }

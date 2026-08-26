@@ -25,18 +25,25 @@ internal sealed class DesktopCaptureWorker : IDisposable
     private bool _weaponRoiCaptureEnabled = true;
     private string? _lastError;
     private OnnxWorker? _frameConsumer;
+    private readonly bool _useWgcCapture;
 
     private readonly Queue<double> _pendingCaptureMs = new();
     private int _requestedCaptureWidth = 320;
     private int _requestedCaptureHeight = 320;
 
-    public DesktopCaptureWorker()
+    public DesktopCaptureWorker(bool useWgcCapture)
     {
+        _useWgcCapture = useWgcCapture;
         _thread = new Thread(CaptureThreadMain)
         {
             IsBackground = true,
-            Name = "DXGI-Capture-Worker"
+            Name = useWgcCapture ? "WGC-Capture-Worker" : "DXGI-Capture-Worker"
         };
+        if (useWgcCapture)
+        {
+            _thread.SetApartmentState(ApartmentState.STA);
+        }
+
         _thread.Start();
     }
 
@@ -153,14 +160,26 @@ internal sealed class DesktopCaptureWorker : IDisposable
     {
         try
         {
-            using var duplicator = new DxgiDesktopDuplicator();
+            using IScreenCapturer capturer = _useWgcCapture
+                ? new WgcDesktopCapturer()
+                : new DxgiDesktopDuplicator();
             var timer = Stopwatch.StartNew();
             var loopTimer = Stopwatch.StartNew();
             var nextLoopAtMs = 0.0;
 
             while (_running)
             {
-                FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetCaptureIntervalMs);
+                if (_useWgcCapture)
+                {
+                    if (!capturer.TryWaitForFrame(100))
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    FixedRateWaiter.WaitForNextTick(loopTimer, ref nextLoopAtMs, TargetCaptureIntervalMs);
+                }
 
                 int requestedWidth;
                 int requestedHeight;
@@ -172,10 +191,10 @@ internal sealed class DesktopCaptureWorker : IDisposable
                     weaponRoiCaptureEnabled = _weaponRoiCaptureEnabled;
                 }
 
-                duplicator.SetCaptureRegion(requestedWidth, requestedHeight);
+                capturer.SetCaptureRegion(requestedWidth, requestedHeight);
                 timer.Restart();
-                var ok = duplicator.TryCaptureFrame(
-                    1,
+                var ok = capturer.TryCaptureFrame(
+                    0,
                     weaponRoiCaptureEnabled,
                     out var frameData,
                     out var width,
@@ -258,14 +277,8 @@ internal sealed class DesktopCaptureWorker : IDisposable
     }
 }
 
-internal sealed class DxgiDesktopDuplicator : IDisposable
+internal sealed class DxgiDesktopDuplicator : IScreenCapturer
 {
-    private const float WeaponRoiBaseWidth = 1920f;
-    private const float WeaponRoiOffsetX = 384f;
-    private const float WeaponRoiOffsetY = 122f;
-    private const float WeaponRoiBaseWidthPixels = WeaponTemplateCatalog.TemplateWidth;
-    private const float WeaponRoiBaseHeightPixels = WeaponTemplateCatalog.TemplateHeight;
-
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
     private readonly IDXGIOutputDuplication _duplication;
@@ -365,7 +378,13 @@ internal sealed class DxgiDesktopDuplicator : IDisposable
         }
     }
 
-    public unsafe bool TryCaptureFrame(
+    public bool TryWaitForFrame(int timeoutMs)
+    {
+        _ = timeoutMs;
+        return !_disposed;
+    }
+
+    public bool TryCaptureFrame(
         int timeoutMs,
         bool captureWeaponRoi,
         out byte[] frameData,
@@ -414,48 +433,25 @@ internal sealed class DxgiDesktopDuplicator : IDisposable
                     frameBuffer = _frameBuffer;
                 }
 
-                var rowBytes = captureWidth * 4;
-                for (var y = 0; y < captureHeight; y++)
-                {
-                    var sourceY = captureTop + y;
-                    var sourceOffset = sourceY * mapped.RowPitch + captureLeft * 4;
-                    var source = new IntPtr(mapped.DataPointer + sourceOffset);
-                    var destination = y * rowBytes;
-                    System.Runtime.InteropServices.Marshal.Copy(source, frameBuffer, destination, rowBytes);
-                }
+                DesktopCaptureFrameCopy.CopyMappedFrame(
+                    mapped.DataPointer,
+                    (int)mapped.RowPitch,
+                    _outputWidth,
+                    _outputHeight,
+                    captureLeft,
+                    captureTop,
+                    captureWidth,
+                    captureHeight,
+                    frameBuffer,
+                    captureWeaponRoi,
+                    ref _weaponRoiBuffer,
+                    out weaponRoiData,
+                    out weaponRoiWidth,
+                    out weaponRoiHeight);
 
                 frameData = frameBuffer;
                 width = captureWidth;
                 height = captureHeight;
-
-                var (roiLeft, roiTop, roiWidth, roiHeight) = CalcWeaponRoi(_outputWidth, _outputHeight);
-                if (captureWeaponRoi && roiWidth > 0 && roiHeight > 0)
-                {
-                    var requiredBytes = roiWidth * roiHeight * 3;
-                    if (_weaponRoiBuffer.Length != requiredBytes)
-                    {
-                        _weaponRoiBuffer = new byte[requiredBytes];
-                    }
-
-                    var srcPtr = (byte*)mapped.DataPointer;
-                    for (var y = 0; y < roiHeight; y++)
-                    {
-                        var sourceY = roiTop + y;
-                        var sourceOffset = sourceY * mapped.RowPitch + roiLeft * 4;
-                        var destination = y * roiWidth * 3;
-                        for (var x = 0; x < roiWidth; x++)
-                        {
-                            var pixelOffset = sourceOffset + x * 4;
-                            _weaponRoiBuffer[destination + x * 3 + 0] = srcPtr[pixelOffset + 2]; // R
-                            _weaponRoiBuffer[destination + x * 3 + 1] = srcPtr[pixelOffset + 1]; // G
-                            _weaponRoiBuffer[destination + x * 3 + 2] = srcPtr[pixelOffset + 0]; // B
-                        }
-                    }
-
-                    weaponRoiData = _weaponRoiBuffer;
-                    weaponRoiWidth = roiWidth;
-                    weaponRoiHeight = roiHeight;
-                }
             }
             finally
             {
@@ -528,21 +524,6 @@ internal sealed class DxgiDesktopDuplicator : IDisposable
         _context.Dispose();
         _device.Dispose();
         _disposed = true;
-    }
-
-    private static (int Left, int Top, int Width, int Height) CalcWeaponRoi(int frameWidth, int frameHeight)
-    {
-        var scale = frameWidth / WeaponRoiBaseWidth;
-        var left = frameWidth - (int)MathF.Round(WeaponRoiOffsetX * scale);
-        var top = frameHeight - (int)MathF.Round(WeaponRoiOffsetY * scale);
-        var width = (int)MathF.Round(WeaponRoiBaseWidthPixels * scale);
-        var height = (int)MathF.Round(WeaponRoiBaseHeightPixels * scale);
-
-        left = Math.Clamp(left, 0, frameWidth);
-        top = Math.Clamp(top, 0, frameHeight);
-        width = Math.Clamp(width, 0, frameWidth - left);
-        height = Math.Clamp(height, 0, frameHeight - top);
-        return (left, top, width, height);
     }
 }
 

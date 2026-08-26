@@ -56,7 +56,6 @@ internal sealed class OnnxWorker : IDisposable
     private int _pendingFrameId;
     private int _lastProcessedFrameId;
     private IAimAssistDetectionSink? _detectionConsumer;
-    private int _padTargetMs;
     private OnnxDebugBox[] _latestBoxes = Array.Empty<OnnxDebugBox>();
     private float[] _preprocessBuffer = Array.Empty<float>();
 
@@ -130,14 +129,6 @@ internal sealed class OnnxWorker : IDisposable
         }
     }
 
-    public void SetPadTargetMs(int padTargetMs)
-    {
-        lock (_sync)
-        {
-            _padTargetMs = Math.Max(0, padTargetMs);
-        }
-    }
-
     private void WorkerMain()
     {
         try
@@ -196,17 +187,6 @@ internal sealed class OnnxWorker : IDisposable
                     _model.IouThreshold,
                     _model.AllowedClasses,
                     out var boxes);
-
-                int padTargetMs;
-                lock (_sync)
-                {
-                    padTargetMs = _padTargetMs;
-                }
-
-                if (padTargetMs > 0)
-                {
-                    FixedRateWaiter.WaitUntilElapsed(cycleTimer, padTargetMs);
-                }
 
                 IAimAssistDetectionSink? detectionConsumer;
                 var detectionState = new SmartCoreDetectionState(boxes, DateTime.UtcNow);

@@ -50,12 +50,9 @@ internal sealed class WindowStateService
             }
 
             values.TryGetValue("DmlAdapterDescription", out var dmlAdapterDescription);
-            var onnxLatencyMs = OnnxLatencySettings.DefaultMs;
-            if (values.TryGetValue("OnnxLatencyMs", out var onnxLatencyRaw)
-                && int.TryParse(onnxLatencyRaw, out var parsedOnnxLatencyMs))
-            {
-                onnxLatencyMs = OnnxLatencySettings.Clamp(parsedOnnxLatencyMs);
-            }
+            var useWgcCapture = values.TryGetValue("UseWgcCapture", out var useWgcCaptureRaw)
+                && bool.TryParse(useWgcCaptureRaw, out var parsedUseWgcCapture)
+                && parsedUseWgcCapture;
 
             snapshot = new WindowStateSnapshot
             {
@@ -66,7 +63,7 @@ internal sealed class WindowStateService
                 DmlAdapterDescription = string.IsNullOrWhiteSpace(dmlAdapterDescription)
                     ? null
                     : dmlAdapterDescription.Trim(),
-                OnnxLatencyMs = onnxLatencyMs
+                UseWgcCapture = useWgcCapture
             };
             return true;
         }
@@ -86,7 +83,7 @@ internal sealed class WindowStateService
             $"IsMaximized={snapshot.IsMaximized}",
             $"SelectedGamepadInstanceId={(snapshot.SelectedGamepadInstanceId.HasValue ? snapshot.SelectedGamepadInstanceId.Value.ToString() : string.Empty)}",
             $"DmlAdapterDescription={snapshot.DmlAdapterDescription ?? string.Empty}",
-            $"OnnxLatencyMs={snapshot.OnnxLatencyMs}") + Environment.NewLine;
+            $"UseWgcCapture={snapshot.UseWgcCapture}") + Environment.NewLine;
         File.WriteAllText(filePath, content);
     }
 }
@@ -98,14 +95,5 @@ internal sealed class WindowStateSnapshot
     public bool IsMaximized { get; init; }
     public uint? SelectedGamepadInstanceId { get; init; }
     public string? DmlAdapterDescription { get; init; }
-    public int OnnxLatencyMs { get; init; } = OnnxLatencySettings.DefaultMs;
-}
-
-internal static class OnnxLatencySettings
-{
-    public const int MinMs = 0;
-    public const int MaxMs = 10;
-    public const int DefaultMs = 0;
-
-    public static int Clamp(int value) => Math.Clamp(value, MinMs, MaxMs);
+    public bool UseWgcCapture { get; init; }
 }

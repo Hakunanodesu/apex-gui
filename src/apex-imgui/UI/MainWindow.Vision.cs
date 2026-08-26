@@ -1,6 +1,11 @@
 ﻿public sealed partial class MainWindow
 {
-    private readonly record struct VisionPipelineConfig(string ModelPath, int CaptureWidth, int CaptureHeight, int DmlDeviceId);
+    private readonly record struct VisionPipelineConfig(
+        string ModelPath,
+        int CaptureWidth,
+        int CaptureHeight,
+        int DmlDeviceId,
+        bool UseWgcCapture);
 
     private DesktopCaptureWorker? _dxgiWorker;
     private OnnxWorker? _onnxWorker;
@@ -35,7 +40,8 @@
             model.OnnxPath,
             captureSize,
             captureSize,
-            DmlAdapterInfo.SelectedDeviceId);
+            DmlAdapterInfo.SelectedDeviceId,
+            _useWgcCapture);
     }
 
     private void ApplyVisionPipelineState(VisionPipelineConfig? targetConfig)
@@ -72,7 +78,7 @@
         try
         {
             StopVisionPipeline();
-            _dxgiWorker = new DesktopCaptureWorker();
+            _dxgiWorker = new DesktopCaptureWorker(config.UseWgcCapture);
             _dxgiWorker.SetCaptureRegion(config.CaptureWidth, config.CaptureHeight);
             _dxgiWorker.SetPreviewFrameCacheEnabled(IsSmartCorePreviewWindowOpen());
             _onnxWorker = new OnnxWorker(model, config.DmlDeviceId);
@@ -80,7 +86,6 @@
             _weaponRecWorker = new WeaponRecognitionWorker(_dxgiWorker);
             _weaponRecWorker.SetConsumer(_viGEmMappingWorker);
             _weaponRecWorker.SetCurrentGame(GetSelectedGameName());
-            PushUnifiedLatency();
             _dxgiWorker.SetFrameConsumer(_onnxWorker);
             _currentVisionConfig = config;
             SyncWeaponRecognitionEnabled();
@@ -121,11 +126,6 @@
         _dxgiWorker?.Dispose();
         _dxgiWorker = null;
         _currentVisionConfig = null;
-    }
-
-    private void PushUnifiedLatency()
-    {
-        _onnxWorker?.SetPadTargetMs(OnnxLatencySettings.Clamp(_onnxLatencyMs));
     }
 }
 

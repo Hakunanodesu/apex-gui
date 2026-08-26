@@ -68,7 +68,6 @@ public sealed partial class MainWindow
                                    "依赖状态",
                                    "配置选择",
                                    "智慧核心",
-                                   "推理延迟",
                                    "选择游戏",
                                    "选择模型",
                                    "吸附参数设定",
@@ -107,7 +106,7 @@ public sealed partial class MainWindow
         DrawDependencyStatusRow(vigemReady, metrics, topPanelStyle);
         DrawConfigSelectionRow(metrics, topPanelStyle);
         DrawSmartCoreRow(metrics);
-        DrawOnnxLatencyRow(metrics);
+        DrawDmlAdapterRow(metrics);
 
         ImGui.EndTable();
     }
@@ -244,30 +243,31 @@ public sealed partial class MainWindow
         }
         ImGui.EndDisabled();
         ImGui.SameLine();
-        DrawDmlAdapterCombo(metrics.ReserveWidth);
+        ImGui.BeginDisabled(_mappingRuntimeState.IsEnabled);
+        var useWgcCapture = _useWgcCapture;
+        if (ImGui.Checkbox("WGC##SmartCoreWgcCapture", ref useWgcCapture))
+        {
+            _useWgcCapture = useWgcCapture;
+            SaveWindowState();
+            SyncSmartCoreVisionPipeline();
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("开启后使用 WGC 截图，关闭则使用 DXGI。");
+        }
+
+        ImGui.EndDisabled();
     }
 
-    private void DrawOnnxLatencyRow(HomeLayoutMetrics metrics)
+    private void DrawDmlAdapterRow(HomeLayoutMetrics metrics)
     {
         ImGui.TableNextRow();
         ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.AlignTextToFramePadding();
-        ImGui.TextUnformatted("推理延迟");
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip("0：推理不补齐。\n1–10ms：推理在交出检测前补齐到该值；已超过则不额外等待。\n截图固定 60Hz。");
-        }
-
         ImGui.TableSetColumnIndex(1);
-        ImGui.SetNextItemWidth(MathF.Max(0f, ImGui.GetContentRegionAvail().X - metrics.ReserveWidth));
-        var latencyMs = _onnxLatencyMs;
-        if (ImGui.SliderInt("##OnnxLatencyMs", ref latencyMs, OnnxLatencySettings.MinMs, OnnxLatencySettings.MaxMs, "%d ms"))
-        {
-            _onnxLatencyMs = OnnxLatencySettings.Clamp(latencyMs);
-            SaveWindowState();
-            PushUnifiedLatency();
-        }
+        ImGui.BeginDisabled(_mappingRuntimeState.IsEnabled);
+        DrawDmlAdapterCombo(metrics.ReserveWidth);
+        ImGui.EndDisabled();
     }
 
     private void DrawDmlAdapterCombo(float reserveWidth)
