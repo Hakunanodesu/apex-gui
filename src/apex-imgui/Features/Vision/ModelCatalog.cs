@@ -131,11 +131,10 @@ internal static class OnnxModelConfigLoader
         switch (raw.Trim().ToLowerInvariant())
         {
             case "yolov5":
-            case "v5":
                 format = YoloOutputFormat.YoloV5;
                 return true;
             case "yolov8":
-            case "v8":
+            case "yolov12":
                 format = YoloOutputFormat.YoloV8;
                 return true;
             default:
