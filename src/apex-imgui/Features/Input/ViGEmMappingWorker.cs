@@ -586,7 +586,8 @@ internal sealed partial class ViGEmMappingWorker : IAimAssistDetectionSink, IWea
                 }
             }
 
-            if (GamepadBindingCatalog.IsPressed(voiceBindingIndex, input))
+            if (!GamepadBindingCatalog.IsVoiceBindingUnset(voiceBindingIndex) &&
+                GamepadBindingCatalog.IsPressed(voiceBindingIndex, input))
             {
                 AddResolvedCustomKeyboardVirtualKey(desiredKeyboardVirtualKeys, aimAssistConfigState.Bindings.VoiceCustomKey);
             }

@@ -412,7 +412,7 @@ public sealed partial class MainWindow
         _homeViewState.FireBindingIndex = _homeViewState.FireBindingIndex >= 0 && _homeViewState.FireBindingIndex < GamepadBindingCatalog.Options.Length
             ? _homeViewState.FireBindingIndex
             : GamepadBindingCatalog.DefaultFireIndex;
-        _homeViewState.VoiceBindingIndex = _homeViewState.VoiceBindingIndex >= 0 && _homeViewState.VoiceBindingIndex < GamepadBindingCatalog.Options.Length
+        _homeViewState.VoiceBindingIndex = _homeViewState.VoiceBindingIndex >= 0 && _homeViewState.VoiceBindingIndex < GamepadBindingCatalog.VoiceOptions.Length
             ? _homeViewState.VoiceBindingIndex
             : GamepadBindingCatalog.DefaultTouchpadLeftIndex;
         _homeViewState.TouchpadLeftBindingIndex = _homeViewState.TouchpadLeftBindingIndex >= 0 && _homeViewState.TouchpadLeftBindingIndex < GamepadBindingCatalog.TouchpadOptions.Length
@@ -440,10 +440,13 @@ public sealed partial class MainWindow
         _homeViewState.VoiceCustomKey = normalizedVoiceCustomKey;
         var disableBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.Options.Length == 0;
         var disableTouchpadBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.TouchpadOptions.Length == 0;
+        var disableVoiceBindingSelection = _configFiles.Count == 0 || GamepadBindingCatalog.VoiceOptions.Length == 0;
         var leftCustomSelected = GamepadBindingCatalog.IsKeyboardCustomBinding(_homeViewState.TouchpadLeftBindingIndex);
         var rightCustomSelected = GamepadBindingCatalog.IsKeyboardCustomBinding(_homeViewState.TouchpadRightBindingIndex);
+        var voiceBindingUnset = GamepadBindingCatalog.IsVoiceBindingUnset(_homeViewState.VoiceBindingIndex);
         if ((_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Left && !leftCustomSelected) ||
-            (_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Right && !rightCustomSelected))
+            (_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Right && !rightCustomSelected) ||
+            (_activeTouchpadKeyCaptureTarget == TouchpadKeyCaptureTarget.Voice && voiceBindingUnset))
         {
             CancelTouchpadKeyCapture();
         }
@@ -592,21 +595,26 @@ public sealed partial class MainWindow
             var voiceIndex = _homeViewState.VoiceBindingIndex;
             var voiceChanged = DrawConfigBoundCombo(
                 "##HomeVoiceBindingCombo",
-                GamepadBindingCatalog.Options,
+                GamepadBindingCatalog.VoiceOptions,
                 ref voiceIndex,
                 voiceComboWidth,
-                disableBindingSelection);
+                disableVoiceBindingSelection);
             _homeViewState.VoiceBindingIndex = voiceIndex;
             if (voiceChanged)
             {
-                TryWriteStringToCurrentConfig(BindingConfigCatalog.VoiceBindingKey, GamepadBindingCatalog.Options[voiceIndex]);
+                TryWriteStringToCurrentConfig(BindingConfigCatalog.VoiceBindingKey, GamepadBindingCatalog.VoiceOptions[voiceIndex]);
+                if (GamepadBindingCatalog.IsVoiceBindingUnset(voiceIndex))
+                {
+                    CancelTouchpadKeyCapture();
+                }
+
                 PushAimAssistConfig();
             }
             ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
             ImGui.AlignTextToFramePadding();
             ImGui.TextUnformatted("映射到");
             ImGui.SameLine(0f, topPanelStyle.ItemSpacing.X);
-            ImGui.BeginDisabled(_configFiles.Count == 0);
+            ImGui.BeginDisabled(_configFiles.Count == 0 || GamepadBindingCatalog.IsVoiceBindingUnset(voiceIndex));
             var voiceButtonLabel = BuildCustomKeyCaptureButtonLabel(TouchpadKeyCaptureTarget.Voice, _homeViewState.VoiceCustomKey);
             if (ImGui.Button($"{voiceButtonLabel}###HomeVoiceCustomKeyCaptureButton", new Vector2(voiceCaptureButtonWidth, 0f)))
             {

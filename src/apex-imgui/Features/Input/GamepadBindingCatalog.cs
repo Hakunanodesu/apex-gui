@@ -76,7 +76,11 @@ internal static class GamepadBindingCatalog
     public static readonly string[] TouchpadOptions =
         Options.Concat(new[] { KeyboardCustomBindingName }).ToArray();
 
+    public static readonly string[] VoiceOptions =
+        Options.Concat(new[] { UnsetBindingName }).ToArray();
+
     public const string KeyboardCustomBindingName = "自定义键盘按键";
+    public const string UnsetBindingName = "未设定";
     public const string DefaultCustomKeyboardKeyName = "=";
 
     private static readonly List<Keys> CapturableCustomKeyboardKeysValue = new();
@@ -86,6 +90,7 @@ internal static class GamepadBindingCatalog
     private static readonly KeyBindingDefinition[] KeyBindingDefinitions = BuildKeyBindingDefinitions();
 
     public static int KeyboardCustomPseudoBindingIndex => Options.Length;
+    public static int VoiceUnsetIndex => Options.Length;
     public static IReadOnlyList<Keys> CapturableCustomKeyboardKeys => CapturableCustomKeyboardKeysValue;
 
     static GamepadBindingCatalog()
@@ -123,6 +128,8 @@ internal static class GamepadBindingCatalog
     public static int DefaultTouchpadRightIndex => ResolveIndex("Start", 15);
 
     public static bool IsKeyboardCustomBinding(int bindingIndex) => bindingIndex == KeyboardCustomPseudoBindingIndex;
+
+    public static bool IsVoiceBindingUnset(int bindingIndex) => bindingIndex == VoiceUnsetIndex;
 
     public static bool TryGetCustomKeyboardDisplayName(Keys key, out string displayName)
     {

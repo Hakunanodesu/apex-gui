@@ -37,7 +37,7 @@ internal static class BindingConfigCatalog
         return new BindingConfigState(
             ResolveOptionIndex(repository.TryReadString(configPath, AimBindingKey), GamepadBindingCatalog.DefaultAimIndex),
             ResolveOptionIndex(repository.TryReadString(configPath, FireBindingKey), GamepadBindingCatalog.DefaultFireIndex),
-            ResolveOptionIndex(repository.TryReadString(configPath, VoiceBindingKey), GamepadBindingCatalog.DefaultTouchpadLeftIndex),
+            ResolveVoiceOptionIndex(repository.TryReadString(configPath, VoiceBindingKey), GamepadBindingCatalog.DefaultTouchpadLeftIndex),
             NormalizeCustomKeyboardKey(repository.TryReadString(configPath, VoiceCustomKeyKey), DefaultVoiceCustomKey),
             ResolveTouchpadOptionIndex(repository.TryReadString(configPath, TouchpadLeftBindingKey), GamepadBindingCatalog.DefaultTouchpadLeftIndex),
             ResolveTouchpadOptionIndex(repository.TryReadString(configPath, TouchpadRightBindingKey), GamepadBindingCatalog.DefaultTouchpadRightIndex),
@@ -57,9 +57,9 @@ internal static class BindingConfigCatalog
             repository.TryWriteString(configPath, FireBindingKey, GamepadBindingCatalog.Options[s.FireBindingIndex]);
         }
 
-        if (s.VoiceBindingIndex >= 0 && s.VoiceBindingIndex < GamepadBindingCatalog.Options.Length)
+        if (s.VoiceBindingIndex >= 0 && s.VoiceBindingIndex < GamepadBindingCatalog.VoiceOptions.Length)
         {
-            repository.TryWriteString(configPath, VoiceBindingKey, GamepadBindingCatalog.Options[s.VoiceBindingIndex]);
+            repository.TryWriteString(configPath, VoiceBindingKey, GamepadBindingCatalog.VoiceOptions[s.VoiceBindingIndex]);
         }
 
         repository.TryWriteString(configPath, VoiceCustomKeyKey, s.VoiceCustomKey);
@@ -96,6 +96,17 @@ internal static class BindingConfigCatalog
         }
 
         var index = Array.IndexOf(GamepadBindingCatalog.Options, value);
+        return index >= 0 ? index : fallback;
+    }
+
+    private static int ResolveVoiceOptionIndex(string? value, int fallback)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return fallback;
+        }
+
+        var index = Array.IndexOf(GamepadBindingCatalog.VoiceOptions, value);
         return index >= 0 ? index : fallback;
     }
 

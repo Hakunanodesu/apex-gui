@@ -11,13 +11,14 @@ internal static class WeaponTemplateCatalog
     public const string EmptyHandName = "empty";
     public const string GameConfigKey = "game";
 
-    public static readonly string[] GameOptions = { "Apex Legends", "The Finals", "Destiny 2" };
+    public static readonly string[] GameOptions = { "Apex Legends", "The Finals", "Destiny 2", "Call of Duty" };
 
     private static readonly Dictionary<string, string> GameFolderByDisplayName = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Apex Legends"] = "apexlegends",
         ["The Finals"] = "thefinals",
         ["Destiny 2"] = "destiny2",
+        ["Call of Duty"] = "callofduty",
     };
 
     private static readonly Lazy<IReadOnlyList<WeaponTemplateEntry>> CachedTemplates = new(LoadEmbeddedTemplatesInternal);
